@@ -1,0 +1,9 @@
+# Zeilenenden im Repo einheitlich LF - sonst ist jeder Diff Rauschen.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.stl binary
