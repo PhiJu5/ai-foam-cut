@@ -16,6 +16,9 @@ Erste quelloffene Fassung. AI Foam Cut steht ab hier unter der GPL-3.0-or-later.
   earcut (ISC), Python (PSF-2.0), Tcl/Tk, PyInstaller-Bootloader, Pillow.
 
 ### Entfernt
+- **Reiter „Rippenfläche"** (`rippenflaeche.js`) samt Reiterknopf, Ansichts- und
+  3D-Fenster-Markup sowie dem Eintrag in `features.json`. Die Rippenbauweise ist in der
+  quelloffenen Fassung nicht enthalten.
 - **Reiter „Aerodynamik"** (`aero.js`, `vlm.js`, `foil2d.js`, `neuralfoil.js`, `neuralfoil_data.js`).
   Grund: `vlm.js` enthielt eine zeilengetreue Portierung der Routine `VORVELC` aus
   [AVL](https://web.mit.edu/drela/Public/web/avl/) (© 2002 Mark Drela, Harold Youngren, GPL-2.0-or-later).

@@ -600,7 +600,6 @@
       <button type="button" class="tab-more-btn">Spezial Module<span class="tab-more-ch">▾</span></button>
       <div class="tab-more-list">
         <button data-view="rib">Rippendesigner</button>
-        <button data-view="rf">Rippenfläche</button>
         <button data-view="cad">CAD-Bearbeitung</button>
         <button data-view="form">Formenbau</button>
         <button data-view="rumpf">Rumpf</button>
@@ -763,19 +762,6 @@
         </div>
       </div>
 
-      <div class="view" id="rfView">
-        <div class="wing-stack core-mode" id="rfStack">
-          <div class="wing-pane">
-            <span class="pane-label">Grundriss — Rippenlagen, Holme, Ruder &amp; Geodäten</span>
-            <canvas id="cRfPlan"></canvas>
-          </div>
-          <div class="wing-pane" style="border-left:0">
-            <span class="pane-label">Bauteile — geschachtelt wie im DXF</span>
-            <div class="simlegend" id="rfInfo" style="left:10px;right:auto;top:10px;max-width:360px">Keine Tragfläche.</div>
-            <canvas id="cRf"></canvas>
-          </div>
-        </div>
-      </div>
 
       <div class="view" id="dxfView">
         <div class="wing-stack core-mode" id="dxfStack">
@@ -1327,20 +1313,6 @@
   </div>
 </div>
 
-<!-- Nasenschablonen: 3D-Vorschau der STL -->
-<div class="modal-backdrop" id="rf3dModal">
-  <div class="modal profedit-modal">
-    <div class="head">
-      <h2>Rippenfläche — 3D-Ansicht des zusammengebauten Flügels</h2>
-      <button class="close-x" id="rf3dClose" title="Schließen">×</button>
-    </div>
-    <div class="body" style="padding:0;position:relative;flex:1;min-height:0;overflow:hidden">
-      <canvas id="cRf3d" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
-      <div class="pane-toggles" id="rf3dToggles" style="top:10px;right:10px;left:auto"></div>
-      <div class="simlegend" id="rf3dInfo" style="left:10px;bottom:10px;top:auto;right:auto;max-width:90%"></div>
-    </div>
-  </div>
-</div>
 
 <div class="modal-backdrop" id="ribStlModal">
   <div class="modal profedit-modal">
@@ -1507,7 +1479,6 @@
 <script src="gcode.js?v=20260922ni"></script>
 <script src="spars.js?v=20260923np"></script>
 <script src="ribs.js?v=20260921cv"></script>
-<script src="rippenflaeche.js?v=20260924a1"></script>
 <script src="dxfshapes.js?v=20260921sn"></script>
 <script src="wingimport.js?v=20260920pc"></script>
 <script src="filesys.js?v=20260924ot"></script>

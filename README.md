@@ -24,7 +24,6 @@ schnell drehenden Werkzeugen. **Betrieb ausschließlich auf eigene Verantwortung
 - **Formenbau**: Urmodell und Negativform als STL, B-Spline-Glättung, Trennfläche,
   Krümmungs- und Zebra-Analyse, STEP-Export
 - **Rumpf**: Loft aus Bezier-Splines, Spanten mit Anformungen
-- **Rippenfläche**: kompletter Bausatz in Rippenbauweise, Holz-Datenbank, Nesting
 - **Fräse**: 2D-CAM (außen/innen/Tasche/Bohren, Haltestege) und GRBL-Steuerung
 - **CAD-Bearbeitung**: eigener 2D-Editor mit AutoCAD-artiger Befehlszeile
 - **3D-Modell**: STL/OBJ und Flugsimulator-Modelle (X-Plane, FlightGear, glTF) zerlegen

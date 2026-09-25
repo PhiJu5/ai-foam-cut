@@ -140,22 +140,6 @@
       "kern_bis": "2026-09-12"
     },
     {
-      "id": "rippenflaeche",
-      "name": "Rippenfläche (Rippenbauweise: Bausatz aus dem Tragflächendesign)",
-      "description": "Reiter „Rippenfläche“: aus dem Tragflächendesign einen kompletten Bausatz in Rippenbauweise ableiten — Rippenanzahl/-verteilung, Rippengruppen mit Werkstoff und Materialstärke, Rippenarten (Vollrippe, D-Box-, Endleistenrippe), schräge Rippen (senkrecht zu Nasenleiste/Holm/Scharnierlinie, auch nur an den Rudern), Holmgurte und Holmstege, Rippenkämme als Holmsteg, Helling (Schlitzbrett oder Auflageböcke), Beplankung inkl. Abwicklung, geodätische Bauweise, Leichterungslöcher; Ausgabe als geschachteltes DXF, als Stückliste (CSV) und als Übergabe in die CAD-Bearbeitung.",
-      "files": [
-        "rippenflaeche.js"
-      ],
-      "tabs": [
-        "rf"
-      ],
-      "default": true,
-      "demo": true,
-      "views": [
-        "rfView"
-      ]
-    },
-    {
       "id": "cad",
       "name": "CAD-Bearbeitung (2D-CAD-Editor mit Befehlszeile)",
       "description": "Reiter „CAD-Bearbeitung“: eigener 2D-CAD-Editor (Linien, Bögen, Splines, Bemaßung, Layer, Objektfang, Offset, Trimmen) mit AutoCAD-artiger Befehlszeile; Übergabe an DXF-Formen und Fräse, DXF-Export.",
