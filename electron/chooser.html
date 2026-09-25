@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>AI Foam Cut</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; background: #f4f5f7; color: #1b1d21; }
+  .wrap { padding: 16px 18px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  ul { flex: 1; list-style: none; margin: 0 0 12px; padding: 4px; overflow-y: auto;
+       background: #fff; border: 1px solid #c8ccd4; border-radius: 6px; }
+  li { padding: 7px 10px; border-radius: 4px; cursor: default; user-select: none; }
+  li[aria-selected="true"] { background: #2f6feb; color: #fff; }
+  .neu { opacity: .65; font-style: italic; }
+  li[aria-selected="true"] .neu { opacity: .85; }
+  .row { display: flex; gap: 8px; }
+  button { font: inherit; padding: 7px 14px; border-radius: 5px; border: 1px solid #c0c5cf;
+           background: #fff; cursor: pointer; }
+  button:hover { background: #eef1f6; }
+  button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button.primary:hover { background: #2a62d0; }
+  #newRow { display: none; gap: 8px; margin-bottom: 10px; }
+  #newRow.on { display: flex; }
+  input { flex: 1; font: inherit; padding: 6px 9px; border: 1px solid #c0c5cf; border-radius: 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Welche Maschine / Einstellungsdatei soll geladen werden?</h1>
+  <ul id="list" tabindex="0"></ul>
+  <div id="newRow">
+    <input id="newName" type="text" placeholder="Name der neuen Maschine" maxlength="60">
+    <button id="newOk">Anlegen</button>
+  </div>
+  <div class="row">
+    <button class="primary" id="load">Laden</button>
+    <button id="new">Neue Maschine...</button>
+    <button id="browse">Durchsuchen...</button>
+  </div>
+</div>
+<script>
+(function () {
+  var data = null, sel = 0;
+  var listEl = document.getElementById('list');
+
+  function render() {
+    listEl.innerHTML = '';
+    data.entries.forEach(function (e, i) {
+      var li = document.createElement('li');
+      li.setAttribute('aria-selected', String(i === sel));
+      var m = e.label.match(/^(.*?)(\s+\(neu\))$/);
+      if (m) {
+        li.appendChild(document.createTextNode(m[1]));
+        var s = document.createElement('span');
+        s.className = 'neu';
+        s.textContent = m[2];
+        li.appendChild(s);
+      } else {
+        li.textContent = e.label;
+      }
+      li.addEventListener('click', function () { sel = i; render(); });
+      li.addEventListener('dblclick', accept);
+      listEl.appendChild(li);
+    });
+    var cur = listEl.children[sel];
+    if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' });
+  }
+
+  function accept() {
+    if (data && data.entries[sel]) window.chooser.accept(data.entries[sel].path);
+  }
+
+  document.getElementById('load').addEventListener('click', accept);
+
+  document.getElementById('browse').addEventListener('click', function () {
+    window.chooser.browse().then(function (p) { if (p) window.chooser.accept(p); });
+  });
+
+  var newRow = document.getElementById('newRow');
+  var newName = document.getElementById('newName');
+  document.getElementById('new').addEventListener('click', function () {
+    newRow.classList.add('on');
+    newName.focus();
+  });
+
+  function addNew() {
+    var safe = newName.value.replace(/[^0-9a-zA-ZÀ-ſ _-]/g, '').trim();
+    if (!safe) { newName.focus(); return; }
+    var sep = data.folder.indexOf('\\') >= 0 ? '\\' : '/';
+    var p = data.folder + sep + 'hotwing-settings-' + safe + '.json';
+    var idx = -1;
+    data.entries.forEach(function (e, i) { if (e.path === p) idx = i; });
+    if (idx < 0) {
+      data.entries.push({ path: p, label: safe + '  (neu)', name: safe });
+      idx = data.entries.length - 1;
+    }
+    sel = idx;
+    newRow.classList.remove('on');
+    newName.value = '';
+    render();
+  }
+  document.getElementById('newOk').addEventListener('click', addNew);
+  newName.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') addNew(); });
+
+  listEl.addEventListener('keydown', function (ev) {
+    if (ev.key === 'ArrowDown') { sel = Math.min(sel + 1, data.entries.length - 1); render(); ev.preventDefault(); }
+    else if (ev.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(); ev.preventDefault(); }
+    else if (ev.key === 'Enter') { accept(); }
+  });
+
+  window.chooser.list().then(function (d) {
+    data = d;
+    data.entries.forEach(function (e, i) { if (e.path === d.last) sel = i; });
+    render();
+    listEl.focus();
+  });
+})();
+</script>
+</body>
+</html>

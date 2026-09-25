@@ -35,24 +35,52 @@ Zweisprachig (Deutsch/Englisch), umschaltbar in den Einstellungen.
 
 ## Starten
 
-Das Programm ist eine lokale Webanwendung ohne Internetzugriff. Es braucht einen kleinen
-lokalen Server, weil es Dateien liest und schreibt:
+Es gibt zwei Wege, dasselbe Programm zu starten.
+
+**Im Browser** (Python, keine weiteren Abhaengigkeiten):
 
 ```
 python launcher.py
 ```
 
-Ein Browserfenster öffnet sich, alles läuft auf `127.0.0.1`. Voraussetzung: Python 3.11 oder neuer.
+Ein Browserfenster oeffnet sich, alles laeuft lokal auf `127.0.0.1`.
+Voraussetzung: Python 3.11 oder neuer.
 
-## Eigene exe bauen
+**Im eigenen Fenster** (Electron - fuehlt sich wie ein normales Programm an,
+eigener Serieller-Port-Dialog):
 
 ```
-python build_tool.py
+npm install
+npm start
 ```
 
-Das Build-Werkzeug erzeugt mit PyInstaller eine eigenständige `.exe`. Über `features.json` lässt
-sich einstellen, welche Funktionen enthalten sein sollen — nützlich für schlanke Ausgaben oder
-zum Ausprobieren einzelner Bereiche.
+## Eigene Ausgabe bauen
+
+Beide Varianten lassen sich zu einer eigenstaendigen Datei packen. Ueber
+`features.json` waehlst du, welche Funktionen enthalten sein sollen - nuetzlich
+fuer schlanke Ausgaben oder zum Ausprobieren einzelner Bereiche.
+
+Unter Windows geht das mit einem Doppelklick, sonst von der Befehlszeile:
+
+| Variante | Doppelklick | Befehlszeile |
+|---|---|---|
+| **Browser** (PyInstaller, `.exe` die den Browser oeffnet) | `BUILD_TOOL.bat` | `python build_tool.py` |
+| **Electron** (eigenes Fenster, `.exe` bzw. AppImage) | `BUILD_TOOL_ELECTRON.bat` | `python build_tool_electron.py` |
+
+Beide oeffnen ein Fenster: Funktionen anhaken, Version eintragen, bauen. Das
+Protokoll laeuft im Fenster mit, der Bau laesst sich abbrechen. Einstellungen
+lassen sich als Profil speichern und wieder laden.
+
+Ohne Fenster geht es auch:
+
+```
+python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.4
+python build_tool_electron.py --cli --target linux
+```
+
+Dafuer werden Node.js und die Abhaengigkeiten aus `package.json` gebraucht
+(einmalig `npm install --prefix %USERPROFILE%/afc-build`). Die Linux-Ausgabe
+baut electron-builder unter Linux oder in WSL.
 
 ## Dokumentation
 

@@ -12,6 +12,7 @@ AVL/
 
 # --- Build-Ausgaben und Abhaengigkeiten ----------------------------------
 dist/
+dist-electron/
 build/
 node_modules/
 *.exe
@@ -32,3 +33,6 @@ __pycache__/
 #  hier unter _intern/ - sie beschreiben Verkauf, Kundendatenbank und den
 #  entfernten Kopierschutz)
 _intern/
+
+# --- Wrangler: lokaler Zustand + Cloudflare-Konto-ID (nicht veroeffentlichen) --
+website/.wrangler/

@@ -1,0 +1,80 @@
+{
+  "name": "ai-foam-cut",
+  "productName": "AI Foam Cut",
+  "version": "1.4.0",
+  "description": "Freie Software fuer Modellflug-Tragflaechen: CNC-Heissdrahtschneiden, Formenbau, Fraesen und Rippenbauweise",
+  "author": "Manuel Heinisch",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/aifoamcut/ai-foam-cut",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aifoamcut/ai-foam-cut.git"
+  },
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist-linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.aifoamcut.app",
+    "productName": "AI Foam Cut",
+    "asar": true,
+    "files": [
+      "electron/**/*",
+      "*.js",
+      "AI Foam Cut.html",
+      "LICENSE",
+      "THIRD_PARTY_LICENSES.md",
+      "icon/icon.ico",
+      "icon/icon-256.png",
+      "!build_exe.py",
+      "!build_tool*.py",
+      "!launcher*.py"
+    ],
+    "directories": {
+      "output": "dist-electron"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon/icon.ico",
+      "artifactName": "${productName} v${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName} v${version}.${ext}",
+      "unpackDirName": "AIFoamCut"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon/icon-256.png",
+      "category": "Graphics",
+      "synopsis": "CNC-Schaumschneiden, Formenbau und Fraese",
+      "artifactName": "${productName} v${version}.${ext}",
+      "executableName": "ai-foam-cut",
+      "desktop": {
+        "Keywords": "CNC;Schaum;Styropor;Hotwire;Tragflaeche;"
+      }
+    },
+    "appImage": {
+      "artifactName": "${productName} v${version}.${ext}"
+    }
+  }
+}

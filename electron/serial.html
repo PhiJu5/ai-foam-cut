@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Anschluss waehlen</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; background: #f4f5f7; color: #1b1d21; }
+  .wrap { padding: 16px 18px; display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+  ul { flex: 1; list-style: none; margin: 0 0 12px; padding: 4px; overflow-y: auto;
+       background: #fff; border: 1px solid #c8ccd4; border-radius: 6px; }
+  li { padding: 7px 10px; border-radius: 4px; cursor: default; user-select: none; }
+  li[aria-selected="true"] { background: #2f6feb; color: #fff; }
+  .det { display: block; font-size: 12px; opacity: .6; }
+  li[aria-selected="true"] .det { opacity: .85; }
+  .row { display: flex; gap: 8px; }
+  button { font: inherit; padding: 7px 14px; border-radius: 5px; border: 1px solid #c0c5cf;
+           background: #fff; cursor: pointer; }
+  button:hover { background: #eef1f6; }
+  button.primary { background: #2f6feb; border-color: #2f6feb; color: #fff; }
+  button.primary:hover { background: #2a62d0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Mit welchem Anschluss ist die Steuerung verbunden?</h1>
+  <ul id="list" tabindex="0"></ul>
+  <div class="row">
+    <button class="primary" id="ok">Verbinden</button>
+    <button id="cancel">Abbrechen</button>
+  </div>
+</div>
+<script>
+(function () {
+  var ports = [], sel = 0;
+  var listEl = document.getElementById('list');
+
+  function render() {
+    listEl.innerHTML = '';
+    ports.forEach(function (p, i) {
+      var li = document.createElement('li');
+      li.setAttribute('aria-selected', String(i === sel));
+      li.appendChild(document.createTextNode(p.name));
+      if (p.detail) {
+        var s = document.createElement('span');
+        s.className = 'det';
+        s.textContent = p.detail;
+        li.appendChild(s);
+      }
+      li.addEventListener('click', function () { sel = i; render(); });
+      li.addEventListener('dblclick', accept);
+      listEl.appendChild(li);
+    });
+  }
+
+  function accept() {
+    if (ports[sel]) window.serialPick.pick(ports[sel].portId);
+  }
+
+  document.getElementById('ok').addEventListener('click', accept);
+  document.getElementById('cancel').addEventListener('click', function () { window.serialPick.pick(''); });
+
+  listEl.addEventListener('keydown', function (ev) {
+    if (ev.key === 'ArrowDown') { sel = Math.min(sel + 1, ports.length - 1); render(); ev.preventDefault(); }
+    else if (ev.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); render(); ev.preventDefault(); }
+    else if (ev.key === 'Enter') { accept(); }
+    else if (ev.key === 'Escape') { window.serialPick.pick(''); }
+  });
+
+  window.serialPick.list().then(function (list) {
+    ports = list;
+    render();
+    listEl.focus();
+  });
+})();
+</script>
+</body>
+</html>
