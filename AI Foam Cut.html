@@ -1,0 +1,1547 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Foam Cut</title>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
+    --txt:#e6ebf1; --muted:#8b98a8; --accent:#4aa3ff; --accent2:#ffb454;
+    --good:#57d38c; --bad:#ff6b6b; --wire:#ff5a3c;
+    --side-w:340px; /* Breite der linken Seitenleiste (auch Einzug der Reiterleiste) */
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font:13px/1.4 "Segoe UI",system-ui,sans-serif}
+  /* Kopfzeile fest (auto), darunter füllt eine 1fr-Zeile den Rest — sonst
+     bläht sich der Kopf auf, sobald die Sidebar kürzer als der Bildschirm ist
+     (variiert je Reiter durch die kontextabhängigen Gruppen). */
+  #app{display:grid;grid-template-columns:var(--side-w) 1fr;grid-template-rows:auto auto 1fr;
+    height:100vh;min-height:0}
+  #app>header{min-height:0}
+  #side,#main{min-height:0}
+  header{grid-column:1/3;display:flex;align-items:center;gap:14px;position:relative;
+    padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  /* Projektname sitzt ganz rechts, direkt vor den Knöpfen. Das Feld ist so
+     schmal wie sein Inhalt (field-sizing) und wächst bei langem Namen nach
+     LINKS — so kann es nie mehr über „Werkstoff-Datenbank" oder einen langen
+     Maschinennamen laufen. Ältere Engines ohne field-sizing bleiben bei der
+     Mindestbreite, was ebenfalls nichts überlagert. */
+  #projName{background:transparent;border:1px solid transparent;border-radius:6px;
+    color:var(--accent);font-size:19px;font-weight:700;text-align:right;
+    padding:4px 10px;flex:0 0.2 auto;width:auto;field-sizing:content;
+    min-width:200px;max-width:40%}
+  #projName::placeholder{color:var(--muted,#7c8a97);font-weight:500}
+  #projName:hover{border-color:var(--line)}
+  #projName:focus{border-color:var(--accent);background:var(--panel2);outline:none}
+  header h1 span{color:var(--accent)}
+  #appVer{font-size:12px;padding:1px 8px;border:1px solid var(--line);border-radius:10px;color:var(--muted,#7c8a97);white-space:nowrap}
+  #appVer b{color:var(--accent);font-weight:600}
+  header .sp{flex:1}
+  /* Kleine Bildschirme: Titel kürzt mit „…", Projektname rückt in den Fluss statt
+     absolut über den Buttons zu liegen, ganz schmal bricht die Kopfzeile um. */
+  header h1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 8 auto}
+  #appVer,#machName{flex-shrink:0}
+  @media (max-width:1650px){
+    #projName{min-width:90px;font-size:16px}
+  }
+  @media (max-width:1100px){
+    header{gap:8px}
+    .tabs{gap:3px;padding:6px 8px 6px calc(var(--side-w) + 8px)}
+    .tabs button{padding:5px 8px}
+  }
+  @media (max-width:860px){
+    header{flex-wrap:wrap;row-gap:6px}
+    header h1{flex-basis:100%}
+  }
+  /* CAD-Zeichenfläche: Fadenkreuz statt Hand-Cursor (überschreibt setupNav). */
+  #cCad{cursor:crosshair !important}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:6px;padding:6px 11px;cursor:pointer;font-size:12px}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
+  button.primary:hover{filter:brightness(1.1)}
+  #side{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:10px}
+  .grp{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
+  .grp>h3{margin:0;padding:8px 11px;background:var(--panel2);font-size:14px;
+    font-weight:700;color:var(--txt);cursor:pointer;display:flex;align-items:center;gap:6px}
+  .grp>h3 .ch{color:var(--accent);font-size:16px;font-weight:700;line-height:1;margin-left:auto}
+  .grp .body{padding:9px 11px;display:grid;gap:8px}
+  /* Abschnitts-Überschrift (z. B. „Blockzuschnitt") über eingeklappten Untergruppen */
+  .grp.grp-head{border:0;margin:14px 0 6px}
+  .grp.grp-head>h3{background:transparent;padding:2px 2px;font-size:11px;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--accent);border-bottom:1px solid var(--line);border-radius:0}
+  /* Untergruppe unter einer Abschnitts-Überschrift: leicht eingerückt */
+  .grp.grp-sub{margin-left:8px}
+  /* Untergruppe INNERHALB eines Übermenüs (z. B. GRBL-Steuerung): keine Einrückung, kein Extra-Abstand */
+  .grp .body>.grp.grp-sub{margin:0}
+
+  /* ---- Farbliche Orientierung der Seitenleisten-Menüs ----
+     Jedes Menü (jede Gruppe) bekommt in grp() eine eigene, stabile Farbe
+     (--grp-accent), damit sich die Gruppen einer Seitenleiste leicht
+     voneinander unterscheiden lassen. Gilt auch für Untergruppen. */
+  .grp{border-color:var(--grp-accent,var(--accent))}
+  .grp>h3 .ch{color:var(--grp-accent,var(--accent))}
+  .grp>h3:hover{background:color-mix(in srgb,var(--grp-accent,var(--accent)) 16%,var(--panel2))}
+  /* Abschnitts-Überschrift und Untergruppen in derselben Menüfarbe */
+  .grp.grp-head{border:0}
+  .grp.grp-head>h3{color:var(--grp-accent,var(--accent));border-bottom-color:var(--grp-accent,var(--accent))}
+  .grp.grp-sub{border-color:color-mix(in srgb,var(--grp-accent,var(--accent)) 55%,var(--line))}
+  .row{display:grid;grid-template-columns:1fr 92px;align-items:center;gap:8px}
+  .row.full{grid-template-columns:1fr}
+  .row label{color:var(--txt);font-size:12px}
+  .row input,.row select{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+    border-radius:5px;padding:5px 7px;font-size:12px;width:100%}
+  .row input[type=checkbox]{width:auto;justify-self:start}
+  .hint{color:var(--muted);font-size:11px;margin:-2px 0 2px}
+  /* Ein-/ausblendbare Funktionsbeschreibungen (Umschaltung in den Einstellungen) */
+  .hint-toggle{display:none;cursor:pointer;width:15px;height:15px;padding:0;margin:0 0 0 5px;
+    border:1px solid var(--line);background:var(--panel2,#12161c);color:var(--muted);
+    border-radius:50%;font-size:10px;line-height:1;text-align:center;vertical-align:middle;flex:0 0 auto}
+  .hint-toggle:hover{color:var(--txt);border-color:var(--muted)}
+  body.hints-collapsed .hint-toggle{display:inline-flex;align-items:center;justify-content:center}
+  /* Notiz-Umschalter (📝) direkt neben dem „?" — immer sichtbar, gleiche Größe */
+  .note-toggle{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;
+    width:15px;height:15px;padding:0;margin:0 0 0 4px;border:1px solid var(--line);
+    background:var(--panel2,#12161c);color:var(--muted);border-radius:50%;font-size:9px;
+    line-height:1;text-align:center;vertical-align:middle;flex:0 0 auto}
+  .note-toggle:hover{color:var(--txt);border-color:var(--muted)}
+  .note-toggle.has-note{color:var(--accent2);border-color:var(--accent2)}
+  /* Notizfelder komplett abschaltbar (Einstellung): 📝-Symbol verbergen */
+  body.notes-hidden .note-toggle{display:none !important}
+  /* Werkzeug-Paar (? + 📝) — hält beide Knöpfe zusammen, direkt am Feld */
+  .field-tools{display:inline-flex;align-items:center;gap:4px;margin-left:5px;vertical-align:middle}
+  .field-tools .hint-toggle,.field-tools .note-toggle{margin:0}
+  /* Notiz-Popup */
+  .note-pop{position:fixed;z-index:120;width:280px;background:var(--panel);
+    border:1px solid var(--accent);border-radius:9px;padding:11px;
+    box-shadow:0 8px 26px rgba(0,0,0,.5);display:none;flex-direction:column;gap:8px}
+  .note-pop.open{display:flex}
+  .note-pop .np-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    white-space:normal;line-height:1.35}
+  .note-pop textarea{background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:6px;
+    padding:7px 8px;font:12px/1.4 "Segoe UI",system-ui,sans-serif;resize:vertical;min-height:84px;width:100%}
+  .note-pop .np-scope{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  .note-pop .np-scope label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .note-pop .np-scope input{width:auto;margin:0}
+  .note-pop .np-foot{display:flex;gap:7px;align-items:center}
+  .note-pop .np-foot .sp{flex:1}
+  /* Zuletzt-geladen-Menü im Kopf */
+  .recent-menu{position:fixed;z-index:120;min-width:260px;max-width:440px;background:var(--panel);
+    border:1px solid var(--line);border-radius:9px;padding:5px;box-shadow:0 8px 26px rgba(0,0,0,.5);
+    display:none;flex-direction:column;gap:2px}
+  .recent-menu.open{display:flex}
+  .recent-menu .rm-item{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:6px;
+    cursor:pointer;font-size:12px;color:var(--txt)}
+  .recent-menu .rm-item:hover{background:var(--panel2)}
+  .recent-menu .rm-item .rm-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .recent-menu .rm-item .rm-time{color:var(--muted);font-size:11px;white-space:nowrap}
+  .recent-menu .rm-empty{padding:9px 11px;color:var(--muted);font-size:12px}
+  .recent-menu .rm-foot{border-top:1px solid var(--line);margin-top:3px;padding:5px 6px 2px}
+  .recent-menu .rm-foot button{width:100%;font-size:11px}
+  .recent-menu .rm-head{padding:6px 9px 2px;color:var(--muted);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+  .recent-menu .rm-head.sep{border-top:1px solid var(--line);margin-top:4px;padding-top:7px}
+  body.hints-collapsed .hint:not([id]):not(.hint-open){display:none}
+  /* Im Einstellungsfenster immer die vollständigen Texte zeigen (nie „?") */
+  body.hints-collapsed #settingsModal .hint{display:revert}
+  #settingsModal .hint-toggle{display:none !important}
+  /* Einstellungsdialog oben fixiert mit fester Höhe: springt beim Reiterwechsel nicht. */
+  #settingsModal{align-items:flex-start;padding-top:4vh}
+  #settingsModal .modal{height:88vh}
+  /* Präsentere Abschnitts-Überschriften im Einstellungsfenster */
+  #settingsModal .set-h{display:block;margin:16px 0 8px;font-size:13px;font-weight:700;
+    letter-spacing:.03em;color:var(--accent);border-bottom:1px solid var(--line);padding-bottom:5px}
+  #settingsModal .set-h:first-child{margin-top:2px}
+  /* Einklappbare Abschnitte im Einstellungsfenster */
+  #settingsModal details.set-sec{margin:0}
+  #settingsModal summary.set-h{display:list-item;list-style-position:inside;margin:14px 0 8px}
+  #settingsModal summary.set-h::marker{color:var(--accent)}
+  #settingsModal summary.set-h:hover{filter:brightness(1.15)}
+  #settingsModal details.set-sec[open]>summary.set-h{margin-bottom:8px}
+  /* Reiterleiste darf umbrechen; #views füllt den Rest (keine feste 44-px-Oberkante mehr,
+     sonst überdecken die Ansichten eine zweizeilige Reiterleiste). */
+  #main{position:relative;overflow:hidden;background:#0b0e12;display:flex;flex-direction:column}
+  /* Reiter-Buttons beginnen bündig mit der Zeichenfläche (rechts der Seitenleiste). */
+  .tabs{grid-column:1/3;flex:0 0 auto;display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px 8px calc(var(--side-w) + 10px);border-bottom:1px solid var(--line);background:var(--panel)}
+  .tabs button,header button{white-space:nowrap;flex-shrink:0}
+  .tabs button.active{background:var(--accent);color:#04121f;border-color:var(--accent)}
+  /* Übermenü „Spezialfunktionen" in der Reiterleiste */
+  .tab-more{position:relative;flex-shrink:0}
+  .tab-more-cur{font-weight:600}
+  .tab-more-cur:not(:empty)::before{content:" · "}
+  .tab-more-ch{margin-left:6px;font-size:10px}
+  .tab-more-list{position:absolute;left:0;top:calc(100% + 4px);z-index:90;min-width:100%;display:none;
+    flex-direction:column;gap:3px;padding:5px;background:var(--panel);border:1px solid var(--line);
+    border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.5)}
+  .tab-more.open .tab-more-list{display:flex}
+  .tab-more-list.right{left:auto;right:0}
+  /* Einstellungen → Menüleiste (tabmenu.js) */
+  #settingsModal .tm-list{display:flex;flex-direction:column;gap:5px}
+  #settingsModal .tm-row{display:flex;align-items:center;gap:8px;padding:4px 6px;border:1px solid var(--line);
+    border-radius:6px;background:var(--panel2)}
+  #settingsModal .tm-arrows{display:inline-flex;gap:3px;flex:0 0 auto}
+  #settingsModal .tm-arrows button{width:26px;padding:2px 0}
+  #settingsModal .tm-label{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #settingsModal .tm-place{flex:0 0 230px;max-width:45%}
+  #settingsModal .tm-group{border:1px solid var(--accent);border-radius:8px;padding:5px;display:flex;flex-direction:column;gap:4px;
+    background:rgba(255,255,255,.02)}
+  #settingsModal .tm-group>.tm-row:not(.tm-ghead){margin-left:26px}
+  #settingsModal .tm-ghead{border-color:transparent;background:transparent;padding:2px 1px}
+  #settingsModal .tm-ic{color:var(--accent);font-size:14px}
+  #settingsModal .tm-name{flex:1 1 auto;min-width:0;font-weight:600}
+  #settingsModal .tm-empty{margin:2px 0 2px 26px}
+  .tab-more-list button{text-align:left}{font-size:12px;color:var(--accent);font-weight:600;white-space:nowrap;margin-right:2px}
+  header #btnMatDb.active{background:var(--accent);color:#04121f;border-color:var(--accent)}
+  #views{position:relative;flex:1 1 auto;min-height:0}
+  canvas{width:100%;height:100%;display:block}
+  .view{position:absolute;inset:0;display:none}
+  .view.active{display:block}
+  /* Tragfläche: Grundriss + Profile nebeneinander (oben), Aufriss unten breit */
+  .wing-stack{position:absolute;inset:0;display:grid;
+    grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+  .wing-pane{position:relative;min-height:0;min-width:0;overflow:hidden;
+    border-top:1px solid var(--line);border-left:1px solid var(--line)}
+  .wing-pane.wing-wide{grid-column:1 / -1}   /* Aufriss über volle Breite */
+  /* Kernschneiden: kein Aufriss, horizontal geteilt (übereinander) ->
+     Grundriss oben, Profile unten groß */
+  .wing-stack.core-mode{grid-template-columns:1fr;grid-template-rows:1fr 2fr}
+  .wing-stack.core-mode .wing-wide{display:none}
+  /* Verschiebbarer Teiler zwischen Grundriss (oben) und Profilen (unten) —
+     nur im Kernschneiden-Modus sichtbar. */
+  .core-split{display:none;position:absolute;left:0;right:0;height:9px;z-index:5;
+    transform:translateY(-50%);cursor:row-resize}
+  .core-split::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;
+    transform:translateY(-50%);background:var(--line)}
+  .core-split:hover::before{background:var(--accent);height:3px}
+  /* Verschiebbare Teiler im Tragflächen-Reiter (2×2-Raster): senkrecht zwischen
+     Grundriss und Profilen (obere Reihe), waagrecht zwischen oberer Reihe und
+     Aufriss. Nur im Tragflächen-Modus sichtbar (im Kernschneiden übernimmt
+     .core-split die Teilung). */
+  .wing-col-split{display:none;position:absolute;top:0;width:9px;z-index:6;
+    transform:translateX(-50%);cursor:col-resize}
+  .wing-col-split::before{content:"";position:absolute;top:0;bottom:0;left:50%;width:2px;
+    transform:translateX(-50%);background:var(--line)}
+  .wing-col-split:hover::before{background:var(--accent);width:3px}
+  .wing-row-split{display:none;position:absolute;left:0;right:0;height:9px;z-index:6;
+    transform:translateY(-50%);cursor:row-resize}
+  .wing-row-split::before{content:"";position:absolute;left:0;right:0;top:50%;height:2px;
+    transform:translateY(-50%);background:var(--line)}
+  .wing-row-split:hover::before{background:var(--accent);height:3px}
+  .wing-pane>canvas{position:absolute;inset:0}
+  .pane-label{position:absolute;right:10px;top:8px;z-index:2;font-size:11px;color:var(--muted);
+    background:rgba(15,18,22,.72);border:1px solid var(--line);border-radius:6px;
+    padding:2px 8px;pointer-events:none}
+  /* Sichtbarkeits-Schalter direkt neben der Profil-Abbildung */
+  .pane-toggles{position:absolute;left:10px;top:8px;z-index:3;display:flex;flex-direction:column;gap:3px;
+    background:rgba(15,18,22,.82);border:1px solid var(--line);border-radius:6px;padding:6px 9px}
+  .pane-toggles label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer}
+  .pane-toggles input{width:auto;margin:0}
+  .pane-toggles .to-gcode{align-self:flex-start;background:var(--accent,#3b82f6);color:#fff;border-color:transparent;font-weight:600}
+  #wingView .wing-stack:not(.core-mode) #coreToGcode{display:none}
+  #wingView .wing-stack:not(.core-mode) #coreMeas,#wingView .wing-stack:not(.core-mode) #coreMeasPanel{display:none!important}
+  .pane-toggles button{width:auto;font-size:11px;padding:2px 8px;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;cursor:pointer}
+  .pane-toggles select{width:auto;margin:0;font-size:11px;padding:1px 4px;background:var(--panel2);
+    color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  /* Segment-Auswahl als Dropdown-Menü (Mehrfachauswahl + Aktiv per Namen) im Profilfenster */
+  .prof-seg-menu{position:relative}
+  .prof-seg-btn{font:inherit;font-size:11px;padding:1px 6px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:4px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .prof-seg-btn:hover{border-color:var(--accent);color:#fff}
+  .prof-seg-btn #profSegChevron{color:var(--accent);font-size:10px}
+  .prof-seg-list{position:absolute;left:0;top:calc(100% + 3px);z-index:12;min-width:150px;
+    background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;
+    display:none;flex-direction:column;gap:3px;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+  .prof-seg-list.open{display:flex}
+  .prof-seg-list label{white-space:nowrap;cursor:pointer}
+  .prof-seg-list label.active{font-weight:600;color:var(--txt)}
+  .prof-seg-name{cursor:pointer;border-radius:3px;padding:0 3px}
+  .prof-seg-name:hover{background:var(--panel2);color:var(--accent)}
+  .prof-seg-hint{font-size:10px;color:var(--muted,#8b98a8);margin-top:2px;white-space:nowrap}
+  .msim{position:relative;height:340px;border:1px solid var(--line);border-radius:8px;
+    overflow:hidden;background:var(--panel2)}
+  .msim>canvas{position:absolute;inset:0;width:100%;height:100%}
+  #gcodeView{padding:0;display:none;flex-direction:column}
+  #gcodeView.active{display:flex}
+  #blockView{padding:0;display:none;flex-direction:column}
+  #blockView.active{display:flex}
+  #cBlock{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .gsplit{flex:1 1 0;display:grid;grid-template-columns:1fr 380px;min-height:0;overflow:hidden}
+  .gsim{position:relative;min-width:0;min-height:0;overflow:hidden;
+    border-right:1px solid var(--line);background:#080b0f}
+  /* absolut positioniert: die Eigengröße des Canvas (Attribute in Gerätepixeln,
+     auf HiDPI doppelt) darf die Zeilenhöhe nicht aufblähen — sonst schiebt sie
+     die Bedienleisten aus dem sichtbaren Bereich. */
+  #cSim{position:absolute;inset:0;width:100%;height:100%;display:block}
+  /* Kennzeichnung unten mittig im Simulator/Monitor: aktive Tragfläche · Segment · Seite
+     (unten, damit sie nicht mit den Warnhinweisen oben überlagert) */
+  .simctx{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:3;pointer-events:none;background:rgba(15,18,22,.85);
+    border:1px solid var(--line);border-radius:8px;padding:6px 11px;font-size:13px;font-weight:600;color:#e6edf3;
+    max-width:60%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .simctx:empty{display:none}
+  .simlegend{position:absolute;right:10px;top:10px;background:rgba(15,18,22,.85);
+    border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:11px;
+    pointer-events:none;max-width:230px}
+  .simlegend div{display:flex;align-items:center;gap:7px;margin:2px 0}
+  .simlegend .hint{display:block;margin-top:6px;line-height:1.35}
+  .simbar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 10px;
+    border-top:1px solid var(--line);background:var(--panel)}
+  .simbar select,.simbar input[type=range]{background:#0c0f13;color:var(--txt);
+    border:1px solid var(--line);border-radius:5px;padding:3px 5px;font-size:12px}
+  .simbar input[type=range]{padding:0;accent-color:var(--accent2)}
+  .simbar .ck{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11px}
+  #gcodeText{position:relative;width:100%;height:100%;min-height:0;overflow:auto;background:#0b0e12;color:#cfe;border:0;
+    font:12px/1.45 "Cascadia Code",Consolas,monospace;padding:8px 0;white-space:pre}
+  /* Handische G-Code-Bearbeitung: gleiche Fläche/Optik wie die Ansicht, orange umrandet */
+  #gcodeEdit{width:100%;height:100%;min-height:0;box-sizing:border-box;overflow:auto;background:#0b0e12;color:#cfe;
+    border:0;border-left:2px solid #f59e0b;resize:none;outline:none;
+    font:12px/1.45 "Cascadia Code",Consolas,monospace;padding:8px 12px;white-space:pre;tab-size:2}
+  #gcodeText .gln{display:block;padding:0 12px 0 54px;position:relative;cursor:pointer}
+  #gcodeText .gln:hover{background:#1c2530}
+  #gcodeText .gln::before{content:attr(data-n);position:absolute;left:0;width:46px;text-align:right;
+    color:#4a5568;padding-right:6px;user-select:none}
+  #gcodeText .gln.cur{background:#1d4ed855;color:#fff}
+  #gcodeText .gln.warn{background:#7c2d1266}
+  #gcodeText .gln.cur.warn{background:#9a3412}
+  /* Programm-Ansicht im Reiter �Schneiden": zeilenweise, aktuelle Zeile markiert und mitlaufend */
+  #mProgView{position:relative;width:100%;max-width:100%;box-sizing:border-box;height:220px;min-height:150px;overflow:auto;background:#0b0e12;color:#cfe;
+    border:1px solid var(--line);border-radius:6px;margin-bottom:9px;resize:vertical;
+    font:12px/1.5 "Cascadia Code",Consolas,monospace;padding:6px 0;white-space:pre}
+  #mProgView:empty::before{content:attr(data-empty);color:#4a5568;padding:6px 12px;white-space:normal}
+  #mProgView .gln{display:block;padding:0 12px 0 54px;position:relative}
+  #mProgView .gln::before{content:attr(data-n);position:absolute;left:0;width:46px;text-align:right;
+    color:#4a5568;padding-right:6px;user-select:none}
+  #mProgView .gln.cur{background:#1d4ed855;color:#fff}
+  #mProgView .gln.done{color:#6b7a8a}
+  @media (max-width:1100px){ .gsplit{grid-template-columns:1fr 280px} }
+  .gbar{flex:0 0 auto;display:flex;gap:8px;padding:8px 10px;border-top:1px solid var(--line);background:var(--panel)}
+  .stat{position:absolute;left:10px;bottom:10px;background:rgba(15,18,22,.85);
+    border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:11px;color:var(--muted);
+    pointer-events:none;max-width:60%;display:none}
+  .stat b{color:var(--txt)}
+  .legend{position:absolute;right:10px;top:10px;background:rgba(15,18,22,.85);
+    border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:11px}
+  .legend div{display:flex;align-items:center;gap:7px;margin:2px 0}
+  .sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .warn{color:var(--accent2);font-size:11px}
+  a.dl{display:none}
+
+  /* ---------- Maschinen-Ansicht (grblHAL) ---------- */
+  #machineView{overflow:auto;padding:12px}
+  #cutView{overflow:auto;padding:12px}
+  /* Reiter „Fräse": gleiche Aufteilung wie „Schneiden" (Vorschau links, Bedienung rechts) */
+  #fraeseView{overflow:auto;padding:12px}
+  #fraeseView input[type=text],#fraeseView input[type=number],#fraeseView select{
+    background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
+  #fraeseView .msim>canvas{cursor:grab}
+  #fraeseView .dro.fr-dro{grid-template-columns:repeat(3,1fr)}
+  .frjog-wrap{display:grid;grid-template-columns:auto auto;gap:18px;justify-content:start;align-items:start}
+  .frjog-cross{display:grid;grid-template-columns:repeat(3,58px);grid-template-rows:repeat(3,44px);gap:5px}
+  .frjog-z{display:flex;flex-direction:column;gap:5px;width:58px}
+  .frjog-z .tw{text-align:center;font-size:10px;color:var(--muted)}
+  .frjog-z button{height:44px}
+  button.frjog{font:600 14px Consolas,monospace;color:var(--accent2);padding:0}
+  .frprog{position:relative;width:100%;height:220px;min-height:150px;overflow:auto;background:#0b0e12;color:#cfe;
+    border:1px solid var(--line);border-radius:6px;margin-bottom:9px;resize:vertical;
+    font:12px/1.5 "Cascadia Code",Consolas,monospace;padding:6px 0;white-space:pre}
+  .frprog:empty::before{content:attr(data-empty);color:#4a5568;padding:6px 12px;white-space:normal}
+  .frprog .gln{display:block;padding:0 12px 0 54px;position:relative}
+  .frprog .gln::before{content:attr(data-n);position:absolute;left:0;width:46px;text-align:right;
+    color:#4a5568;padding-right:6px;user-select:none}
+  .frprog .gln.cur{background:#1d4ed855;color:#fff}
+  .frprog .gln.done{color:#6b7a8a}
+  /* Job-Liste in der Seitenleiste */
+  .frjobs{display:flex;flex-direction:column;gap:3px}
+  .frjob{display:grid;grid-template-columns:auto 1fr auto auto auto auto auto;gap:3px;align-items:center;
+    padding:3px 4px;border:1px solid var(--line);border-radius:5px;font-size:11px}
+  .frjob.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .frjob.off{opacity:.55}
+  .frjob input[type=checkbox]{width:auto;margin:0}
+  .frjob .frjob-name{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt)}
+  .frjob .frjob-name:hover{color:var(--accent)}
+  .frjob select{font-size:11px;padding:2px 3px;max-width:96px;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frjob input[type=text]{font-size:11px;padding:2px 4px;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frjob button{padding:1px 5px;font-size:10px;margin:0}
+  .frpart{display:grid;grid-template-columns:1fr auto auto auto;gap:3px;align-items:center;padding:2px 4px;border:1px solid var(--line);border-radius:4px}
+  .frpart.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+  .frpart.frpart-all{grid-template-columns:1fr auto auto;border-style:dashed}
+  .frpart select,.frpart input[type=text]{font-size:11px;padding:2px 3px;max-width:96px;min-width:0;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frpart .frpart-name{grid-column:1 / -1;max-width:none;width:100%;box-sizing:border-box}
+  .frpart button{padding:1px 5px;font-size:10px;margin:0}
+  .frjob-tool{display:flex;justify-content:flex-end;margin:-2px 0 2px 22px}
+  .frjob-tool select{font-size:11px;padding:2px 3px;max-width:100%;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .mwrap{max-width:900px;margin:0 auto;display:grid;gap:10px}
+  /* Reiter „Schneiden": nutzt die volle Bildschirmbreite — 3D-Simulation links
+     groß, Bedienung (Programm/Konsole) rechts. */
+  .cutwrap{max-width:1700px;align-items:stretch;grid-template-columns:minmax(0,1fr)}
+  /* Inhalt des Programmfensters darf die Spalte nie aufweiten (auch bei schmalem Fenster /
+     hoher Skalierung, wo nur eine Spalte angezeigt wird). */
+  #mProgView,.frprog{contain:inline-size}
+  .cutcol{display:grid;gap:10px;align-content:start;min-width:0}
+  .mcard-sim{display:flex;flex-direction:column;height:100%}
+  .mcard-sim .msim{flex:1 1 auto;height:auto;min-height:60vh}
+  @media(min-width:1000px){
+    .cutwrap{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}
+  }
+  /* Prominente G-Code-Quellenauswahl im Reiter „Schneiden". */
+  .cutsource{background:var(--panel2);border:1px solid var(--accent);
+    border-radius:8px;padding:12px 14px;margin-bottom:12px}
+  .cutsource-label{display:block;font-size:13px;font-weight:600;color:var(--txt);margin-bottom:8px}
+  #cutView .cutsource-select{font-size:16px;font-weight:600;padding:10px 12px;
+    flex:1 1 240px;min-width:200px;min-height:44px}
+  #cutView .cutsource-btn{width:100%}
+  .cutsource-btn{font-size:15px;font-weight:700;padding:11px 20px;min-height:44px}
+  .mcard{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0;max-width:100%;overflow:hidden}
+  .cutcol>*{min-width:0}
+  .mcard>.lbl{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin-bottom:9px}
+  .mrow{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+  .mrow .sp{flex:1}
+  .mfield{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--txt)}
+  #machineView input[type=text],#machineView input[type=number],#machineView select{
+    background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
+  .mhead{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
+    letter-spacing:.1em;text-transform:uppercase}
+  .hset{display:flex;flex-direction:column;gap:9px;margin-top:8px}
+  .hset-row{display:grid;grid-template-columns:1fr 120px;gap:6px 10px;align-items:center}
+  .hset-row label{font-size:12px;color:var(--txt);font-weight:600}
+  .hset-row .hint{grid-column:1/-1;margin:0}
+  .hset-row input[type=number]{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+    border-radius:5px;padding:5px 7px;font-size:12px;width:100%}
+  .hset-row input[type=checkbox]{justify-self:end;width:auto}
+  .hset-row.hset-mask{grid-template-columns:1fr}
+  .hset-row.hset-mask label{grid-column:auto}
+  .hset-axes{display:flex;flex-direction:column;gap:5px}
+  .hset-axes .ck{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--txt);cursor:pointer}
+  .hset-axes .ck input{width:auto;margin:0}
+  .dot{width:9px;height:9px;border-radius:50%;background:#555;display:inline-block}
+  .dot.idle{background:var(--good);box-shadow:0 0 8px var(--good)}
+  .dot.run{background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  .dot.alarm{background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  .dro{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:#05070a;
+    border:1px solid #000;border-radius:7px;padding:2px}
+  .dro .axis{background:#0a0d11;padding:11px 10px 9px;text-align:right;position:relative}
+  .dro .axis .ax-name{position:absolute;left:10px;top:8px;font-size:10px;letter-spacing:.1em;color:#6b5a34}
+  .dro .axis .ax-tower{position:absolute;left:10px;top:21px;font-size:9px;color:#4a4033}
+  .dro .axis .val{font:600 27px/1 Consolas,"Cascadia Code",monospace;color:var(--accent2);
+    text-shadow:0 0 10px rgba(255,180,84,.35);margin-top:15px}
+  /* Endschalter-Kontrolllampe je Achse: grün = frei, rot (leuchtend) = ausgelöst */
+  .dro .axis .ax-lim{display:flex;align-items:center;justify-content:flex-end;gap:5px;margin-top:7px}
+  .dro .axis .ax-lim .lim-txt{font-size:8.5px;letter-spacing:.08em;color:#4a5560;text-transform:uppercase}
+  .dro .axis .ax-lim .lim-dot{width:9px;height:9px;border-radius:50%;
+    background:#25a244;border:1px solid #3fd15f;box-shadow:0 0 5px rgba(37,162,68,.6),inset 0 0 2px rgba(0,0,0,.35)}
+  .dro-feed{display:flex;align-items:baseline;gap:8px;background:#0a0d11;border:1px solid #05070a;padding:7px 10px 6px;margin-top:2px}
+  .dro-feed .lbl{font-size:10px;letter-spacing:.1em;color:#6b5a34;text-transform:uppercase;margin:0}
+  .dro-feed .val{font:600 22px/1 Consolas,"Cascadia Code",monospace;color:var(--accent2);margin-left:auto}
+  .dro-feed .unit{font-size:10px;color:#4a5560}
+  .dro .axis .ax-lim.on .lim-dot{background:#ff3b30;border-color:#ff6b60;
+    box-shadow:0 0 8px rgba(255,59,48,.85),inset 0 0 2px rgba(0,0,0,.4)}
+  .dro .axis .ax-lim.on .lim-txt{color:#ff6b60}
+  /* Handfahrt-Schrittweite: freies Zahlenfeld + Preset-Dropdown nebeneinander */
+  .stepcombo{display:inline-flex;align-items:stretch;gap:0}
+  .stepcombo input{border-top-right-radius:0;border-bottom-right-radius:0}
+  .stepcombo .stepsel{width:26px;padding:0;border-left:0;border-top-left-radius:0;border-bottom-left-radius:0;
+    text-align:center;color:var(--muted);cursor:pointer;-webkit-appearance:none;appearance:none;background:var(--panel2)}
+  .stepcombo .stepsel:hover{color:var(--txt);border-color:var(--accent)}
+  .jog-axes{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+  .jog-axes .col{display:flex;flex-direction:column;gap:5px}
+  .jog-axes .col .name{text-align:center;font:13px Consolas,monospace;color:var(--accent2)}
+  .jog-axes .col .tw{text-align:center;font-size:10px;color:var(--muted);margin-top:-3px}
+  #machineView input[type=range]{flex:1;accent-color:var(--wire)}
+  .wire-val{font:18px Consolas,monospace;min-width:52px;text-align:right;color:var(--accent2)}
+  #mProg{width:100%;height:11px;accent-color:var(--accent2)}
+  .grblConsole{background:#080b0e;border:1px solid var(--line);border-radius:6px;height:170px;
+    overflow:auto;padding:7px 9px;font:12px/1.45 Consolas,"Cascadia Code",monospace;
+    color:#8fd0a8;white-space:pre-wrap;word-break:break-word}
+  .grblConsole .tx{color:#7fb0ff} .grblConsole .err{color:var(--bad)} .grblConsole .sys{color:var(--muted)}
+  .estop{width:100%;font-size:14px;font-weight:800;letter-spacing:.14em;color:#111;
+    border:2px solid #000;border-radius:9px;padding:13px;cursor:pointer;
+    background:repeating-linear-gradient(-45deg,#ffc400 0 22px,#111 22px 44px)}
+  .estop span{background:#ffc400;padding:2px 12px;border-radius:4px}
+  .estop:active{filter:brightness(.9)}
+
+  /* ---------- GRBL-Einstellungen ($$) ---------- */
+  /* Frei schwebendes Fenster (z. B. 3D-Ansicht DXF-Formen): verschiebbar am Kopf, Größe per Ecke */
+  .floatwin{position:fixed;z-index:60;display:none;flex-direction:column;min-width:320px;min-height:220px;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.45);
+    resize:both;overflow:hidden}
+  .floatwin .head{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line);
+    cursor:move;user-select:none;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .floatwin .head .ttl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .floatwin .head select{cursor:pointer;font-size:11px;padding:2px 4px;background:var(--bg,#10151c);color:var(--txt);border:1px solid var(--line);border-radius:4px;width:auto}
+  .floatwin .head button{cursor:pointer;font-size:11px;padding:2px 8px;background:transparent;color:var(--txt);
+    border:1px solid var(--line);border-radius:6px}
+  .floatwin .body{flex:1;position:relative;min-height:0}
+  .floatwin .body>canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;
+    align-items:center;justify-content:center;padding:20px;z-index:50}
+  .modal-backdrop.open{display:flex}
+  .modal{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    width:min(760px,100%);max-height:88vh;display:flex;flex-direction:column}
+  .modal .head{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--line)}
+  .modal .head h2{font-size:12px;letter-spacing:.13em;text-transform:uppercase;margin:0}
+  .modal .body{overflow:auto;padding:6px 13px 12px}
+  .modal .foot{padding:11px 13px;border-top:1px solid var(--line)}
+  .modal input{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+    border-radius:5px;padding:5px 7px;font-size:12px}
+  /* Reiter „Projektübersicht": ohne Seitenleiste, mittiges Akkordeon (overview.js) */
+  #app.nosidebar{grid-template-columns:0 1fr}
+  #app.nosidebar #side{display:none}
+  #app.nosidebar #main{grid-column:2}   /* sonst rückt #main in die 0-px-Spalte */
+  .ovwrap{max-width:1180px}
+  /* Hintergrund: Simulator-Schnappschuss (overview.js applyBackdrop) hinter dem
+     gesamten Ansichtfenster; dunkle Überlagerung hält Text lesbar, Karten leicht
+     durchscheinend, damit das Bild sichtbar bleibt. */
+  #materialView.has-sim{background-size:contain;background-position:center bottom;background-repeat:no-repeat}
+  #materialView.has-sim::before{content:'';position:absolute;inset:0;
+    background:linear-gradient(rgba(11,14,18,.72),rgba(11,14,18,.82));pointer-events:none;z-index:0}
+  #materialView.has-sim .mwrap{position:relative;z-index:1}
+  #materialView.has-sim .mcard{background:color-mix(in srgb,var(--panel) 62%,transparent);backdrop-filter:blur(2px)}
+  #materialView.has-sim .ov-sec{background:color-mix(in srgb,var(--panel) 66%,transparent)}
+  #materialView.has-sim .ov-head{background:color-mix(in srgb,var(--panel2) 60%,transparent)}
+  .ov-group{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin:14px 2px 4px}
+  .ov-sec{border:1px solid var(--line);border-radius:8px;margin:6px 0;overflow:hidden;background:var(--panel)}
+  .ov-sec.open{box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent)}
+  .ov-head{display:flex;align-items:baseline;gap:8px;padding:9px 12px;cursor:pointer;user-select:none;background:var(--panel2)}
+  .ov-fixed>.ov-head{cursor:default}
+  .ov-fixed>.ov-head:hover{background:var(--panel2)}
+  .ov-head:hover{background:color-mix(in srgb,var(--accent) 12%,var(--panel2))}
+  .ov-caret{color:var(--accent);font-size:11px;flex:0 0 auto}
+  .ov-title{font-weight:600;font-size:13px;color:var(--txt);white-space:nowrap}
+  .ov-badge{font-size:11px;color:var(--accent);border:1px solid var(--accent);border-radius:10px;padding:0 6px;white-space:nowrap}
+  .ov-info{color:var(--muted);font-size:12px;margin-left:auto;text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ov-sec.open .ov-info{white-space:normal}
+  .ov-body{padding:10px 12px;border-top:1px solid var(--line)}
+  .ov-body.ov-two{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:10px 22px}
+  @media (max-width:900px){ .ov-body.ov-two{grid-template-columns:1fr} }
+  .ov-set{display:grid;gap:8px;align-content:start}
+  .ov-inf{min-width:0}
+  .ov-cats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+  .ov-cats button.active{background:var(--panel2);border-color:var(--accent);color:var(--accent)}
+  .ov-catbody{border-top:1px solid var(--line);padding-top:6px}
+  .ov-bar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;margin:8px 2px}
+  .ov-sum{color:var(--txt);font-size:12px;margin-left:auto}
+  #projOverview summary{list-style:none}
+  #projOverview summary::-webkit-details-marker{display:none}
+  #projOverview summary::before{content:'▸';color:var(--muted);font-size:10px;margin-right:2px}
+  #projOverview details[open]>summary::before{content:'▾'}
+  .set-table{width:100%;border-collapse:collapse;font-size:12px}
+  .set-table th{position:sticky;top:0;background:var(--panel2);text-align:left;color:var(--muted);
+    font-size:11px;letter-spacing:.07em;text-transform:uppercase;padding:7px;border-bottom:1px solid var(--line)}
+  .set-table td{padding:4px 7px;border-bottom:1px solid #232a33}
+  .set-table td.num{font-family:Consolas,monospace;color:var(--accent2);white-space:nowrap}
+  .set-table tr.dirty td{background:rgba(255,180,84,.12)}
+  .set-table input{width:130px;text-align:right}
+  .close-x{margin-left:auto;background:none;border:none;color:var(--muted);font-size:20px;
+    line-height:1;cursor:pointer;padding:0 5px}
+  /* Profilbearbeitung als Fenster (je Profil aus dem Tragflächendesigner) */
+  .profedit-modal{width:min(1040px,100%);height:min(700px,88vh)}
+  .profedit-body{display:flex;gap:12px;flex:1;min-height:0;padding:12px 13px}
+  .profedit-canvas{position:relative;flex:1;min-width:0;border:1px solid var(--line);
+    border-radius:8px;overflow:hidden;background:var(--panel2)}
+  .profedit-canvas canvas{width:100%;height:100%;display:block}
+  .profedit-ctrl{width:264px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:9px}
+  #cadToolbar{position:absolute;left:0;right:0;top:0;height:92px;z-index:4;display:flex;gap:8px;align-items:stretch;padding:5px 8px;
+    overflow-x:auto;overflow-y:hidden;background:rgba(10,14,19,.96);border-bottom:1px solid var(--line);box-sizing:border-box}
+  .cadTbGroup{display:flex;flex-direction:column;flex:0 0 auto;border:1px solid var(--line);border-radius:7px;background:rgba(255,255,255,.03);overflow:hidden}
+  .cadTbCap{font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.02em;white-space:nowrap;text-align:center;
+    padding:2px 8px;background:rgba(255,255,255,.05);border-bottom:1px solid var(--line)}
+  .cadTbBtns{display:grid;grid-auto-flow:column;gap:3px;padding:4px 5px}
+  .cadTbBtn{width:30px;height:27px;padding:0;display:inline-flex;align-items:center;justify-content:center;font-size:15px;line-height:1}
+  .cadTbBtn.on{background:var(--accent);color:#04121f;border-color:var(--accent)}
+  #cCad{top:92px!important;height:calc(100% - 92px)!important}
+  .cadOpt{cursor:pointer;border:1px solid var(--line);border-radius:4px;padding:0 5px;background:#12181f;color:var(--txt)}
+  .cadOpt b{color:var(--accent)}
+  .cadOpt:hover{border-color:var(--accent);background:#182230}
+  .cadSug{cursor:pointer;padding:1px 4px;border-radius:3px}
+  .cadSug:hover{background:#182230}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>AI <span>Foam Cut</span> · Tragflächen & 4-Achs Heißdraht-CNC</h1>
+    <span id="appVer" title="Programmversion" hidden></span>
+    <span id="machName" title="Beim Start gewählte Maschine / Einstellungsdatei" hidden></span>
+    <button id="btnMatDb" title="Werkstoff-Datenbank: Werkstoffe mit allen Eigenschaften anlegen und pflegen">Werkstoff-Datenbank</button>
+    <div class="sp"></div>
+    <input id="projName" placeholder="Projektname" title="Projektname – wird oben rechts angezeigt und als Dateiname beim Speichern vorgeschlagen">
+    <button id="btnLoad" title="Laden: Projekt, Tragfläche importieren, Einstellungen, zuletzt geladen">Laden ▾</button>
+    <button id="btnSave" title="Speichern: Projekt (Strg+S) und Einstellungen">Speichern ▾</button>
+    <button id="btnSettings" title="Farben & Darstellung einstellen">⚙ Einstellungen</button>
+  </header>
+
+  <div class="tabs">
+    <!-- STANDARD-Gliederung der Reiterleiste (tabmenu.js liest sie hier ab): eigene Reiter
+         und Aufklappmenüs (.tab-more, Name in data-group). Die Einträge bleiben
+         <button data-view> (Build-Tool entfernt sie einzeln; Menüs ohne Reiter entfallen).
+         tabmenu.js baut die Leiste beim Start nach der Nutzer-Gliederung um
+         (Einstellungen → Menüleiste). -->
+    <button data-view="material" class="active">Projektübersicht und Werkstoffzuordnung</button>
+    <div class="tab-more" data-group="Tragflächen">
+      <button type="button" class="tab-more-btn">Tragflächen<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="wing">Tragflächendesigner</button>
+        <button data-view="neg">Negativschalendesign</button>
+        <button data-view="core">Kerndesign</button>
+      </div>
+    </div>
+    <div class="tab-more" data-group="Komplexe Formen">
+      <button type="button" class="tab-more-btn">Komplexe Formen<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="dxf">DXF-Formen</button>
+        <button data-view="model">3D-Modell</button>
+        <button data-view="schrift">Schriften</button>
+      </div>
+    </div>
+    <div class="tab-more" data-group="Spezial Module">
+      <button type="button" class="tab-more-btn">Spezial Module<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="rib">Rippendesigner</button>
+        <button data-view="rf">Rippenfläche</button>
+        <button data-view="cad">CAD-Bearbeitung</button>
+        <button data-view="form">Formenbau</button>
+        <button data-view="rumpf">Rumpf</button>
+        <button data-view="fraese">Fräse</button>
+      </div>
+    </div>
+    <button data-view="gcode">G-Code</button>
+    <button data-view="cut">Schneiden</button>
+    <button data-view="machine">Maschine</button>
+  </div>
+
+  <aside id="side"></aside>
+
+  <div id="main">
+    <div id="views">
+      <div class="view" id="wingView">
+        <div class="wing-stack">
+          <div class="wing-pane">
+            <span class="pane-label">Grundriss — Draufsicht (Flugrichtung oben)</span>
+            <div class="pane-toggles" id="planToggles" style="top:auto;bottom:10px;left:10px">
+              <button id="wing3dOpenBtn" type="button" title="3D-Ansicht der geschnittenen, zusammengebauten Segmente in eigenem Fenster">3D-Ansicht…</button>
+            </div>
+            <canvas id="cPlan"></canvas>
+          </div>
+          <div class="wing-pane">
+            <span class="pane-label">Profile — Querschnitt & Block</span>
+            <div class="pane-toggles" id="profToggles">
+              <label>Profile: <select data-show><option value="both">innen + außen</option><option value="inner">nur innen</option><option value="outer">nur außen</option></select></label>
+              <label class="prof-seg-menu">Segmente:
+                <button type="button" class="prof-seg-btn" id="profSegHead"><span id="profSegLabel">Segment 1</span><span id="profSegChevron">▾</span></button>
+                <div class="prof-seg-list" id="profSegList"></div>
+              </label>
+              <label><input type="checkbox" data-cfg="showCore"> Beplankungslinie</label>
+              <label><input type="checkbox" data-cfg="showKerf"> Schnittspur (Abbrand)</label>
+              <label><input type="checkbox" data-cfg="kerfHeat"> Abbrand-Verteilung farbig</label>
+              <label title="Band in der echten Breite des Schnittspalts unter der Abbrandlinie (nur diese Ansicht; Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="core"> Abbrand in wahrer Dicke</label>
+              <label><input type="checkbox" data-cfg="showBlock"> Styroporblock</label>
+              <label><input type="checkbox" data-cfg="showNums"> Punktnummern</label>
+              <label><input type="checkbox" data-cfg="showDim"> Bemaßung</label>
+              <button type="button" class="to-gcode" id="coreToGcode" data-gsrc="core" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+              <button type="button" id="coreMeas" style="align-self:flex-start" title="Messwerkzeug: Abstand, Kette, Winkel und Radius direkt in der Ansicht messen (Klick setzt Punkte, Fang auf Konturpunkte und -kanten)">📏 Messen</button>
+            </div>
+            <canvas id="cProf"></canvas>
+            <div class="simlegend" id="coreMeasPanel" style="left:auto;right:10px;top:34px;width:290px;max-width:290px;pointer-events:auto;z-index:4;display:none"></div>
+          </div>
+          <div class="wing-pane wing-wide">
+            <span class="pane-label">Aufriss — Ansicht von vorne (V-Form)</span>
+            <canvas id="cElev"></canvas>
+          </div>
+          <div class="core-split" id="coreSplit" title="Ziehen: Ansichten teilen"></div>
+          <div class="wing-col-split" id="wingColSplit" title="Ziehen: Grundriss/Profile breiter/schmaler"></div>
+          <div class="wing-row-split" id="wingRowSplit" title="Ziehen: obere Ansichten/Aufriss höher/niedriger"></div>
+        </div>
+      </div>
+      <div class="view" id="matdbView">
+        <div class="mwrap">
+          <div class="mcard">
+            <span class="lbl">Werkstoff-Datenbank</span>
+            <div class="hint">Werkstoffe werden hier mit allen Eigenschaften (ohne Dimension) angelegt und bearbeitet — links in der Seitenleiste. Werkstoff und Dicke werden im Reiter „Projektübersicht“ je Tragfläche zugewiesen.</div>
+            <div id="matPropsDb"></div>
+          </div>
+        </div>
+      </div>
+      <div class="view active" id="materialView">
+        <div class="mwrap ovwrap">
+          <div class="mcard">
+            <span class="lbl">Projektübersicht und Werkstoffzuordnung</span>
+            <div class="hint">Alles zugeklappt: Jede Zeile zeigt nur eine Kurzinfo. Zeile anklicken, um Einstellungen und Details ein- oder auszublenden (Projekt, je Tragfläche Design/Werkstoff/Blockdicke/Gewicht mit Segmenttabelle und Gewichtsschätzung, Werkstoff für DXF-Formen und 3D-Modell, Schneideinstellungen).</div>
+            <div id="projOverview"></div>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="gcodeView">
+        <div class="gsplit">
+          <div class="gsim">
+            <canvas id="cSim"></canvas>
+            <div class="simctx" id="simCtx"></div>
+            <div class="simlegend" id="simLegend" style="top:auto;bottom:10px">
+              <div data-show="towers|paths"><span class="sw" data-pal="towerL" style="background:#4aa3ff"></span>Portal links · Schneideweg</div>
+              <div data-show="towers|paths"><span class="sw" data-pal="towerR" style="background:#ffb454"></span>Portal rechts · Schneideweg</div>
+              <div><span class="sw" data-pal="wire" style="background:#ff5a3c"></span>Heißdraht</div>
+              <div data-show="profile"><span class="sw" data-pal="profile" style="background:#57d38c"></span>Flächenprofil</div>
+              <div><span class="sw" data-pal="origin" style="background:#ff3b3b"></span>Maschinen-Nullpunkt (X0/Y0)</div>
+              <div class="hint">Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom (am Cursor) · Würfel-Klick = Achsenansicht · Doppelklick = zurück</div>
+            </div>
+          </div>
+          <div id="gcodeText"></div>
+          <textarea id="gcodeEdit" style="display:none" spellcheck="false"></textarea>
+        </div>
+        <div class="simbar">
+          <button class="primary" id="simPlay">▶ Start</button>
+          <button id="simStop">⏹ Zurück</button>
+          <button id="simTop" title="Draufsicht: Blick von oben, Profilnase oben (Flugrichtung)">⬇ Draufsicht</button>
+          <button id="simSide" title="Seitenansicht: Blick längs der Spannweite auf das Profil (Sehne waagerecht)">➡ Seitenansicht</button>
+          <button id="simFront" title="Vorderansicht: Blick längs der Sehne, Spannweite waagerecht">⬅ Vorderansicht</button>
+          <button id="simView0" title="Ansicht zurücksetzen: Standard-Schrägansicht, Zoom und Verschiebung auf Ausgangswert">⟲ Ansicht</button>
+          <button class="primary" id="simToCut" style="display:none" title="Zum Reiter „Schneiden“ wechseln und dieses Programm (gewählte Quelle und Segment) dort als Quelle übernehmen (Strg+C)">✂ Schneiden</button>
+          <label class="mfield">Tempo
+            <select id="simSpeed">
+              <option value="1">1×</option><option value="5">5×</option>
+              <option value="10">10×</option><option value="25" selected>25×</option>
+              <option value="50">50×</option><option value="200">200×</option>
+            </select>
+          </label>
+          <input type="range" id="simSeek" min="0" max="1000" value="0" style="flex:1;min-width:120px">
+          <label class="ck"><input type="checkbox" id="simTowers" checked> Türme</label>
+          <label class="ck"><input type="checkbox" id="simPaths" checked> Schneidewege</label>
+          <label class="ck"><input type="checkbox" id="simBlock" checked> Block</label>
+          <label class="ck"><input type="checkbox" id="simSurface" checked> Schnittfläche</label>
+          <label class="ck"><input type="checkbox" id="simProfile"> Flächenprofil</label>
+          <label class="ck"><input type="checkbox" id="simDim" checked> Bemaßung</label>
+          <span id="simInfo" class="hint">kein Programm</span>
+        </div>
+        <div class="gbar">
+          <button id="btnLoadGcode" title="Fertige G-Code-Datei in Anzeige und 3D-Simulation laden">📂 G-Code laden…</button>
+          <button class="primary" id="btnDlGcode">G-Code (.gcode) herunterladen</button>
+          <button id="btnCopy">In Zwischenablage</button>
+          <button id="btnEditGcode" title="G-Code von Hand bearbeiten">✏ Bearbeiten</button>
+          <button id="btnEditApply" class="primary" style="display:none" title="Bearbeiteten G-Code übernehmen">✓ Übernehmen</button>
+          <button id="btnEditCancel" style="display:none" title="Bearbeitung verwerfen">✕ Abbrechen</button>
+          <button id="btnRegenGcode" title="Manuelle Änderungen verwerfen und aus den Parametern neu erzeugen">↻ Neu erzeugen</button>
+          <span id="gInfo" class="hint" style="align-self:center"></span>
+        </div>
+      </div>
+
+      <div class="view" id="negView">
+        <!-- Oben der Aufriss (Ansicht von vorne) über die ganze Spannweite, unten der
+             Querschnitt des aktiven Segments. Teiler = #negElevSplit (cfg.negViewSplit). -->
+        <div class="wing-stack core-mode" id="negStack">
+          <div class="wing-pane">
+            <span class="pane-label">Aufriss — Ansicht von vorne (Negativschalen über die Spannweite)</span>
+            <canvas id="cNegElev"></canvas>
+          </div>
+          <div class="wing-pane" style="border-left:0">
+            <span class="pane-label">Negativschale — Querschnitt (analog DXF)</span>
+            <div class="pane-toggles" id="negToggles">
+              <label>Profile: <select data-show><option value="both">innen + außen</option><option value="inner">nur innen</option><option value="outer">nur außen</option></select></label>
+              <label title="Band in der echten Breite des Schnittspalts unter der Abbrandlinie (nur diese Ansicht; Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="neg"> Abbrand in wahrer Dicke</label>
+              <button type="button" class="to-gcode" id="negToGcode" data-gsrc="neg" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+              <button type="button" id="negMeas" style="align-self:flex-start" title="Messwerkzeug: Abstand, Kette, Winkel und Radius direkt in der Ansicht messen (Klick setzt Punkte, Fang auf Konturpunkte und -kanten)">📏 Messen</button>
+            </div>
+            <canvas id="cNeg"></canvas>
+            <div class="simlegend" id="negMeasPanel" style="left:auto;right:10px;top:34px;width:290px;max-width:290px;pointer-events:auto;z-index:4;display:none"></div>
+          </div>
+          <div class="core-split" id="negElevSplit" style="display:block" title="Ziehen: Aufriss/Querschnitt teilen"></div>
+        </div>
+      </div>
+
+      <div class="view" id="ribView">
+        <div class="wing-stack core-mode" id="ribStack">
+          <div class="wing-pane">
+            <span class="pane-label">Grundriss — Lage der Rippen &amp; Holme</span>
+            <canvas id="cRibPlan"></canvas>
+          </div>
+          <div class="wing-pane" style="border-left:0">
+            <span class="pane-label">Rippen — aus dem Tragflächendesign abgeleitet</span>
+            <div class="simlegend" id="ribInfo" style="left:10px;right:auto;top:10px;max-width:340px">Keine Tragfläche.</div>
+            <canvas id="cRib"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="rfView">
+        <div class="wing-stack core-mode" id="rfStack">
+          <div class="wing-pane">
+            <span class="pane-label">Grundriss — Rippenlagen, Holme, Ruder &amp; Geodäten</span>
+            <canvas id="cRfPlan"></canvas>
+          </div>
+          <div class="wing-pane" style="border-left:0">
+            <span class="pane-label">Bauteile — geschachtelt wie im DXF</span>
+            <div class="simlegend" id="rfInfo" style="left:10px;right:auto;top:10px;max-width:360px">Keine Tragfläche.</div>
+            <canvas id="cRf"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="dxfView">
+        <div class="wing-stack core-mode" id="dxfStack">
+          <div class="wing-pane">
+            <span class="pane-label" id="dxfPlanLabel">Grundriss — alle Segmente</span>
+            <div class="pane-toggles" id="dxfPlanToggles">
+              <label>Ansicht: <select id="dxfPlanMode">
+                <option value="plan">Grundriss</option>
+                <option value="elev">Aufriss</option>
+                <option value="front">Vorderansicht (Schneidepfade)</option>
+              </select></label>
+              <button id="dxf3dOpenBtn" type="button" title="3D-Ansicht der geschnittenen, zusammengebauten Segmente in eigenem Fenster">3D-Ansicht…</button>
+              <button type="button" class="to-gcode" id="dxfToGcode" data-gsrc="dxf" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+            </div>
+            <canvas id="cDxfPlan"></canvas>
+          </div>
+          <div class="wing-pane" style="border-left:0">
+            <span class="pane-label">DXF-Formen — INNEN &amp; AUSSEN mit Synchronpunkten</span>
+            <div class="simlegend" id="dxfInfo" style="left:10px;right:auto;top:10px;max-width:280px"></div>
+            <canvas id="cDxf"></canvas>
+            <div id="dxfCoordBar" style="position:absolute;left:10px;bottom:10px;display:none;gap:8px;align-items:center;z-index:5;background:rgba(10,14,19,.82);border:1px solid var(--line);border-radius:7px;padding:5px 8px">
+              <span id="dxfCoordRead" class="hint" style="margin:0;font-family:Consolas,monospace;white-space:nowrap"></span>
+              <input id="dxfCoordInput" type="text" placeholder="x,y · @dx,dy · L&lt;°" title="Exakte Eingabe: absolut x,y — relativ @dx,dy — polar Länge&lt;Winkel. Enter setzt den Punkt." style="width:160px;font-family:Consolas,monospace;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:12px">
+            </div>
+          </div>
+          <div class="core-split" id="dxfSplit" style="display:block" title="Ziehen: Grundriss/Profile teilen"></div>
+        </div>
+      </div>
+
+      <div class="view" id="dxfexportView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">DXF-Export — Vorschau der ausgewählten Layer</span>
+          <div class="simlegend" id="dxfExpInfo" style="left:10px;right:auto;top:10px;max-width:320px"></div>
+          <canvas id="cExport"></canvas>
+        </div>
+      </div>
+
+      <div class="view" id="cadView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <div id="cadToolbar"></div>
+          <span class="pane-label" style="top:100px">CAD-Bearbeitung — Import aus DXF-Formen/Rippen, bearbeiten, als DXF exportieren</span>
+          <div class="simlegend" id="cadInfo" style="left:10px;right:auto;top:102px;max-width:320px;transition:opacity .3s"></div>
+          <button id="cadCmdToggle" title="Befehlsliste ein-/ausblenden" style="position:absolute;right:10px;top:102px;z-index:6">⌨ Befehle</button>
+          <div class="simlegend" id="cadCmdList" style="left:auto;right:10px;top:136px;max-width:260px;display:none;z-index:6"></div>
+          <canvas id="cCad"></canvas>
+          <div id="cadDynIn" style="display:none;position:absolute;z-index:6;pointer-events:none;background:rgba(10,14,19,.92);border:1px solid var(--accent);border-radius:6px;padding:4px 7px;font:11px/1.35 Consolas,'Cascadia Code',monospace;color:var(--txt);max-width:340px">
+            <div class="dynPrompt" style="color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+            <input id="cadDynInput" type="text" style="pointer-events:none;width:150px;font:inherit;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px;padding:2px 5px;margin:2px 0">
+            <div class="dynVals" style="color:var(--accent2);white-space:nowrap"></div>
+          </div>
+          <div id="cadCoordBar" style="position:absolute;left:10px;bottom:10px;z-index:5;background:rgba(10,14,19,.88);border:1px solid var(--line);border-radius:7px;padding:5px 8px;width:600px;max-width:calc(100% - 20px);font-family:Consolas,'Cascadia Code',monospace;font-size:12px">
+            <div id="cadCmdSuggest" style="display:none;margin-bottom:4px;border-bottom:1px solid var(--line);padding-bottom:4px"></div>
+            <div id="cadCmdHist" title="Befehlsverlauf" style="max-height:52px;overflow-y:auto;color:var(--muted);white-space:pre-wrap;line-height:1.35"></div>
+            <div id="cadPromptLine" style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:3px 0 4px;color:var(--txt);line-height:1.4"></div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span style="display:inline-flex;gap:2px" title="Koordinaten-Modus der Befehlszeile: Abs = x,y vom Ursprung · Rel = x,y bzw. Länge&lt;Winkel vom letzten Punkt. Präfix @ erzwingt relativ, # erzwingt absolut."><button id="cadAbsBtn" type="button" style="padding:2px 6px;font-size:11px">Abs</button><button id="cadRelBtn" type="button" style="padding:2px 6px;font-size:11px">Rel</button></span>
+              <input id="cadCoordInput" type="text" placeholder="Befehl oder Wert eingeben …" title="Befehlszeile: Befehl tippen (l, pl, ci, rec, o …), Option des laufenden Befehls (S, Z, D …) oder Punkt/Wert eingeben (x,y absolut · @dx,dy relativ · Länge&lt;Winkel polar). Enter bestätigt, Enter ohne Eingabe = weiter/beenden/wiederholen, Esc = Abbruch." style="flex:1;min-width:0;font-family:inherit;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:4px 6px;font-size:12px">
+              <span id="cadCoordRead" class="hint" style="margin:0;white-space:nowrap"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="modelView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">3D-Modell — Segmentzerlegung</span>
+          <div class="simlegend" id="modelInfo" style="left:10px;right:auto;top:10px;max-width:340px">Keine Datei geladen. STL laden.</div>
+          <canvas id="cModel"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="m3dViewToggle" title="Zwischen 3D-Ansicht und lagerichtigen Schnittprofilen umschalten">▦ Schnittprofile</button>
+            <button id="m3dViewPairs" title="Ein Segmentpaar (zwei Stirnprofile) mit Schnittspur anzeigen">◫ Segmentpaar</button>
+            <button id="m3dViewPlate" title="Platte: mehrere Segmente anordnen, verschieben und Verbindungen bearbeiten">▤ Platte</button>
+            <button id="m3dIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="m3dTop">⬇ Draufsicht</button>
+            <button id="m3dSide">➡ Seitenansicht</button>
+            <button id="m3dFront">⬅ Vorderansicht</button>
+            <button type="button" class="to-gcode primary" id="m3dToGcode" data-gsrc="model" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+            <label class="ck"><input type="checkbox" id="m3dPlanes" checked> Schnittebenen</label>
+            <label class="ck"><input type="checkbox" id="m3dWire"> Drahtgitter</label>
+            <span class="hint" style="align-self:center">Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Rad-Doppelklick = Drehpunkt · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="schriftView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Schriften — Buchstaben, Verbindung und Schnittbahn (Ansicht von vorne)</span>
+          <div class="simlegend" id="schriftInfo" style="left:10px;right:auto;top:34px;max-width:420px;z-index:3">Kein Text.</div>
+          <canvas id="cSchrift" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="scFit" title="Ansicht einpassen (auch Doppelklick in die Ansicht)">⬚ Einpassen</button>
+            <label class="ck"><input type="checkbox" id="scShowFill" checked> Füllung</label>
+            <label class="ck"><input type="checkbox" id="scShowCut" checked> Schnittbahn</label>
+            <label class="ck" title="Band in der echten Breite des Schnittspalts unter der Schnittbahn"><input type="checkbox" id="scShowKerfTrue" data-ktrue="schrift"> Abbrand in wahrer Dicke</label>
+            <label class="ck"><input type="checkbox" id="scShowNum" checked> Reihenfolge</label>
+            <label class="ck"><input type="checkbox" id="scShowSkel"> Skelett</label>
+            <button id="scDxf" title="Buchstaben-Konturen, Schnittbahn und Block als DXF speichern">DXF…</button>
+            <button id="scToCad" title="Buchstaben-Konturen in den Reiter „CAD-Bearbeitung“ laden">In CAD</button>
+            <button type="button" class="to-gcode primary" id="scToGcode" data-gsrc="schrift" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+            <span class="hint" style="align-self:center">Ziehen = schieben · Rad = Zoom · Doppelklick = einpassen</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="formView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Formenbau — Urmodell / Negativform (STL)</span>
+          <div class="simlegend" id="formInfo" style="left:10px;right:auto;top:10px;max-width:380px">Keine Tragfläche vorhanden.</div>
+          <canvas id="cForm" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simlegend" id="formCutPanel" style="left:10px;right:auto;top:auto;bottom:46px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <div class="simlegend" id="formCurvPanel" style="left:auto;right:10px;top:auto;bottom:46px;max-width:320px;pointer-events:auto;z-index:4;display:none"></div>
+          <div class="simlegend" id="formMeasPanel" style="left:auto;right:130px;top:10px;bottom:auto;width:300px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="formProf" title="Vergleichsfenster Profilglättung öffnen (Rohpunkte / geglättete Kurve / Referenz)">▦ Profilvergleich…</button>
+            <button id="formCut" title="Schnittansicht: 2D-Schnitt durch das Modell ein-/ausblenden (Ebene und Lage im Fenster links unten)">✂ Schnitt</button>
+            <button id="formCurv" title="Krümmungsanalyse: Krümmungskamm der Profilschnitte in 3D alle x mm über die Spannweite (Einstellungen im Fenster rechts unten)">∿ Krümmung</button>
+            <button id="formZebra" title="Zebra-Analyse: Reflexionsstreifen auf der Fläche (Flächengüte prüfen, nur WebGL-Darstellung; Einstellungen im Fenster rechts unten)">▤ Zebra</button>
+            <button id="formMeas" title="Messwerkzeug: Abstand, Kette, Winkel, Radius und Wandstärke direkt am 3D-Modell messen (Klick setzt Punkte auf der Oberfläche)">📏 Messen</button>
+            <button id="formWlDraw" title="Winglet aus Zeichnung: Nasenlinie und Endleiste in Aufriss, Draufsicht und Seitenansicht zeichnen (nur Ziel Urmodell)">✎ Winglet-Zeichnung</button>
+            <button id="formIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="formTop">⬇ Draufsicht</button>
+            <button id="formSide">➡ Seitenansicht</button>
+            <button id="formFront">⬅ Vorderansicht</button>
+            <span class="hint" style="align-self:center">Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="rumpfView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Rumpf — Loft-Fläche aus Bezier-Splines (Seitenansicht, Draufsicht, Spanten)</span>
+          <div class="simlegend" id="rumpfInfo" style="left:10px;right:auto;top:10px;max-width:420px;z-index:3">Kein Rumpf.</div>
+          <canvas id="cRumpf" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <input type="file" id="fileRumpfImg" accept="image/*" style="display:none">
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="rumpfIso" title="3D-Ansicht (frei drehen)">⬚ 3D</button>
+            <button id="rumpf3dTop" title="3D von oben">⬇ 3D oben</button>
+            <button id="rumpfSideV" title="Seitenansicht bearbeiten: Ober-/Unterkante (Splines mit Tangenten) und Höhe der breitesten Stelle je Station">➡ Seitenansicht</button>
+            <button id="rumpfTopV" title="Draufsicht bearbeiten: halbe Breite je Station (Spline mit Tangenten)">⬇ Draufsicht</button>
+            <button id="rumpfSecV" title="Spant: Querschnitt an beliebiger X-Lage (Pfeiltasten), Export als DXF">✂ Spant</button>
+            <span class="hint" style="align-self:center">3D: Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
+
+      <div class="view" id="fraeseView">
+        <div class="mwrap cutwrap">
+
+          <div class="cutcol cutcol-sim">
+            <div class="mcard mcard-sim">
+              <span class="lbl">CAM-Vorschau · Draufsicht · folgt der Ausführung</span>
+              <div class="msim"><canvas id="cFraese"></canvas><div class="simlegend" id="frInfo" style="left:10px;right:auto;max-width:300px">Keine Geometrie.</div></div>
+              <div class="mrow" style="margin-top:8px">
+                <button class="primary" id="frSimPlay">▶ Simulieren</button>
+                <button id="frSimReset">⏹ Zurück</button>
+                <label class="mfield" title="Zeitraffer der Simulation">Tempo ×
+                  <input id="frSimSpeed" type="number" value="10" min="1" max="200" style="width:64px">
+                </label>
+                <div class="sp"></div>
+                <button id="frFit">⤢ Einpassen</button>
+              </div>
+              <span class="hint">„Simulieren" fährt das CAM-Programm als Trockenlauf ab. Beim echten Lauf folgt die Werkzeugmarke der Maschinenposition. Klick auf eine Kontur = Job markieren · Ziehen = verschieben · Rad = Zoom · Doppelklick = einpassen.</span>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Position (Werkstück-Koordinaten, mm)</span>
+              <div class="dro fr-dro" id="frDro"></div>
+              <div class="mrow" style="margin-top:10px">
+                <button id="frHome">Referenzfahrt (Homing)</button>
+                <button id="frHomeStop" style="display:none">⏹ Referenzfahrt stoppen</button>
+                <button id="frUnlock">Alarm/Fehler quittieren ($X)</button>
+                <button id="frGoZero2">⌂ Fahren auf Nullpunkt</button>
+              </div>
+              <div class="mrow" style="margin-top:10px">
+                <button class="primary" id="frSetZero">Nullpunkt setzen (X0 Y0 Z0)</button>
+                <button id="frSetZeroXY">nur X/Y nullen</button>
+                <button id="frSetZeroZ">nur Z nullen</button>
+                <button id="frProbe">⤓ Z-Taster</button>
+              </div>
+              <span class="hint">Nullpunkt = Werkstück-Ecke (X0/Y0) und Werkstückoberkante (Z0). Fräser mit der Handfahrt an die Ecke fahren und auf die Oberfläche antasten, dann „Nullpunkt setzen". „Z-Taster": fährt langsam nach unten bis zum Kontakt und setzt Z auf die Plättchendicke (Seitenmenü „Fräse: Maschine"). „Fahren auf Nullpunkt" hebt zuerst Z auf Sicherheitshöhe, dann X/Y.</span>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Handfahrt</span>
+              <div class="mrow" style="margin-bottom:10px">
+                <label class="mfield">Schritt [mm]
+                  <span class="stepcombo">
+                    <input id="frStep" type="number" value="1" min="0.01" step="any" style="width:78px">
+                    <select id="frStepSel" class="stepsel" title="Vorschlag wählen" aria-label="Schrittweite wählen">
+                      <option value="" selected>▾</option>
+                      <option>0.01</option><option>0.1</option><option>1</option><option>5</option><option>10</option>
+                      <option>50</option><option>100</option>
+                    </select>
+                  </span>
+                </label>
+                <label class="mfield">Vorschub [mm/min]
+                  <input id="frJogFeed" type="number" value="1000" min="1" style="width:110px">
+                </label>
+                <span class="hint">Kurz tippen = ein Schritt · gedrückt halten = Dauerfahrt.</span>
+              </div>
+              <div class="frjog-wrap" id="frJog"></div>
+            </div>
+          </div>
+
+          <div class="cutcol cutcol-ctrl">
+            <div class="mcard">
+              <span class="lbl">Verbindung · GRBL / grblHAL (Web Serial)</span>
+              <div class="mrow">
+                <label class="mfield">Baudrate
+                  <select id="frBaud">
+                    <option>115200</option><option>250000</option><option>57600</option>
+                  </select>
+                </label>
+                <div class="sp"></div>
+                <div class="mhead"><span id="frStateDot" class="dot"></span><span id="frStateText">getrennt</span></div>
+                <button class="primary" id="frConnect">Port wählen &amp; verbinden</button>
+                <button id="frSettingsBtn">GRBL Einstellungen</button>
+              </div>
+              <div class="hint" id="frSerialNote">Eigene Verbindung für die Fräse — unabhängig vom Heißdraht-Reiter „Maschine".</div>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Spindel · M3 S / M5 · Overrides</span>
+              <div class="mrow">
+                <label class="mfield">Drehzahl [1/min]
+                  <input id="frRpm" type="number" value="12000" min="0" step="100" style="width:100px">
+                </label>
+                <button class="primary" id="frSpOn">Spindel EIN</button>
+                <button id="frSpOff">Spindel AUS</button>
+                <div class="sp"></div>
+                <span class="hint">Drehzahl-Override:</span>
+                <button id="frSovDn">−10 %</button><span class="wire-val" id="frSovVal">100 %</span><button id="frSovUp">+10 %</button><button id="frSov100">100 %</button>
+              </div>
+              <div class="mrow" style="margin-top:8px">
+                <span class="hint">Vorschub-Override (wirkt sofort auf das laufende Programm):</span>
+                <button id="frFovDn">−10 %</button><span class="wire-val" id="frFovVal">100 %</span><button id="frFovUp">+10 %</button><button id="frFov100">100 %</button>
+              </div>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Programm</span>
+              <div class="cutsource">
+                <div class="mrow">
+                  <button class="primary cutsource-btn" id="frUseCam">CAM-Programm übernehmen</button>
+                  <button id="frFileBtn">G-Code-Datei laden…</button>
+                  <span id="frFileInfo" class="hint">kein Programm geladen</span>
+                </div>
+              </div>
+              <div id="frProgView" class="frprog" data-empty="Übernommenes Programm erscheint hier …"></div>
+              <div class="mrow" style="margin-bottom:9px">
+                <button id="frStart" disabled>Start</button>
+                <button id="frPause" disabled>Pause</button>
+                <button class="primary" id="frResume" style="display:none">▶ Fortsetzen</button>
+                <button id="frStop" disabled>Stopp</button>
+                <button id="frAbort" disabled>⏹ Abbruch</button>
+                <button class="primary" id="frGoZero" style="display:none">⌂ Fahren auf Nullpunkt</button>
+                <div class="sp"></div>
+                <span id="frFeedText" class="hint" title="Aktuelle Ist-Geschwindigkeit (Vorschub)">Geschwindigkeit: — mm/min</span>
+                <span id="frProgText" class="hint">0 / 0</span>
+              </div>
+              <progress id="frProg" value="0" max="1"></progress>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Konsole</span>
+              <div id="frConsole" class="grblConsole"></div>
+              <div class="mrow" style="margin-top:9px">
+                <input id="frMdi" type="text" class="sp" placeholder="Befehl eingeben (z. B. G0 X10) …">
+                <button id="frMdiSend">Senden</button>
+              </div>
+            </div>
+
+            <button class="estop" id="frEstop"><span>■ NOT-HALT — FEED HOLD + SPINDEL AUS</span></button>
+            <div class="hint" style="text-align:center">
+              Ersetzt keinen hardwareseitigen Not-Aus. Spindel &amp; Motoren müssen physisch abschaltbar bleiben.
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="view" id="machineView">
+        <div class="mwrap">
+
+          <div class="mcard">
+            <span class="lbl" id="mConnLbl">Verbindung · grblHAL (Web Serial)</span>
+            <div class="mrow">
+              <label class="mfield">Steuerung
+                <select id="mFirmware">
+                  <option value="grblhal">grblHAL</option>
+                  <option value="mega5x">Mega 5X (grbl-mega-5x)</option>
+                </select>
+              </label>
+              <label class="mfield">Baudrate
+                <select id="mBaud">
+                  <option>115200</option><option>250000</option><option>57600</option>
+                </select>
+              </label>
+              <div class="sp"></div>
+              <div class="mhead"><span id="mStateDot" class="dot"></span><span id="mStateText">getrennt</span></div>
+              <button class="primary" id="mConnect">Port wählen &amp; verbinden</button>
+              <button id="mSettingsBtn">GRBL Einstellungen</button>
+            </div>
+            <div class="hint" id="mSerialNote"></div>
+          </div>
+
+          <div class="mcard">
+            <span class="lbl">Position (relativ zum Nullpunkt, mm)</span>
+            <div class="dro" id="dro"></div>
+            <div class="dro-feed" title="Aktuelle Ist-Geschwindigkeit (Bahngeschwindigkeit des schnelleren Portals)"><span class="lbl">Geschwindigkeit</span><span class="val" data-feednow>—</span><span class="unit">mm/min</span></div>
+            <div class="mrow" style="margin-top:10px">
+              <button id="mHome">Referenzfahrt (Homing)</button>
+              <button id="mHomeStop" style="display:none">⏹ Referenzfahrt stoppen</button>
+              <button id="mUnlock">Alarm/Fehler quittieren ($X)</button>
+              <button id="mFree" style="display:none">Endschalter freifahren</button>
+              <span class="hint">Fährt alle Achsen auf ihre Endschalter und referenziert den Maschinennullpunkt automatisch ($H). Erfordert eingebaute Referenzschalter und aktiviertes Homing ($22=1). Der Draht bleibt dabei AUS. „Referenzfahrt stoppen" bricht die laufende Fahrt sofort ab (Soft-Reset). „Alarm/Fehler quittieren" hebt eine Alarm-Sperre auf ($X), z. B. nach Endschalter-Auslösung oder abgebrochenem Homing. „Endschalter freifahren" erscheint, solange ein Endschalter gedrückt ist: Hard-Limits werden kurz abgeschaltet, die Achse fährt vom Schalter weg, danach werden die Hard-Limits wieder eingeschaltet.</span>
+            </div>
+            <div class="mrow" style="margin-top:10px">
+              <button class="primary" id="mSetHome">Nullpunkt setzen (Set Home)</button>
+              <span class="hint">Setzt die aktuelle Draht-/Portalposition als Maschinennullpunkt (X0/Y0). Die Anzeige springt danach auf 0 — Bezugspunkt für alle Programme.</span>
+            </div>
+          </div>
+
+          <div class="mcard">
+            <span class="lbl">Handfahrt</span>
+            <div class="mrow" style="margin-bottom:10px">
+              <label class="mfield">Schritt [mm]
+                <span class="stepcombo">
+                  <input id="mStep" type="number" value="1" min="0.01" step="any" style="width:78px">
+                  <select id="mStepSel" class="stepsel" title="Vorschlag wählen" aria-label="Schrittweite wählen">
+                    <option value="" selected>▾</option>
+                    <option>0.1</option><option>1</option><option>5</option><option>10</option>
+                    <option>50</option><option>100</option><option>150</option><option>200</option>
+                    <option>250</option><option>300</option><option>350</option>
+                  </select>
+                </span>
+              </label>
+              <label class="mfield">Vorschub [mm/min]
+                <input id="mJogFeed" type="number" value="500" min="1" style="width:110px">
+              </label>
+            </div>
+            <div class="jog-axes" id="jogAxes"></div>
+          </div>
+
+          <div class="mcard">
+            <span class="lbl">Drahtheizung · M3 S / M5</span>
+            <div class="mrow">
+              <input id="mWire" type="range" min="0" max="100" value="0">
+              <span class="wire-val" id="mWireVal">0 %</span>
+              <button id="mWireSet">Setzen</button>
+              <button id="mWireOff">AUS</button>
+            </div>
+            <div class="hint">Stellsignal am Spindel-PWM-Ausgang. Duty = S / $30.</div>
+          </div>
+
+          <div class="mcard">
+            <span class="lbl">Konsole</span>
+            <div id="mConsole2" class="grblConsole"></div>
+            <div class="mrow" style="margin-top:9px">
+              <input id="mMdi2" type="text" class="sp" placeholder="Befehl eingeben (z. B. G0 X10) …">
+              <button id="mMdiSend2">Senden</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="view" id="cutView">
+        <div class="mwrap cutwrap">
+
+          <div class="cutcol cutcol-sim">
+            <div class="mcard mcard-sim">
+              <span class="lbl">3D-Simulation</span>
+              <div class="msim"><canvas id="cSimM"></canvas><div class="simctx" id="simMCtx"></div></div>
+              <div class="mrow" style="margin-top:8px">
+                <button class="primary" id="simMPlay" disabled>▶ Simulieren</button>
+                <button id="simMReset" disabled>⏹ Zurück</button>
+                <div class="sp"></div>
+                <button id="simMTop">⬇ Draufsicht</button>
+                <button id="simMSide">➡ Seitenansicht</button>
+                <button id="simMFront">⬅ Vorderansicht</button>
+                <button id="simMView0" title="Ansicht zurücksetzen: Standard-Schrägansicht, Zoom und Verschiebung auf Ausgangswert">⟲ Ansicht</button>
+              </div>
+              <span class="hint">„Simulieren" fährt das gewählte Programm als Trockenlauf ab (vor dem Schnitt). Während der Ausführung folgt der Draht der gesendeten G-Code-Zeile. Ziehen = drehen · Rad = Zoom (am Cursor) · Würfel-Klick = Achsenansicht · Doppelklick = zurück.</span>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Position (relativ zum Nullpunkt, mm)</span>
+              <div class="dro" id="droCut"></div>
+              <div class="dro-feed" title="Aktuelle Ist-Geschwindigkeit (Bahngeschwindigkeit des schnelleren Portals)"><span class="lbl">Geschwindigkeit</span><span class="val" data-feednow>—</span><span class="unit">mm/min</span></div>
+              <div class="mrow" style="margin-top:10px">
+                <button id="mHomeCut">Referenzfahrt (Homing)</button>
+                <button id="mHomeStopCut" style="display:none">⏹ Referenzfahrt stoppen</button>
+                <button id="mUnlockCut">Alarm/Fehler quittieren ($X)</button>
+                <button id="mFreeCut" style="display:none">Endschalter freifahren</button>
+                <span class="hint">Fährt alle Achsen auf ihre Endschalter und referenziert den Maschinennullpunkt automatisch ($H). Erfordert eingebaute Referenzschalter und aktiviertes Homing ($22=1). Der Draht bleibt dabei AUS. „Referenzfahrt stoppen" bricht die laufende Fahrt sofort ab (Soft-Reset). „Alarm/Fehler quittieren" hebt eine Alarm-Sperre auf ($X).</span>
+              </div>
+              <div class="mrow" style="margin-top:10px">
+                <button class="primary" id="mSetHomeCut">Nullpunkt setzen (Set Home)</button>
+                <span class="hint">Setzt die aktuelle Draht-/Portalposition als Maschinennullpunkt (X0/Y0). Die Anzeige springt danach auf 0 — Bezugspunkt für alle Programme.</span>
+              </div>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Handfahrt</span>
+              <div class="mrow" style="margin-bottom:10px">
+                <label class="mfield">Schritt [mm]
+                  <span class="stepcombo">
+                    <input id="mStepCut" type="number" value="1" min="0.01" step="any" style="width:78px">
+                    <select id="mStepSelCut" class="stepsel" title="Vorschlag wählen" aria-label="Schrittweite wählen">
+                      <option value="" selected>▾</option>
+                      <option>0.1</option><option>1</option><option>5</option><option>10</option>
+                      <option>50</option><option>100</option><option>150</option><option>200</option>
+                      <option>250</option><option>300</option><option>350</option>
+                    </select>
+                  </span>
+                </label>
+                <label class="mfield">Vorschub [mm/min]
+                  <input id="mJogFeedCut" type="number" value="500" min="1" style="width:110px">
+                </label>
+              </div>
+              <div class="jog-axes" id="jogAxesCut"></div>
+            </div>
+          </div>
+
+          <div class="cutcol cutcol-ctrl">
+            <div class="mcard">
+              <span class="lbl">Programm</span>
+              <div class="cutsource">
+                <label class="cutsource-label" for="cutSource">G-Code-Quelle wählen</label>
+                <div class="mrow">
+                  <select id="cutSource" class="cutsource-select">
+                    <option value="gcode">G-Code (Kern/Negativschale)</option>
+                    <option value="model">3D-Modell</option>
+                    <option value="plate">3D-Modell Platte (mehrere)</option>
+                    <option value="block">Block</option>
+                    <option value="guillotine">Guillotine</option>
+                    <option value="blockH">Block horizontal</option>
+                    <option value="calib">Abbrand-Kalibrierung</option>
+                  </select>
+                </div>
+                <div class="mrow" style="margin-top:8px">
+                  <button class="primary cutsource-btn" id="mUseGcode">Quelle übernehmen</button>
+                </div>
+                <div class="mrow" style="margin-top:9px">
+                  <input id="mFile" type="file" accept=".gcode,.nc,.ngc,.tap,.txt">
+                  <span id="mFileInfo" class="hint">kein Programm geladen</span>
+                </div>
+              </div>
+              <div id="mProgView" data-empty="Übernommenes Programm erscheint hier …"></div>
+              <div class="mrow" style="margin-bottom:9px">
+                <button id="mStart" disabled>Start</button>
+                <button id="mPause" disabled>Pause</button>
+                <button class="primary" id="mResume" style="display:none">▶ Fortsetzen</button>
+                <button id="mAbort" disabled>⏹ Schnittabbruch</button>
+                <button class="primary" id="mGoZero" style="display:none">⌂ Fahren auf Nullpunkt</button>
+                <div class="sp"></div>
+                <span id="mFeedText" class="hint" title="Aktuelle Ist-Geschwindigkeit (Vorschub)">Geschwindigkeit: — mm/min</span>
+                <span id="mProgText" class="hint">0 / 0</span>
+              </div>
+              <progress id="mProg" value="0" max="1"></progress>
+            </div>
+
+            <div class="mcard">
+              <span class="lbl">Konsole</span>
+              <div id="mConsole" class="grblConsole"></div>
+              <div class="mrow" style="margin-top:9px">
+                <input id="mMdi" type="text" class="sp" placeholder="Befehl eingeben (z. B. G0 X10) …">
+                <button id="mMdiSend">Senden</button>
+              </div>
+            </div>
+
+            <button class="estop" id="mEstop"><span>■ NOT-HALT — FEED HOLD</span></button>
+            <button class="primary" id="mEstopZero" style="width:100%;margin-top:8px"
+                    title="Löst den Feed-Hold auf (Soft-Reset + $X), schaltet den Draht aus und fährt erst horizontal, dann vertikal auf den Nullpunkt.">⌂ Nach Not-Halt: Fahren auf Nullpunkt</button>
+            <div class="hint" style="text-align:center">
+              Ersetzt keinen hardwareseitigen Not-Aus. Draht &amp; Motoren müssen physisch abschaltbar bleiben.
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="stat" id="stat"></div>
+    </div>
+  </div>
+</div>
+<!-- GRBL-Einstellungen: Settings-Menü des Boards ($$) -->
+<div class="modal-backdrop" id="grblSettings">
+  <div class="modal">
+    <div class="head">
+      <h2>GRBL-Einstellungen ($$)</h2>
+      <input id="setSearch" type="text" placeholder="filtern (Nr. oder Text)…" style="width:190px">
+      <button class="close-x" id="setClose" title="Schließen">×</button>
+    </div>
+    <div class="body">
+      <table class="set-table">
+        <thead><tr><th style="width:74px">$-Nr.</th><th>Beschreibung</th><th style="width:150px">Wert</th></tr></thead>
+        <tbody id="setBody"></tbody>
+      </table>
+      <div id="setEmpty" class="hint">Noch nichts geladen — auf „Neu laden“ klicken.</div>
+    </div>
+    <div class="foot">
+      <div class="mrow">
+        <button id="setReload">Neu laden</button>
+        <div class="sp"></div>
+        <span class="hint">Direkt setzen:</span>
+        $<input id="rawNum" type="text" style="width:56px" placeholder="Nr">
+        <span>=</span>
+        <input id="rawVal" type="text" style="width:100px" placeholder="Wert">
+        <button id="rawSet">Setzen</button>
+        <div class="sp"></div>
+        <button class="primary" id="setSave">Änderungen speichern</button>
+      </div>
+      <div id="setStatus" class="hint" style="margin-top:9px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Fräse: GRBL-Einstellungen ($$) der Fräsensteuerung -->
+<div class="modal-backdrop" id="frSettings">
+  <div class="modal">
+    <div class="head">
+      <h2>Fräse — GRBL-Einstellungen ($$)</h2>
+      <input id="frSetSearch" type="text" placeholder="filtern (Nr. oder Text)…" style="width:190px">
+      <button class="close-x" id="frSetClose" title="Schließen">×</button>
+    </div>
+    <div class="body">
+      <table class="set-table">
+        <thead><tr><th style="width:74px">$-Nr.</th><th>Beschreibung</th><th style="width:150px">Wert</th></tr></thead>
+        <tbody id="frSetBody"></tbody>
+      </table>
+      <div id="frSetEmpty" class="hint">Noch nichts geladen — auf „Neu laden“ klicken.</div>
+    </div>
+    <div class="foot">
+      <div class="mrow">
+        <button id="frSetReload">Neu laden</button>
+        <div class="sp"></div>
+        <span class="hint">Direkt setzen:</span>
+        $<input id="frRawNum" type="text" style="width:56px" placeholder="Nr">
+        <span>=</span>
+        <input id="frRawVal" type="text" style="width:100px" placeholder="Wert">
+        <button id="frRawSet">Setzen</button>
+        <div class="sp"></div>
+        <button class="primary" id="frSetSave">Änderungen speichern</button>
+      </div>
+      <div id="frSetStatus" class="hint" style="margin-top:9px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Nasenschablonen: 3D-Vorschau der STL -->
+<div class="modal-backdrop" id="rf3dModal">
+  <div class="modal profedit-modal">
+    <div class="head">
+      <h2>Rippenfläche — 3D-Ansicht des zusammengebauten Flügels</h2>
+      <button class="close-x" id="rf3dClose" title="Schließen">×</button>
+    </div>
+    <div class="body" style="padding:0;position:relative;flex:1;min-height:0;overflow:hidden">
+      <canvas id="cRf3d" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+      <div class="pane-toggles" id="rf3dToggles" style="top:10px;right:10px;left:auto"></div>
+      <div class="simlegend" id="rf3dInfo" style="left:10px;bottom:10px;top:auto;right:auto;max-width:90%"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="ribStlModal">
+  <div class="modal profedit-modal">
+    <div class="head">
+      <h2>Nasenschablonen — 3D-Vorschau</h2>
+      <button class="close-x" id="ribStlClose" title="Schließen">×</button>
+    </div>
+    <div class="body" style="padding:0;position:relative;flex:1;min-height:0;overflow:hidden">
+      <canvas id="cRibStl" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+      <div class="simlegend" id="ribStlInfo" style="left:10px;bottom:10px;top:auto;right:auto;max-width:90%"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Profilbearbeitung: wird je Profil aus dem Tragflächendesigner geöffnet -->
+<div class="modal-backdrop" id="profEditModal">
+  <div class="modal profedit-modal">
+    <div class="head">
+      <h2 id="profEditTitle">Profil bearbeiten</h2>
+      <button class="close-x" id="profEditClose" title="Schließen">×</button>
+    </div>
+    <div class="body profedit-body">
+      <div class="profedit-canvas">
+        <div class="simlegend" id="profEditInfo" style="left:10px;right:auto;top:10px;max-width:250px"></div>
+        <canvas id="cProfEdit"></canvas>
+      </div>
+      <div class="profedit-ctrl" id="profEditCtrl"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Werkstück-Drehung: Profilvergleich Original vs. verzerrt -->
+<div class="modal-backdrop" id="sweepCmpModal">
+  <div class="modal" style="width:min(1200px,96vw);max-width:96vw;height:min(860px,94vh);max-height:94vh;display:flex;flex-direction:column">
+    <div class="head">
+      <h2>Profilvergleich — Drehung (Original vs. verzerrt)</h2>
+      <button id="sweepCmpDxf" style="margin-left:auto;margin-right:8px">DXF exportieren</button>
+      <button class="close-x" id="sweepCmpClose" title="Schließen">×</button>
+    </div>
+    <div class="body" id="sweepCmpBody" style="flex:1 1 auto;display:flex;flex-direction:column;min-height:0;overflow:hidden">
+      <div class="hint" id="sweepCmpHint" style="margin-bottom:8px;flex:0 0 auto"></div>
+      <div style="display:flex;gap:14px;flex:1 1 auto;min-height:0">
+        <div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column">
+          <div class="set-h" style="margin:2px 0 6px;flex:0 0 auto">Wurzelbogen</div>
+          <div style="position:relative;flex:1 1 auto;min-height:0;background:var(--panel,#0e1520);border-radius:8px">
+            <canvas id="cSweepCmpRoot" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+          </div>
+          <div class="hint" id="sweepCmpRootInfo" style="margin-top:6px;flex:0 0 auto"></div>
+        </div>
+        <div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column">
+          <div class="set-h" style="margin:2px 0 6px;flex:0 0 auto">Randbogen</div>
+          <div style="position:relative;flex:1 1 auto;min-height:0;background:var(--panel,#0e1520);border-radius:8px">
+            <canvas id="cSweepCmpTip" style="width:100%;height:100%;display:block;cursor:grab"></canvas>
+          </div>
+          <div class="hint" id="sweepCmpTipInfo" style="margin-top:6px;flex:0 0 auto"></div>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:6px;flex:0 0 auto">Mausrad = Zoom (am Cursor) · Ziehen = Verschieben · Doppelklick = zurücksetzen.</div>
+    </div>
+  </div>
+</div>
+
+<!-- Einstellungen: Farben (UI + Zeichnung) -->
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <div class="head">
+      <h2 id="settingsTitle">Einstellungen</h2>
+      <button class="close-x" id="settingsClose" title="Schließen">×</button>
+    </div>
+    <div class="body" id="settingsBody"></div>
+    <div class="foot">
+      <div class="mrow">
+        <button id="settingsReset">Alle zurücksetzen</button>
+        <div class="sp"></div>
+        <span class="hint">Änderungen wirken sofort und werden gespeichert.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Planform Creator: Trapez-Vereinfachung mit Vorschau -->
+<div class="modal-backdrop" id="pc2Modal">
+  <div class="modal" style="width:min(1100px,96vw);max-width:96vw;height:min(820px,94vh);max-height:94vh;display:flex;flex-direction:column">
+    <div class="head">
+      <h2 id="pc2Title">Planform importieren</h2>
+      <button class="close-x" id="pc2Close" title="Schließen" style="margin-left:auto">×</button>
+    </div>
+    <div class="body" style="flex:1 1 auto;display:flex;gap:14px;min-height:0;overflow:hidden">
+      <div id="pc2Ctrl" style="width:290px;flex:0 0 auto;overflow-y:auto;display:flex;flex-direction:column;gap:8px"></div>
+      <div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column">
+        <div style="position:relative;flex:1 1 auto;min-height:0;background:var(--panel,#0e1520);border-radius:8px">
+          <canvas id="cPc2" style="width:100%;height:100%;display:block"></canvas>
+        </div>
+        <div class="hint" id="pc2Info" style="margin-top:6px;flex:0 0 auto"></div>
+      </div>
+    </div>
+    <div class="foot">
+      <div class="mrow">
+        <span class="hint" id="pc2Err"></span>
+        <div class="sp"></div>
+        <button id="pc2Cancel">Abbrechen</button>
+        <button class="primary" id="pc2Import">Als Trapeze importieren</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<a class="dl" id="dl"></a>
+<input type="file" id="fileDat" accept=".dat,.bez,.txt,.cor,.dxf,.svg" style="display:none">
+<input type="file" id="filePc2" accept=".pc2,.json" style="display:none">
+<input type="file" id="fileFoils" accept=".dat,.bez,.txt,.cor" multiple style="display:none">
+<input type="file" id="fileDxf" accept=".dxf" style="display:none">
+<input type="file" id="fileCnc" accept=".cnc" style="display:none">
+<input type="file" id="fileCncWing" accept=".cnc" style="display:none">
+<input type="file" id="fileCadDxf" accept=".dxf" style="display:none">
+<input type="file" id="fileCadBg" accept="image/*" style="display:none">
+<input type="file" id="fileSvg" accept=".svg,image/svg+xml" style="display:none">
+<input type="file" id="fileBgImg" accept="image/*" style="display:none">
+<input type="file" id="fileProj" accept=".json" style="display:none">
+<input type="file" id="fileGcode" accept=".gcode,.nc,.ngc,.tap,.txt" style="display:none">
+<input type="file" id="fileModel3d" accept=".stl,.obj" style="display:none">
+<input type="file" id="fileFraeseDxf" accept=".dxf" style="display:none">
+<input type="file" id="fileFraeseGcode" accept=".gcode,.nc,.ngc,.tap,.txt" style="display:none">
+<input type="file" id="fileSchriftFont" accept=".ttf,.otf,.ttc" style="display:none">
+<input type="file" id="fileSettings" accept=".json" style="display:none">
+<input type="file" id="fileMaterial" accept=".json" style="display:none">
+
+<!-- Eigenes Fenster: 3D-Ansicht der geschnittenen Segmente (Tragfläche / DXF-Formen, render.js) -->
+<div class="floatwin" id="seg3dWin" style="display:none">
+  <div class="head">
+    <span class="ttl">3D-Ansicht — geschnittene Segmente (zusammengebaut)</span>
+    <select id="seg3dSide" title="Dargestellte Tragflächenseite">
+      <option value="one">Eine Seite</option>
+      <option value="other">Andere Seite (gespiegelt)</option>
+      <option value="both">Beide Seiten</option>
+    </select>
+    <button id="seg3dReset" type="button" title="Kamera zurücksetzen">Ansicht zurücksetzen</button>
+    <button id="seg3dClose" type="button" title="Schließen (Esc)">✕</button>
+  </div>
+  <div class="body"><canvas id="cSeg3d"></canvas></div>
+</div>
+<script src="i18n.js?v=20260924bo"></script>
+<script src="safety.js?v=20260924hf"></script>
+<script src="airfoil.js?v=20260913x"></script>
+<script src="materials.js?v=20260913x"></script>
+<script src="blockprep.js?v=20260913x"></script>
+<script src="wing.js?v=20260913x"></script>
+<script src="flz.js?v=20260919wi"></script>
+<script src="xflr5.js?v=20260919wi"></script>
+<script src="pc2.js?v=20260920pc"></script>
+<script src="dxf.js?v=20260913x"></script>
+<script src="hotwire.js?v=20260918cf"></script>
+<script src="hotwire_gcode.js?v=20260919en"></script>
+<script src="sweeprot.js?v=20260913x"></script>
+<script src="earcut.js?v=20260921cu"></script>
+<script src="grbl.js?v=20260924hf"></script>
+<script src="viewcube.js?v=20260922lg"></script>
+<script src="sim3d.js?v=20260922lg"></script>
+<script src="simmodel.js?v=20260921b"></script>
+<script src="model3d.js?v=20260921vd"></script>
+<script src="model3d_gcode.js?v=20260919en"></script>
+<script src="core.js?v=20260923rp"></script>
+<script src="cad.js?v=20260921sq"></script>
+<script src="gcode.js?v=20260922ni"></script>
+<script src="spars.js?v=20260923np"></script>
+<script src="ribs.js?v=20260921cv"></script>
+<script src="rippenflaeche.js?v=20260924a1"></script>
+<script src="dxfshapes.js?v=20260921sn"></script>
+<script src="wingimport.js?v=20260920pc"></script>
+<script src="filesys.js?v=20260924ot"></script>
+<script src="wingexport.js?v=20260920pc2"></script>
+<script src="gmfc.js?v=20260918a"></script>
+<script src="render.js?v=20260923wc"></script>
+<script src="measure2d.js?v=20260918mt"></script>
+<script src="sidebar.js?v=20260924bn"></script>
+<script src="pathpreview.js?v=20260918nz"></script>
+<script src="gcodegen.js?v=20260923rp"></script>
+<script src="cutpanel.js?v=20260923rp"></script>
+<script src="stege.js?v=20260919k5"></script>
+<script src="kernteile.js?v=20260919k3"></script>
+<script src="stepexport.js?v=20260917p"></script>
+<script src="formenbau.js?v=20260922lg"></script>
+<script src="rumpf.js?v=20260921vc"></script>
+<script src="fraese.js?v=20260924hf"></script>
+<script src="schrift_fonts.js?v=20260918sc"></script>
+<script src="schrift.js?v=20260919en"></script>
+<script src="schrift_gcode.js?v=20260918sd"></script>
+<script src="compute.js?v=20260918sf"></script>
+<script src="wings.js?v=20260923pm"></script>
+<script src="overview_bg.js?v=20260914j"></script>
+<script src="overview.js?v=20260919wt"></script>
+<script src="ptedit.js?v=20260919en"></script>
+<script src="profedit.js?v=20260913x"></script>
+<script src="tabmenu.js?v=20260918b"></script>
+<script src="app.js?v=20260922ne"></script>
+</body>
+</html>
+
+
+
+
+
+
+

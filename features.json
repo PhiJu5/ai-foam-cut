@@ -1,0 +1,216 @@
+{
+  "_hinweis": "Manifest der optionalen Funktionen (Features) fuer das Build-Tool (build_tool.py). Alle .js-Dateien, die in 'AI Foam Cut.html' per <script src> eingebunden sind und hier NICHT in einem Feature stehen, gehoeren zum Kern und sind immer in der exe. Ein Feature = eigene Datei(en), die ohne Fehler weggelassen werden koennen: andere Module duerfen ihre Namen nur geschuetzt aufrufen (z. B. 'App.stegeOn && App.stegeOn()' oder 'if (window.Model3D)'). 'tabs' = data-view-Werte der Reiter, die ohne das Feature aus der HTML entfernt werden. 'default' = im Build-Tool vorausgewaehlt. Zur Laufzeit steht window.FEATURES (Liste der enthaltenen IDs) und window.BUILD_INFO zur Verfuegung. 'demo': true = das Feature kann im Build-Tool als 'nur Demo (ohne Export)' gebaut werden; die IDs stehen dann in window.BUILD_INFO.demo und das Modul sperrt seine Exporte selbst (Helfer: App.demoFeature(id, text) in core.js). 'views' = ids der <div class=\"view\"> -Bloecke, die mit dem Feature aus der HTML fliegen (sonst bliebe das Markup in der exe stehen). 'requires' = IDs anderer Features, die dieses braucht; das Build-Tool waehlt sie automatisch mit an. 'kern_bis' = Datum, bis zu dem die Funktion fest zum Kern gehoerte; aeltere Build-Profile (ohne Feld 'known') bekommen sie deshalb beim Laden automatisch angehakt.",
+  "features": [
+    {
+      "id": "model3d",
+      "name": "3D-Modell (STL laden, Segmentzerlegung, Platten-G-Code)",
+      "description": "Reiter „3D-Modell“: STL-Datei laden, in Segmente zerlegen, Heissdraht-G-Code je Segment bzw. Platte, Uebergabe an die CAD-Bearbeitung.",
+      "files": [
+        "model3d.js",
+        "simmodel.js"
+      ],
+      "tabs": [
+        "model"
+      ],
+      "default": true,
+      "views": [
+        "modelView"
+      ]
+    },
+    {
+      "id": "stege",
+      "name": "Kern-Stege (Negativ- und Kerndesign)",
+      "description": "Im Negativschalendesign den Kern in einzelne Stege zerlegen (Glasschlauch, Holmgurt, Stegabstand) und im selben Schnitt wie die Schalen fahren; im Kerndesign den Kern ebenso zerteilen, optional mit erhaltener, auseinandergezogener Schale (eigener Schnitt, ein oder getrennte Programme).",
+      "files": [
+        "stege.js",
+        "kernteile.js"
+      ],
+      "tabs": [],
+      "default": true
+    },
+    {
+      "id": "formenbau",
+      "name": "Formenbau (Urmodell / Negativform als STL)",
+      "description": "Reiter „Formenbau“: aus dem Tragflächendesign ein Urmodell (Positiv) oder die beiden Negativform-Hälften als STL für 3D-Druck und CNC-Fräsen ableiten; Profile per Bezier-/B-Spline-Ausgleich geglättet, Randbogen mit einstellbarem Wingtip.",
+      "files": [
+        "formenbau.js"
+      ],
+      "tabs": [
+        "form"
+      ],
+      "default": true,
+      "demo": true,
+      "views": [
+        "formView"
+      ]
+    },
+    {
+      "id": "rumpf",
+      "name": "Rumpf (Rumpf aus Bezier-Splines mit Tangenten: Dreitafel-Ansicht und Spanten)",
+      "description": "Reiter „Rumpf“: Rumpf als echte NURBS-Fläche aus Stationen (Oberkante, Unterkante, Breite, Querschnittsform), Bearbeitung in Seiten-/Draufsicht mit Hintergrundbild, Spantschnitte, Export STL und DXF.",
+      "files": [
+        "rumpf.js"
+      ],
+      "tabs": [
+        "rumpf"
+      ],
+      "default": true,
+      "views": [
+        "rumpfView"
+      ]
+    },
+    {
+      "id": "fraese",
+      "name": "Fräse (2D-CAM + GRBL-Fräsensteuerung)",
+      "description": "Reiter „Fräse“: Konturen aus DXF oder dem CAD-Reiter als Fräs-Jobs (Außen-/Innenkontur, auf der Linie, Tasche, Bohren) mit Werkzeugradius-Korrektur, Tiefenzustellung und Haltestegen; GRBL-G-Code; eigene Maschinensteuerung (Web Serial) mit DRO X/Y/Z, Handfahrt, Nullpunkt/Z-Taster, Spindel, Overrides, Programmlauf und $$-Einstellungen. Braucht die Funktion „Maschine“ (GRBL-Treiber in grbl.js).",
+      "files": [
+        "fraese.js"
+      ],
+      "tabs": [
+        "fraese"
+      ],
+      "default": true,
+      "views": [
+        "fraeseView"
+      ],
+      "requires": [
+        "machine"
+      ]
+    },
+    {
+      "id": "schrift",
+      "name": "Schriften (Buchstaben/Schilder schneiden)",
+      "description": "Reiter „Schriften“: Text in eingebauten Linienschriften (Höhe, Strichstärke, Breite, Neigung, Enden, Ecken, Eckigkeit, Serifen frei einstellbar, eigene Schriftarten speicherbar) oder beliebigen TrueType-/OpenType-Schriften bzw. Systemschriften; Verbindung der Buchstaben (überlappend, Grundleiste, Stege, Punkte anbinden), Innenformen per Einschnitt/Schablonen-Lücke, Schnittbahn mit Abbrand und Verbindungswegen durch den Abfall, DXF-Export und Übergabe an die CAD-Bearbeitung. G-Code-Text kommt aus der Funktion „G-Code-Erzeugung“ (schrift_gcode.js); ohne sie zeigt der G-Code-Reiter die Bahnvorschau.",
+      "files": [
+        "schrift_fonts.js",
+        "schrift.js"
+      ],
+      "tabs": [
+        "schrift"
+      ],
+      "default": true,
+      "demo": true,
+      "views": [
+        "schriftView"
+      ]
+    },
+    {
+      "id": "gmfc",
+      "name": "GMFC-Export/-Import (.cnc-Projekt)",
+      "description": "Menü „Speichern → Tragfläche als GMFC-Projekt (.cnc)…“: exportiert alle Segmente mit Profilen, Sehnen, Pfeilung, V-Form, Rändern und Beplankung als GMFC-Projektdatei; fehlende Werte (Grundhöhe der Sehne, Schaumtyp, Endleisten-Verlängerung) werden in einem Eingabefenster abgefragt. Dazu „Laden → GMFC-Projekt (.cnc) in DXF-Formen…“: GMFC-Projekte mit importierten, synchronisierten Querschnitten und mehreren Segmenten als Rippenkette in den Reiter „DXF-Formen“ übernehmen (braucht das Feature dxfshapes).",
+      "files": [
+        "gmfc.js"
+      ],
+      "tabs": [],
+      "default": true
+    },
+    {
+      "id": "dxfshapes",
+      "name": "DXF-Formen (Reiter „DXF-Formen“ + DXF-Export)",
+      "description": "Reiter „DXF-Formen“: zwei Konturen (INNEN/AUSSEN) aus DXF/SVG laden, Synchronpunkte setzen, bearbeiten, Rippenkette mit Segmenten, Grundriss/Aufriss und eigener Schnitt-G-Code; dazu der DXF-Export der Tragfläche. Der SVG-/DXF-Parser selbst bleibt im Kern (Profil-Import).",
+      "files": [
+        "dxfshapes.js"
+      ],
+      "tabs": [
+        "dxf"
+      ],
+      "views": [
+        "dxfView",
+        "dxfexportView"
+      ],
+      "default": true,
+      "demo": true,
+      "kern_bis": "2026-09-12"
+    },
+    {
+      "id": "rib",
+      "name": "Rippendesigner (Rippen, Nasenschablonen, STL)",
+      "description": "Reiter „Rippendesigner“: Rippen aus dem Tragflächendesign ableiten (Beplankungsabzug, Holmausschnitte, Halbrippen), Nasenschablonen und Rippen als STL exportieren, 3D-Vorschau.",
+      "files": [
+        "ribs.js"
+      ],
+      "tabs": [
+        "rib"
+      ],
+      "views": [
+        "ribView"
+      ],
+      "default": true,
+      "demo": true,
+      "kern_bis": "2026-09-12"
+    },
+    {
+      "id": "rippenflaeche",
+      "name": "Rippenfläche (Rippenbauweise: Bausatz aus dem Tragflächendesign)",
+      "description": "Reiter „Rippenfläche“: aus dem Tragflächendesign einen kompletten Bausatz in Rippenbauweise ableiten — Rippenanzahl/-verteilung, Rippengruppen mit Werkstoff und Materialstärke, Rippenarten (Vollrippe, D-Box-, Endleistenrippe), schräge Rippen (senkrecht zu Nasenleiste/Holm/Scharnierlinie, auch nur an den Rudern), Holmgurte und Holmstege, Rippenkämme als Holmsteg, Helling (Schlitzbrett oder Auflageböcke), Beplankung inkl. Abwicklung, geodätische Bauweise, Leichterungslöcher; Ausgabe als geschachteltes DXF, als Stückliste (CSV) und als Übergabe in die CAD-Bearbeitung.",
+      "files": [
+        "rippenflaeche.js"
+      ],
+      "tabs": [
+        "rf"
+      ],
+      "default": true,
+      "demo": true,
+      "views": [
+        "rfView"
+      ]
+    },
+    {
+      "id": "cad",
+      "name": "CAD-Bearbeitung (2D-CAD-Editor mit Befehlszeile)",
+      "description": "Reiter „CAD-Bearbeitung“: eigener 2D-CAD-Editor (Linien, Bögen, Splines, Bemaßung, Layer, Objektfang, Offset, Trimmen) mit AutoCAD-artiger Befehlszeile; Übergabe an DXF-Formen und Fräse, DXF-Export.",
+      "files": [
+        "cad.js"
+      ],
+      "tabs": [
+        "cad"
+      ],
+      "views": [
+        "cadView"
+      ],
+      "default": true,
+      "demo": true,
+      "requires": [
+        "dxfshapes"
+      ],
+      "kern_bis": "2026-09-12"
+    },
+    {
+      "id": "gcodegen",
+      "name": "G-Code-Erzeugung Heißdraht (Kern, Negativschale, DXF-Formen, 3D-Modell, Block/Guillotine/Kalibrierung)",
+      "description": "Erzeugt aus dem Design den Heißdraht-G-Code (HotWire.gcode, autoGen im Reiter „G-Code“, Nachläufe Aufheizphase/G93/Wasserzeichen, Segment- und Platten-G-Code des 3D-Modells, Blockzuschnitt) sowie die DXF-Schneidepfade. OHNE diese Funktion entsteht eine reine Design-Ausgabe: alle Design-Reiter, Projekt speichern/laden und STL-Export bleiben; der Reiter „G-Code“ kann nur fertige Dateien laden und simulieren.",
+      "files": [
+        "hotwire_gcode.js",
+        "blockprep.js",
+        "model3d_gcode.js",
+        "gcodegen.js",
+        "schrift_gcode.js"
+      ],
+      "tabs": [],
+      "default": true,
+      "kern_bis": "2026-09-13"
+    },
+    {
+      "id": "machine",
+      "name": "Maschine + Schneiden (GRBL-Steuerung, Reiter „Schneiden“ und „Maschine“)",
+      "description": "Reiter „Schneiden“ (Programm wählen, Monitor-Simulation, Start/Pause, Blockzuschnitt, Guillotine, Kalibrierung) und „Maschine“ (Web-Serial-Verbindung, Handfahrt, Homing, $$-Einstellungen, Vorschub-Modus G93). Braucht die G-Code-Erzeugung. Ohne diese Funktion erscheinen Maschinengeometrie und -grenzen im Reiter „G-Code“ (für die Simulation).",
+      "files": [
+        "grbl.js",
+        "cutpanel.js"
+      ],
+      "tabs": [
+        "cut",
+        "machine"
+      ],
+      "views": [
+        "cutView",
+        "machineView"
+      ],
+      "requires": [
+        "gcodegen"
+      ],
+      "default": true,
+      "kern_bis": "2026-09-13"
+    }
+  ]
+}

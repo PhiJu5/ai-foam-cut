@@ -1,0 +1,34 @@
+# --- Niemals veroeffentlichen: Kunden- und Geschaeftsdaten ---------------
+lizenzen/
+Buchhaltung/
+build_profiles/
+build_profiles_electron/
+*.key
+secrets*
+.dev.vars
+
+# --- Fremder Quellcode (nur lokale Referenz, nicht unser Werk) -----------
+AVL/
+
+# --- Build-Ausgaben und Abhaengigkeiten ----------------------------------
+dist/
+build/
+node_modules/
+*.exe
+*.AppImage
+
+# --- Altbestand ----------------------------------------------------------
+_Aussortiert_2026-09-13/
+old/
+
+# --- Entwicklungsreste (alte Modulkopien der Aufteilung, Caches) ----------
+.claude/split_orig/
+.claude/split_backup/
+__pycache__/
+*.pyc
+
+# --- Nicht veroeffentlichen: Geschaeftshistorie und interne Pruefberichte --
+# (vollstaendiger Changelog und Audit liegen im kommerziellen Projekt sowie
+#  hier unter _intern/ - sie beschreiben Verkauf, Kundendatenbank und den
+#  entfernten Kopierschutz)
+_intern/

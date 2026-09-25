@@ -1,0 +1,171 @@
+
+== dxf.js (2)
+   "SVG konnte nicht gelesen werden."
+   "Keine Konturen (Pfade/Polygone) in der SVG gefunden."
+
+== grbl.js (1)
+   "Einstellung gesendet: "
+
+== sim3d.js (1)
+   "Drehung"
+
+== model3d.js (39)
+   "Lädt "
+   "Fehler beim Laden: "
+   "Keine Dreiecke gefunden."
+   "STL nicht lesbar."
+   "vereinfachte Vorschau (1/"
+   " der Flächen)"
+   "Keine Schnittprofile — Ebenen im 3D-Modell setzen."
+   "Schnittprofile (lagerichtig) — Ebene ⊥ "
+   " (Anfang)"
+   " (Ende)"
+   "Rad = Zoom · Ziehen = Verschieben · Doppelklick = zurück"
+   "Querschnitt nicht ermittelbar."
+   "Erst zerlegen — dann Segmentpaar anzeigen."
+   "Null (0,0)"
+   "Segmentpaar "
+   "  · hohl (innen zuerst)"
+   "  · bearbeitet"
+   "Sollkontur A (außen/Loch)"
+   "Sollkontur B"
+   "Schnittspur (A —, B ┄)"
+   "Eindringpunkt + Schlitz"
+   "Startpunkt + Richtung"
+   "Blockgrenzen"
+   "Turmweg links/rechts"
+   "Nullpunkt (0,0)"
+   "Punkt ziehen = verschieben · Doppelklick = zurücksetzen"
+   "Klick = Eindringpunkt (außen) setzen · Rad = Zoom · Ziehen = Verschieben"
+   "Klick = Startpunkt setzen · Rad = Zoom · Ziehen = Verschieben"
+   "Keine Platten-Auswahl — im Menü „Platte / Stapeln\" Segmente wählen."
+   "Platte nicht erzeugbar."
+   "Platte — "
+   " Segmente · Dicke "
+   "Verbindungen automatisch kollisionsfrei (grün); manuell bearbeitet = orange."
+   "● Bearbeiten: Verbindungspfad (Punkte ziehen/hinzufügen/löschen)"
+   "● Bearbeiten: Segmente ziehen"
+   "Punkt ziehen = verschieben · auf Linie klicken = Punkt einfügen · Doppelklick = löschen"
+   "Stück ziehen = verschieben · Rad = Zoom"
+   "Im Menü Bearbeitung wählen · Rad = Zoom · Ziehen = schwenken"
+   "Schnittachse: "
+
+== core.js (1)
+   "OK"
+
+== cad.js (6)
+   " Punkte"
+   "Zwei gegenüberliegende Ecken des umschließenden Rechtecks klicken."
+   "Auf den WEGZUSCHNEIDENDEN Teil einer Kontur klicken — er wird bis zur nächsten Kreuzung entfernt."
+   "Fehler: "
+   "3D-Modell geladen: "
+   "Segment(e)."
+
+== ribs.js (4)
+   "↻ Aus gleichmäßiger Verteilung"
+   "Positionen aus „Anzahl je Segment\" neu übernehmen (überschreibt Handwerte)"
+   "Rippe entfernen"
+   "+ Rippe hinzufügen"
+
+== dxfshapes.js (15)
+   "SVG-Import fehlgeschlagen: "
+   "INNEN aus eigener SVG…"
+   "AUSSEN aus eigener SVG…"
+   "Verschiebung zurücksetzen"
+   "Erst Konturen auswählen (Werkzeug „Auswählen\"), dann zwei Punkte der Spiegelachse klicken. Original bleibt erhalten."
+   "Nichts ausgewählt oder keine Geometrie."
+   "Exportiert: "
+   " Layer, "
+   " Konturen."
+   "Fehler: "
+   "Nichts ausgewählt."
+   " Layer · "
+   " Konturen — bereit zum Export."
+   "Aufriss — alle Segmente (Vorderansicht)"
+   "Ansicht erscheint nach Import (2+ Rippen)."
+
+== filesys.js (7)
+   "Trapezgrenzen (% Halbspannweite, Wurzel 0 → Spitze 100). Bearbeiten schaltet auf „Manuell\"."
+   "Fehler: "
+   "Keine geeignete Profilkontur gefunden."
+   "SVG-Import fehlgeschlagen: "
+   "Menüfarben zurücksetzen"
+   "Neues Projekt starten? Alle Tragflächen-, DXF-, 3D- und CAD-Daten des aktuellen Projekts werden verworfen. Maschinen-Einstellungen und Werkstoff-Datenbank bleiben erhalten."
+   "Neues Projekt."
+
+== render.js (12)
+   "— Original"
+   "– – verzerrt (Drehung)"
+   "Sehne"
+   "Dicke/Sehne"
+   "Werkstück-Drehung ist nicht aktiv."
+   "Keine Drehung angewandt (Winkel ≈ 0)."
+   "Drehwinkel"
+   "Blau = konstruiertes Profil, Orange = was der Draht an der Führungsebene abfährt (chord-normiert überlagert). Das fertige Werkstück (Schnitt senkrecht zur Spannweite) bleibt das Original."
+   "Drehung nicht aktiv."
+   "Keine Drehung angewandt."
+   "X-Fahrweg"
+   " mm"
+
+== sidebar.js (22)
+   "⬍ Profilvergleich (Original ↔ verzerrt)"
+   "Bearbeitung zurücksetzen"
+   "Als G-Code-Quelle übernehmen"
+   " (andere Dicke)"
+   "Alle gleich dicken wählen"
+   "Als Platten-Quelle übernehmen"
+   "Bearbeitung beenden"
+   "Bearbeitung starten"
+   "Segmente verschieben"
+   "Verbindungspfad (Linienzug)"
+   "Verbindungen auf Automatik zurücksetzen"
+   "Positionen zurücksetzen (Auto-Raster)"
+   "Ebenen gleichmäßig verteilen"
+   "+ Ebene hinzufügen"
+   "Schnittebenen ("
+   ") — Wert überschreiben oder mit ↑/↓ verschieben:"
+   "Lage der Ebene (mm)"
+   "Alle Ebenen entfernen"
+   "Zerlegen"
+   "nur Segment "
+   "STL"
+   "Alle Segmente als STL"
+
+== gcodegen.js (21)
+   "° · rauf "
+   " · Draht rauf EIN"
+   " · Draht rauf AUS"
+   " · runter Vorschub "
+   "rauf auf gewünschte Höhe (Winkel "
+   "runter auf Y0 (Winkel "
+   " · Block X "
+   " mm · yTop "
+   " mm · yBot "
+   " mm"
+   " mm kompensiert (nach außen) · Bezug Y0 = Maschinen-Nullpunkt · beide Türme identisch"
+   "waagrecht auf yTop in einem Zug nach hinten durchtrennen"
+   "oben waagrecht nach hinten durchtrennen"
+   "hinten senkrecht runter auf untere Schnitthöhe yBot"
+   "unten waagrecht nach vorn durchtrennen"
+   "Keine Platten-Auswahl — im Menü „Platte\" Segmente wählen."
+   " Zeilen · Platte · "
+   " Segmente · Dicke "
+   "Kein Modellsegment — im Reiter „3D-Modell\" laden und zerlegen."
+   " Zeilen · 3D-Modell Segment "
+   " Punkte je Profil"
+
+== rumpf.js (2)
+   "Keine Spanten."
+   "Wurzelrippe Z ="
+
+== fraese.js (1)
+   " mm in Zeile "
+
+== compute.js (1)
+   "Strak "
+
+== profedit.js (2)
+   ".dat exportieren…"
+   "DXF exportieren…"
+
+T()-Literale geprüft: 1728, fehlend (eindeutig): 137, DICT.en Einträge: 3528

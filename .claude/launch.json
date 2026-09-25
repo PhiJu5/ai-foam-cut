@@ -1,0 +1,26 @@
+{
+ "version": "0.0.1",
+ "configurations": [
+  {
+   "name": "foamcut11",
+   "runtimeExecutable": "python",
+   "runtimeArgs": [
+    ".claude/dev_server.py"
+   ],
+   "port": 8766,
+   "autoPort": true
+  },
+  {
+   "name": "website",
+   "runtimeExecutable": "python",
+   "runtimeArgs": [
+    "-m",
+    "http.server",
+    "8792",
+    "--directory",
+    "website/without download"
+   ],
+   "port": 8792
+  }
+ ]
+}
