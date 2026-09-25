@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
-## [1.4] — unveröffentlicht
+## [1.4] — 2026-09-25
 
 Erste quelloffene Fassung. AI Foam Cut steht ab hier unter der GPL-3.0-or-later.
 
@@ -25,7 +25,18 @@ Erste quelloffene Fassung. AI Foam Cut steht ab hier unter der GPL-3.0-or-later.
   eine gereinigte Electron-Fassung kann später folgen.
 - **Lizenz- und Kopierschutzkette**: `lizenz.py`, `build_tool_electron.py`, Demo-Uhrwache,
   EULA-Zustimmung, Online-Demo-Anbindung. Unter einer freien Lizenz gegenstandslos.
-- Die kommerzielle Website (`website/`).
+- Verkaufs-, Lizenz- und Demo-Teile der Website: `/api/demo`-Schnittstelle samt Worker-Skript
+  und KV-Speicher, Design-/Vollversion, Demozugang, Lemon-Squeezy-Vorbereitung.
+
+### Hinzugefügt
+- **Website** (`website/`) als rein statische Seite neu aufgebaut: ein Programm statt
+  Design-/Vollversion, gleichrangige Kästen für die fertige Windows-.exe und den Quellcode,
+  neuer Abschnitt „Open Source“ (GPL, selbst bauen, mitmachen) und ein Abschnitt
+  „Projekt unterstützen“ mit freiwilliger PayPal-Spende über einen einfachen PayPal.me-Link
+  (paypal.me/AIfoamcut — kein PayPal-Skript, kein Zählpixel). Deutsch und Englisch.
+- `rechtliches.html` an den freien Weg angepasst: Demo-Lizenz und Lizenzverwaltung
+  entfallen, neuer Datenschutz-Abschnitt zur PayPal-Spende, Haftung und Urheberrecht auf
+  die GPL-3.0 (Abschnitte 15–17) gestützt.
 
 ### Hinweis
 Der vollständige Changelog der Vorgeschichte (Version 1.0 bis 1.3) ist nicht Teil dieses

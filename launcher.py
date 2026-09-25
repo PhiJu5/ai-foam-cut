@@ -1,8 +1,10 @@
 import sys, os, json, glob, http.server, socketserver, threading, webbrowser, datetime, ctypes, urllib.parse
 
 # --- Ablaufdatum: App funktioniert nach diesem Datum nicht mehr ---
-# None = kein Ablaufdatum (im Build-Tool das Feld leer lassen).
-EXPIRY = datetime.date(2026, 10, 31)
+# None = kein Ablaufdatum. Fuer die freie Fassung IMMER None: eine GPL-Fassung
+# darf sich nicht selbst abschalten. Das Feld stammt aus der Zeit der befristeten
+# Testversionen und bleibt nur bestehen, weil das Build-Tool es setzen kann.
+EXPIRY = None
 
 HTML_NAME = "AI Foam Cut.html"
 SETTINGS_NAME = "hotwing-settings.json"   # Standard-Dateiname (gleich wie manueller Export in der App)
@@ -274,10 +276,9 @@ def main():
 
     msgbox(
         "AI Foam Cut laeuft jetzt im Browser.\n\n"
-        "Diese Testversion ist gueltig bis %s.\n\n"
         "Aktive Einstellungsdatei:\n%s\n\n"
         "Zum Beenden auf OK klicken (schliesst den lokalen Server)."
-        % (EXPIRY.strftime("%d.%m.%Y"), settings_file) + port_hint,
+        % (settings_file,) + port_hint,
         "AI Foam Cut",
     )
     httpd.shutdown()
