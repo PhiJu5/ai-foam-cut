@@ -1905,7 +1905,8 @@
       [T('Punkt 2: langsam, Heizstrom 1'), fp.slow + T(' mm/min · ') + hp.fast + T(' % → Abbrand ') + kp.slow.toFixed(2) + ' mm'],
       hp.varies ? [T('Punkt 3: langsam, Heizstrom 2'), fp.slow + T(' mm/min · ') + hp.slow + T(' % → Abbrand ')
         + kp.fast.toFixed(2) + ' mm'] : null,
-      [T('Drahtheizung'), App.currentHeat() + (hp.varies ? T(' % (folgt dem Vorschub, Punkt 1+3)') : T(' % (konstant)'))],
+      hp.ext ? [T('Drahtheizung'), T('Externes Netzteil ') + App.extPowerText(d.id) + T(' · Relais ') + hp.fast + ' %']
+      : [T('Drahtheizung'), App.currentHeat() + (hp.varies ? T(' % (folgt dem Vorschub, Punkt 1+3)') : T(' % (konstant)'))],
       [T('Eingegebener Vorschub'), state.cfg.feed + ' mm/min'],
       [T('Wirksamer Abbrand'), App.currentKerf().toFixed(2) + ' mm']
     ];

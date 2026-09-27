@@ -195,6 +195,21 @@
       ],
       "default": true,
       "kern_bis": "2026-09-13"
+    },
+    {
+      "id": "foildb",
+      "name": "Profildatenbank (alle geladenen Profile, Vergleich, Gruppen)",
+      "description": "Reiter „Profildatenbank“: jedes im Programm geladene Profil wird automatisch gesammelt (maschinenweit in hotwing-profile.json, nicht im Projekt); Profile vergleichen (übereinander, Kennwerte-Tabelle), bearbeiten (Dicke/Wölbung/Endleiste/Punktzahl, Name, Notiz), frei gruppieren; die Gruppen erscheinen als Aufklappmenü bei der Profilwahl im Tragflächendesigner und in der Auslegung. Ohne diese Funktion läuft alles wie bisher.",
+      "files": [
+        "foildb.js"
+      ],
+      "tabs": [
+        "foildb"
+      ],
+      "default": true,
+      "views": [
+        "foildbView"
+      ]
     }
   ]
 }

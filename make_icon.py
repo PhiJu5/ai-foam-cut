@@ -1,4 +1,5 @@
-"""Erzeugt das Programm-Icon fuer AI Foam Cut (icon/icon.ico + PNG-Vorschau).
+"""Erzeugt das Programm-Icon fuer AI Foam Cut (icon/icon.ico, icon-1024.png fuer
+den Mac + PNG-Vorschau).
 
 Motiv: ein Tragflaechenprofil (echtes NACA 2415, optisch verdickt) ueber dem
 gluehenden Schneiddraht, der tangential darunter liegt - der Schnitt ist gerade
@@ -26,6 +27,7 @@ WIRE_MID = (255, 150, 40)      # Draht aussen
 GLOW = (255, 120, 20)          # Schein um den Draht
 
 SIZES = [256, 128, 64, 48, 32, 24, 16]
+MAC_SIZE = 1024                 # nur als PNG fuer die Mac-Ausgabe
 SS = 8                          # Supersampling-Faktor
 
 
@@ -156,6 +158,8 @@ def main():
     ico = os.path.join(OUTDIR, "icon.ico")
     imgs[0].save(ico, format="ICO", sizes=[(p, p) for p in SIZES])
     print("geschrieben:", ico)
+    # macOS: electron-builder macht daraus die .icns - verlangt mindestens 512 px.
+    draw_icon(MAC_SIZE).save(os.path.join(OUTDIR, "icon-%d.png" % MAC_SIZE))
 
     # Vorschaublatt auf neutralem Grau
     pad, gap = 24, 20

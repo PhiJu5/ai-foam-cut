@@ -8,10 +8,14 @@ weggelassenen Funktionen werden aus der HTML entfernt.
 Auswahlen lassen sich als Profil speichern (build_profiles/*.json), z. B.
 "Tester Meier" = nur Basis + Stege.
 
+Ziel Linux: dieselbe Auswahl als ausfuehrbare Linux-Datei (PyInstaller).
+Unter Windows laeuft dieser Bau in WSL (siehe wslbuild.py), unter Linux direkt.
+
 Aufruf:
     python build_tool.py                       -> Oberflaeche
     python build_tool.py --profile NAME        -> ohne Oberflaeche mit gespeichertem Profil bauen
     python build_tool.py --profile NAME --version 1.30
+    python build_tool.py --profile NAME --linux [--distro Ubuntu]
 
 Am einfachsten: BUILD_TOOL.bat doppelklicken.
 Der Quellordner wird NICHT veraendert - der Build laeuft in build/_stage_<name>/.
@@ -19,11 +23,25 @@ Der Quellordner wird NICHT veraendert - der Build laeuft in build/_stage_<name>/
 import os, re, sys, json, glob, shutil, datetime, subprocess, threading, queue
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import wslbuild as WSL          # noqa: E402  Linux-Bau in WSL
 HTML = "AI Foam Cut.html"
 ENTRY = "launcher.py"
 MANIFEST = "features.json"
 PROFILE_DIR = os.path.join(HERE, "build_profiles")
 BASENAME = "AI Foam Cut"
+LINUX_SUFFIX = "-linux"          # dist/<name>-linux = ausfuehrbare Linux-Datei
+
+
+def open_dir(p):
+    """Ordner im Dateimanager zeigen - Windows, Linux und macOS."""
+    os.makedirs(p, exist_ok=True)
+    if os.name == "nt":
+        os.startfile(p)                                    # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", p])
+    else:
+        subprocess.Popen(["xdg-open", p])
 
 
 # ---------------------------------------------------------------- Manifest
@@ -181,8 +199,11 @@ def profile_path(name):
 
 
 def list_profiles():
+    # Dateien mit Unterstrich am Anfang sind Einstellungen des Werkzeugs
+    # (_linux.json: Ziel und WSL-Distribution), keine Profile.
     return sorted(os.path.splitext(os.path.basename(p))[0]
-                  for p in glob.glob(os.path.join(PROFILE_DIR, "*.json")))
+                  for p in glob.glob(os.path.join(PROFILE_DIR, "*.json"))
+                  if not os.path.basename(p).startswith("_"))
 
 
 def save_profile(name, data):
@@ -248,10 +269,18 @@ def patch_launcher(src, expiry):
 
 
 def run_build(cfg, log, cancel=None):
-    """cfg: {name, version, expiry, features:[ids], profile, edition, demo:[ids]}
+    """cfg: {name, version, expiry, features:[ids], profile, edition, demo:[ids],
+             target: 'win'|'linux', distro}
     demo = Feature-IDs, die enthalten sind, aber ohne Exportfunktionen laufen
     (window.BUILD_INFO.demo; das Modul prueft das selbst).
-    Baut dist/<name>.exe. Wirft bei Fehlern eine Exception."""
+    Baut dist/<name>.exe bzw. bei target='linux' dist/<name>-linux (in WSL
+    oder direkt unter Linux). Wirft bei Fehlern eine Exception."""
+    target = cfg.get("target") or "win"
+    if target not in ("win", "linux"):
+        raise RuntimeError("Unbekanntes Ziel: %r" % target)
+    if target == "win" and os.name != "nt":
+        raise RuntimeError("Die Windows-exe laesst sich nur unter Windows bauen "
+                           "(PyInstaller packt immer fuer das eigene System).")
     feats = load_manifest()
     html = read_html()
     selected = set(cfg["features"])
@@ -291,7 +320,7 @@ def run_build(cfg, log, cancel=None):
         raise RuntimeError("Dateien fehlen: %s" % ", ".join(missing))
 
     log("=" * 60)
-    log("Build: %s" % name)
+    log("Build: %s   Ziel: %s" % (name, "Linux" if target == "linux" else "Windows"))
     log("Ablauf: %s   Profil: %s   Ausgabe: %s" % (cfg["expiry"] or "kein Ablaufdatum",
         cfg.get("profile") or "-", cfg.get("edition") or "-"))
     log("Funktionen: %s" % (", ".join(sorted(selected)) or "nur Kern"))
@@ -308,13 +337,14 @@ def run_build(cfg, log, cancel=None):
     log("=" * 60)
     log("Dateien (%d): %s" % (len(files) + 1, ", ".join(files + [HTML])))
 
-    ensure_pyinstaller(log)
+    if target == "win":
+        ensure_pyinstaller(log)
 
     build_info = {
         "name": name, "version": cfg["version"], "expiry": cfg["expiry"],
         "date": datetime.date.today().isoformat(), "profile": cfg.get("profile") or "",
         "edition": cfg.get("edition", "Demo"), "features": sorted(selected),
-        "demo": demo,
+        "demo": demo, "plattform": "linux" if target == "linux" else "windows",
     }
 
     stage = os.path.join(HERE, "build", "_stage_" + name)
@@ -332,6 +362,8 @@ def run_build(cfg, log, cancel=None):
         json.dump(build_info, f, indent=2, ensure_ascii=False)
 
     dist = os.path.join(HERE, "dist")
+    if target == "linux":
+        return _build_linux(cfg, name, stage, files, dist, build_info, log, cancel)
     exe = os.path.join(dist, name + ".exe")
     if os.path.isfile(exe):
         try:
@@ -370,6 +402,33 @@ def run_build(cfg, log, cancel=None):
     log("")
     log("FERTIG: %s  (%.1f MB)" % (exe, os.path.getsize(exe) / 1e6))
     return exe
+
+
+def _build_linux(cfg, name, stage, files, dist, build_info, log, cancel):
+    """PyInstaller fuer Linux: in WSL (unter Windows) oder direkt (unter Linux).
+    Das Python dafuer liegt in ~/afc-build/pyvenv (wslbuild.setup)."""
+    out_name = name + LINUX_SUFFIX
+    out = os.path.join(dist, out_name)
+    if os.path.isfile(out):
+        os.remove(out)
+    q = WSL.shq
+    # Unter Linux trennt ":" Quelle und Ziel bei --add-data (Windows: ";").
+    parts = [WSL.PY, "-m", "PyInstaller", "--onefile", "--noconsole", "--clean", "--noconfirm",
+             "--name", q(out_name), "--distpath", "out", "--workpath", "work", "--specpath", "."]
+    for f in files + [HTML]:
+        parts += ["--add-data", q("%s:." % f)]
+    parts.append(ENTRY)
+    got = WSL.build(cfg.get("distro", ""), stage, dist, " ".join(parts), ["out/" + out_name],
+                    log, cancel=cancel, what="Linux", stage_name="pystage")
+    with open(out + ".build.json", "w", encoding="utf-8") as f:
+        json.dump(build_info, f, indent=2, ensure_ascii=False)
+    shutil.rmtree(stage, ignore_errors=True)
+    log("")
+    log("FERTIG: %s  (%.1f MB)" % (got[0], os.path.getsize(got[0]) / 1e6))
+    log("Beim Nutzer: in einen EIGENEN Ordner legen (daneben entstehen die Einstellungen), "
+        "dann:  chmod +x \"%s\"  und starten. Fuer die Maschine muss der Benutzer in der "
+        "Gruppe \"dialout\" sein (sudo usermod -aG dialout $USER)." % out_name)
+    return got[0]
 
 
 # ---------------------------------------------------------------- UI
@@ -411,8 +470,26 @@ def run_ui():
     ttk.Label(top, text="Ausgabe (steht im Programm neben der Version, z. B. Demo):").grid(row=4, column=0, sticky="w", columnspan=2)
     ed_var = tk.StringVar(value="Demo")
     ttk.Entry(top, textvariable=ed_var, width=16).grid(row=4, column=2, sticky="w", padx=4)
+    ttk.Label(top, text="Ziel:").grid(row=5, column=0, sticky="w")
+    lin_set = WSL.load_settings(PROFILE_DIR)
+    target_var = tk.StringVar(value="win" if os.name == "nt" else "linux")
+    tf = ttk.Frame(top); tf.grid(row=5, column=1, columnspan=4, sticky="w", padx=4)
+    ttk.Radiobutton(tf, text="Windows (.exe)", variable=target_var, value="win").pack(side="left")
+    ttk.Radiobutton(tf, text="Linux" + (" (Bau in WSL)" if os.name == "nt" else ""),
+                    variable=target_var, value="linux").pack(side="left", padx=(12, 0))
+    dist_var = tk.StringVar(value=lin_set.get("distro", ""))
+    if os.name == "nt":
+        ttk.Label(tf, text="Distribution:").pack(side="left", padx=(16, 2))
+        dist_cb = ttk.Combobox(tf, textvariable=dist_var, width=16, values=WSL.distros())
+        dist_cb.pack(side="left")
+        if not dist_var.get() and dist_cb.cget("values"):
+            dist_var.set(dist_cb.cget("values")[0])
+    ttk.Button(tf, text="Umgebung pruefen",
+               command=lambda: do_lin_check()).pack(side="left", padx=(8, 2))
+    ttk.Button(tf, text="Linux-Werkzeuge einrichten...",
+               command=lambda: do_lin_setup()).pack(side="left", padx=2)
     name_lbl = ttk.Label(top, text="", foreground="#555")
-    name_lbl.grid(row=5, column=0, columnspan=5, sticky="w")
+    name_lbl.grid(row=6, column=0, columnspan=5, sticky="w")
 
     def exe_name():
         v = ver_var.get().strip().lstrip("vV")
@@ -422,10 +499,18 @@ def run_ui():
 
     def refresh_name(*_):
         ed = ed_var.get().strip()
-        name_lbl.config(text="exe-Name: dist\\%s.exe    Anzeige im Programm: v%s%s"
-                        % (exe_name(), ver_var.get().strip().lstrip("vV"), (" · " + ed) if ed else ""))
+        datei = exe_name() + (LINUX_SUFFIX if target_var.get() == "linux" else ".exe")
+        name_lbl.config(text="Datei: dist%s%s    Anzeige im Programm: v%s%s"
+                        % (os.sep, datei, ver_var.get().strip().lstrip("vV"), (" · " + ed) if ed else ""))
+        build_btn_text = "Linux-Datei bauen" if target_var.get() == "linux" else "EXE bauen"
+        if "build_btn" in ui:
+            ui["build_btn"].config(text=build_btn_text)
+    ui = {}
     ver_var.trace_add("write", refresh_name); suffix_var.trace_add("write", refresh_name)
     ed_var.trace_add("write", refresh_name)
+    target_var.trace_add("write", refresh_name)
+    target_var.trace_add("write", lambda *a: WSL.save_settings(PROFILE_DIR, {"target": target_var.get()}))
+    dist_var.trace_add("write", lambda *a: WSL.save_settings(PROFILE_DIR, {"distro": dist_var.get().strip()}))
     refresh_name()
 
     # --- Feature-Liste
@@ -517,12 +602,14 @@ def run_ui():
 
     # --- Aktionen + Log
     act = ttk.Frame(root); act.pack(fill="x", **pad)
-    build_btn = ttk.Button(act, text="EXE bauen", command=lambda: do_build())
+    build_btn = ttk.Button(act, text="EXE bauen", width=18, command=lambda: do_build())
     build_btn.pack(side="left")
+    ui["build_btn"] = build_btn
+    refresh_name()
     cancel_btn = ttk.Button(act, text="Abbrechen", state="disabled", command=lambda: state.update(cancel=True))
     cancel_btn.pack(side="left", padx=4)
     ttk.Button(act, text="Ordner dist oeffnen",
-               command=lambda: os.startfile(os.path.join(HERE, "dist"))).pack(side="left", padx=4)
+               command=lambda: open_dir(os.path.join(HERE, "dist"))).pack(side="left", padx=4)
     status = ttk.Label(act, text=""); status.pack(side="left", padx=12)
 
     logf = ttk.LabelFrame(root, text="Protokoll"); logf.pack(fill="both", expand=True, **pad)
@@ -546,8 +633,8 @@ def run_ui():
                     status.config(text=s[2], foreground="#080" if s[1] else "#b00")
                     if s[1]:
                         prof_cb.config(values=list_profiles())
-                        if messagebox.askyesno("Fertig", s[2] + "\n\nOrdner dist oeffnen?"):
-                            os.startfile(os.path.join(HERE, "dist"))
+                        if s[2].startswith("Fertig") and messagebox.askyesno("Fertig", s[2] + "\n\nOrdner dist oeffnen?"):
+                            open_dir(os.path.join(HERE, "dist"))
                     else:
                         messagebox.showerror("Build fehlgeschlagen", s[2])
                 else:
@@ -563,7 +650,56 @@ def run_ui():
                 "features": [i for i, v in vars_.items() if v.get()],
                 "demo": [i for i, v in demo_vars.items() if v.get() and vars_[i].get()],
                 "demo_kern": bool(kern_demo_var.get()),
-                "export_lock": bool(export_lock_var.get())}
+                "export_lock": bool(export_lock_var.get()),
+                "target": target_var.get(), "distro": dist_var.get().strip()}
+
+    def bg(what, worker):
+        """Pruefen/Einrichten/Bauen im Hintergrund; worker() gibt die Schlussmeldung."""
+        state.update(running=True, cancel=False)
+        build_btn.config(state="disabled"); cancel_btn.config(state="normal")
+        status.config(text=what + " laeuft ...", foreground="#555")
+        txt.delete("1.0", "end")
+
+        def work():
+            try:
+                q.put((True, True, worker()))
+            except Exception as e:
+                log("FEHLER: %s" % e)
+                q.put((True, False, str(e)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def do_lin_check():
+        if state["running"]:
+            return
+
+        def work():
+            ok, bericht = WSL.check(dist_var.get().strip(), "python")
+            for ln in bericht.splitlines():
+                log(ln)
+            if not ok:
+                raise RuntimeError("Die Linux-Bauumgebung ist noch nicht fertig - siehe Protokoll.")
+            return "Linux-Umgebung in Ordnung"
+        bg("Pruefen", work)
+
+    def do_lin_setup():
+        if state["running"]:
+            return
+        if os.name == "nt" and not WSL.distros():
+            txt.delete("1.0", "end"); txt.insert("end", WSL.FEHLT + "\n")
+            status.config(text="Kein WSL installiert", foreground="#b00")
+            return
+        if not messagebox.askyesno(
+                "Linux-Werkzeuge einrichten",
+                "In der Linux-Umgebung werden eingerichtet:\n"
+                "  - Systempakete: %s\n"
+                "  - ein eigenes Python mit PyInstaller unter ~/afc-build/pyvenv\n\n"
+                "Nur einmal noetig. Jetzt einrichten?" % " ".join(WSL.APT_PY)):
+            return
+
+        def work():
+            WSL.setup(dist_var.get().strip(), "python", log, cancel=lambda: state["cancel"])
+            return "Linux-Werkzeuge eingerichtet"
+        bg("Einrichten", work)
 
     def do_build():
         if state["running"]:
@@ -577,19 +713,11 @@ def run_ui():
             cfg["expiry"] = normalize_expiry(cfg["expiry"])
         except Exception as e:
             messagebox.showerror("Ablaufdatum", str(e)); return
-        state.update(running=True, cancel=False)
-        build_btn.config(state="disabled"); cancel_btn.config(state="normal")
-        status.config(text="Build laeuft ...", foreground="#555")
-        txt.delete("1.0", "end")
-
-        def work():
-            try:
-                exe = run_build(cfg, log, cancel=lambda: state["cancel"])
-                q.put((True, True, "Fertig: " + exe))
-            except Exception as e:
-                log("FEHLER: %s" % e)
-                q.put((True, False, str(e)))
-        threading.Thread(target=work, daemon=True).start()
+        if cfg["target"] == "linux" and os.name == "nt" and not WSL.distros():
+            txt.delete("1.0", "end"); txt.insert("end", WSL.FEHLT + "\n")
+            status.config(text="Kein WSL installiert", foreground="#b00")
+            return
+        bg("Build", lambda: "Fertig: " + run_build(cfg, log, cancel=lambda: state["cancel"]))
 
     def do_save_profile():
         name = prof_var.get().strip() or simpledialog.askstring("Profil", "Name des Profils:", parent=root)
@@ -599,7 +727,7 @@ def run_ui():
         save_profile(name, {"features": cfg["features"], "known": [ft["id"] for ft in feats],
                             "expiry": cfg["expiry"], "suffix": suffix_var.get().strip(),
                             "edition": cfg["edition"], "demo": cfg["demo"], "demo_kern": cfg["demo_kern"],
-                            "export_lock": cfg["export_lock"]})
+                            "export_lock": cfg["export_lock"], "target": cfg["target"]})
         prof_var.set(name); prof_cb.config(values=list_profiles())
         status.config(text="Profil gespeichert: " + name, foreground="#555")
 
@@ -620,6 +748,8 @@ def run_ui():
         if "edition" in p:
             ed_var.set(p["edition"])
         suffix_var.set(p.get("suffix", ""))
+        if p.get("target") in ("win", "linux"):
+            target_var.set(p["target"])
         status.config(text="Profil geladen: " + name, foreground="#555")
 
     def do_del_profile():
@@ -644,6 +774,10 @@ def run_cli(args):
            "profile": name, "features": profile_features(p, load_manifest()),
            "edition": p.get("edition", "Demo"), "demo": p.get("demo", []), "demo_kern": bool(p.get("demo_kern")),
            "export_lock": bool(p.get("export_lock"))}
+    if "--linux" in args:
+        cfg["target"] = "linux"
+        cfg["distro"] = (args[args.index("--distro") + 1] if "--distro" in args
+                         else WSL.load_settings(PROFILE_DIR).get("distro", ""))
     run_build(cfg, print)
 
 

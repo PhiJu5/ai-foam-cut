@@ -557,6 +557,54 @@
   .cadOpt:hover{border-color:var(--accent);background:#182230}
   .cadSug{cursor:pointer;padding:1px 4px;border-radius:3px}
   .cadSug:hover{background:#182230}
+
+  /* ---- Reiter "Profildatenbank" (foildb.js) ---- */
+  .fdb-wrap{position:absolute;inset:0;display:grid;grid-template-columns:400px 1fr;min-height:0}
+  @media(max-width:1250px){.fdb-wrap{grid-template-columns:340px 1fr}}
+  .fdb-left{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line);background:var(--panel)}
+  .fdb-tools{display:flex;flex-wrap:wrap;gap:5px;padding:8px 10px;border-bottom:1px solid var(--line);align-items:center}
+  .fdb-tools input[type=text]{flex:1;min-width:120px;font-size:12px}
+  .fdb-tools select{font-family:var(--mono);font-size:11px}
+  .fdb-tools .cnt{font-family:var(--mono);font-size:10px;color:var(--muted);margin-left:auto}
+  .fdb-list{flex:1;overflow:auto;padding:6px 8px 30px}
+  .fdb-row{display:flex;align-items:center;gap:7px;padding:5px 6px;border:1px solid transparent;border-radius:6px;cursor:pointer}
+  .fdb-row:hover{background:rgba(255,255,255,.04)}
+  .fdb-row.sel{border-color:var(--accent);background:rgba(74,163,255,.12)}
+  .fdb-row svg{width:60px;height:24px;flex:none}
+  .fdb-row input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);margin:0;flex:none}
+  .fdb-info{flex:1;min-width:0}
+  .fdb-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fdb-meta{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:1px}
+  .fdb-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
+  .fdb-chip{font-size:9.5px;padding:0 5px;border-radius:8px;background:rgba(74,163,255,.18);color:var(--txt)}
+  .fdb-right{display:grid;grid-template-rows:minmax(220px,45%) 1fr;min-height:0}
+  .fdb-cmp{position:relative;border-bottom:1px solid var(--line);min-height:0}
+  .fdb-cmp canvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab}
+  .fdb-cmp .pane-label{position:absolute;left:10px;top:6px;font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+  .fdb-cmp .fdb-cmpbtns{position:absolute;right:10px;top:6px;display:flex;gap:4px}
+  .fdb-cmp .fdb-cmpbtns button{font-size:10px;padding:2px 7px}
+  .fdb-bottom{display:grid;grid-template-columns:minmax(300px,420px) 1fr;min-height:0;overflow:hidden}
+  .fdb-detail{overflow:auto;padding:10px 12px 40px;border-right:1px solid var(--line)}
+  .fdb-detail .gh{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:12px 0 6px;display:flex;align-items:center;gap:8px}
+  .fdb-detail .gh:first-child{margin-top:0}
+  .fdb-detail .gh::after{content:"";flex:1;height:1px;background:var(--line)}
+  .fdb-field{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px}
+  .fdb-field label{font-size:12px}
+  .fdb-field input[type=number]{width:96px;font-family:var(--mono);font-size:12px;text-align:right}
+  .fdb-field input[type=text]{flex:1}
+  .fdb-field .u{font-family:var(--mono);font-size:10px;color:var(--muted);width:20px}
+  .fdb-hint{font-size:11px;color:var(--muted);line-height:1.5;margin:4px 0}
+  .fdb-groups{display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:6px}
+  .fdb-groups label{font-size:12px;display:flex;align-items:center;gap:3px}
+  .fdb-groups input{accent-color:var(--accent);margin:0}
+  .fdb-btns{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0}
+  .fdb-btns select{flex:1;min-width:120px}
+  .fdb-tablewrap{overflow:auto;padding:10px 12px 40px}
+  table.fdb-tbl{border-collapse:collapse;font-family:var(--mono);font-size:11.5px;width:100%}
+  table.fdb-tbl th,table.fdb-tbl td{padding:3px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  table.fdb-tbl th{font-weight:600;color:var(--txt)}
+  table.fdb-tbl td:first-child,table.fdb-tbl th:first-child{text-align:left;color:var(--muted)}
+  .fdb-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -586,6 +634,7 @@
         <button data-view="wing">Tragflächendesigner</button>
         <button data-view="neg">Negativschalendesign</button>
         <button data-view="core">Kerndesign</button>
+        <button data-view="foildb">Profildatenbank</button>
       </div>
     </div>
     <div class="tab-more" data-group="Komplexe Formen">
@@ -722,6 +771,40 @@
           <button id="btnEditCancel" style="display:none" title="Bearbeitung verwerfen">✕ Abbrechen</button>
           <button id="btnRegenGcode" title="Manuelle Änderungen verwerfen und aus den Parametern neu erzeugen">↻ Neu erzeugen</button>
           <span id="gInfo" class="hint" style="align-self:center"></span>
+        </div>
+      </div>
+
+
+      <div class="view" id="foildbView">
+        <div class="fdb-wrap">
+          <div class="fdb-left">
+            <div class="fdb-tools">
+              <input type="text" id="fdbFilter" placeholder="Suchen (Name, Datei, Notiz)…">
+              <select id="fdbGroup" title="Nur Profile dieser Gruppe zeigen"></select>
+              <select id="fdbSort" title="Sortierung">
+                <option value="name">Name</option>
+                <option value="added">Zuletzt geladen</option>
+                <option value="thick">Dicke</option>
+                <option value="cam">Wölbung</option>
+              </select>
+              <span class="cnt" id="fdbCount"></span>
+            </div>
+            <div class="fdb-list" id="fdbList"></div>
+          </div>
+          <div class="fdb-right">
+            <div class="fdb-cmp">
+              <span class="pane-label">Vergleich — Mausrad = Zoom, Ziehen = Verschieben, Doppelklick = zurück</span>
+              <div class="fdb-cmpbtns">
+                <button type="button" id="fdbCmpAll" title="Alle in der Liste sichtbaren Profile übereinanderlegen">Alle sichtbaren</button>
+                <button type="button" id="fdbCmpClear" title="Vergleichsauswahl leeren">Vergleich leeren</button>
+              </div>
+              <canvas id="cFoilDb"></canvas>
+            </div>
+            <div class="fdb-bottom">
+              <div class="fdb-detail" id="fdbDetail"></div>
+              <div class="fdb-tablewrap" id="fdbTable"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1454,18 +1537,18 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20260924bo"></script>
+<script src="i18n.js?v=20260927bz5"></script>
 <script src="safety.js?v=20260924hf"></script>
 <script src="airfoil.js?v=20260913x"></script>
 <script src="materials.js?v=20260913x"></script>
 <script src="blockprep.js?v=20260913x"></script>
 <script src="wing.js?v=20260913x"></script>
 <script src="flz.js?v=20260919wi"></script>
-<script src="xflr5.js?v=20260919wi"></script>
+<script src="xflr5.js?v=20260926xf"></script>
 <script src="pc2.js?v=20260920pc"></script>
 <script src="dxf.js?v=20260913x"></script>
 <script src="hotwire.js?v=20260918cf"></script>
-<script src="hotwire_gcode.js?v=20260919en"></script>
+<script src="hotwire_gcode.js?v=20260927bz4"></script>
 <script src="sweeprot.js?v=20260913x"></script>
 <script src="earcut.js?v=20260921cu"></script>
 <script src="grbl.js?v=20260924hf"></script>
@@ -1474,22 +1557,22 @@
 <script src="simmodel.js?v=20260921b"></script>
 <script src="model3d.js?v=20260921vd"></script>
 <script src="model3d_gcode.js?v=20260919en"></script>
-<script src="core.js?v=20260923rp"></script>
+<script src="core.js?v=20260927bz3"></script>
 <script src="cad.js?v=20260921sq"></script>
 <script src="gcode.js?v=20260922ni"></script>
 <script src="spars.js?v=20260923np"></script>
 <script src="ribs.js?v=20260921cv"></script>
-<script src="dxfshapes.js?v=20260921sn"></script>
+<script src="dxfshapes.js?v=20260927bz5"></script>
 <script src="wingimport.js?v=20260920pc"></script>
-<script src="filesys.js?v=20260924ot"></script>
+<script src="filesys.js?v=20260925fd"></script>
 <script src="wingexport.js?v=20260920pc2"></script>
 <script src="gmfc.js?v=20260918a"></script>
-<script src="render.js?v=20260923wc"></script>
+<script src="render.js?v=20260927pw"></script>
 <script src="measure2d.js?v=20260918mt"></script>
-<script src="sidebar.js?v=20260924bn"></script>
+<script src="sidebar.js?v=20260927bz4"></script>
 <script src="pathpreview.js?v=20260918nz"></script>
-<script src="gcodegen.js?v=20260923rp"></script>
-<script src="cutpanel.js?v=20260923rp"></script>
+<script src="gcodegen.js?v=20260927bz2"></script>
+<script src="cutpanel.js?v=20260927pw"></script>
 <script src="stege.js?v=20260919k5"></script>
 <script src="kernteile.js?v=20260919k3"></script>
 <script src="stepexport.js?v=20260917p"></script>
@@ -1499,14 +1582,15 @@
 <script src="schrift_fonts.js?v=20260918sc"></script>
 <script src="schrift.js?v=20260919en"></script>
 <script src="schrift_gcode.js?v=20260918sd"></script>
-<script src="compute.js?v=20260918sf"></script>
+<script src="foildb.js?v=20260925fd"></script>
+<script src="compute.js?v=20260927pw"></script>
 <script src="wings.js?v=20260923pm"></script>
 <script src="overview_bg.js?v=20260914j"></script>
-<script src="overview.js?v=20260919wt"></script>
+<script src="overview.js?v=20260927pw"></script>
 <script src="ptedit.js?v=20260919en"></script>
 <script src="profedit.js?v=20260913x"></script>
 <script src="tabmenu.js?v=20260918b"></script>
-<script src="app.js?v=20260922ne"></script>
+<script src="app.js?v=20260925fd"></script>
 </body>
 </html>
 

@@ -1,12 +1,13 @@
-// Plattform-Unterschiede zwischen Windows und Linux - an EINER Stelle.
+// Plattform-Unterschiede zwischen Windows, Linux und macOS - an EINER Stelle.
 //
 // Die Anwendung selbst ist plattformneutral (Chromium + Node). Verschieden
-// sind nur zwei Dinge, und die stehen hier:
+// sind nur drei Dinge, und die stehen hier:
 //   1. der Ordner, in dem die portable Ausgabe liegt (dort liegen die
-//      Einstellungsdateien),
-//   2. das Programmsymbol (.ico bzw. .png).
+//      Einstellungsdateien) - auf dem Mac der Ordner neben der .app,
+//   2. das Programmsymbol (.ico bzw. .png),
+//   3. die Menueleiste (macOS braucht eine, sonst gehen Cmd+C/V/Q nicht).
 //
-// Alles andere - Server, Fenster, serielle Ports - ist auf beiden Systemen
+// Alles andere - Server, Fenster, serielle Ports - ist auf allen Systemen
 // derselbe Code.
 const fs = require('fs');
 const os = require('os');
@@ -15,6 +16,7 @@ const { execFileSync } = require('child_process');
 
 const IS_WIN = process.platform === 'win32';
 const IS_LINUX = process.platform === 'linux';
+const IS_MAC = process.platform === 'darwin';
 
 // ------------------------------------------------------- Ordner der Ausgabe
 /**
@@ -26,8 +28,10 @@ const IS_LINUX = process.platform === 'linux';
  * den echten Ordner in PORTABLE_EXECUTABLE_DIR ab.
  * Linux: das AppImage haengt sich nach /tmp/.mount_* ein; APPIMAGE zeigt auf
  * die AppImage-Datei selbst, OWD auf den Ordner, aus dem gestartet wurde.
+ * macOS: siehe macDir().
  */
 function portableDir() {
+  if (IS_MAC) return macDir();
   const win = process.env.PORTABLE_EXECUTABLE_DIR;
   if (win && isDir(win)) return win;
   const img = process.env.APPIMAGE;
@@ -42,6 +46,35 @@ function portableDir() {
 
 function isDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch (e) { return false; }
+}
+
+/**
+ * macOS: der Ordner, in dem "AI Foam Cut.app" liegt - wie bei exe und
+ * AppImage. Drei Faelle, in denen das nicht geht, landen stattdessen in
+ * ~/Documents/AI Foam Cut:
+ *   - App Translocation: eine heruntergeladene, noch unter Quarantaene
+ *     stehende App startet macOS aus einem zufaelligen, schreibgeschuetzten
+ *     Ordner (/private/var/folders/.../AppTranslocation/...),
+ *   - die App liegt unter /Applications (Einstellungsdateien gehoeren nicht
+ *     zwischen die Programme),
+ *   - der Ordner ist nicht beschreibbar.
+ * Leer ausserhalb einer gepackten .app (Entwicklungsstart).
+ */
+function macDir() {
+  const exe = process.execPath;
+  const i = exe.indexOf('.app/Contents/MacOS/');
+  if (i < 0) return '';
+  const dir = path.dirname(exe.slice(0, i + 4));
+  const apps = [path.join(os.homedir(), 'Applications'), '/Applications'];
+  const ok = dir.indexOf('/AppTranslocation/') < 0 && apps.indexOf(dir) < 0 && writable(dir);
+  if (ok) return dir;
+  const docs = path.join(os.homedir(), 'Documents', 'AI Foam Cut');
+  try { fs.mkdirSync(docs, { recursive: true }); } catch (e) { /* unten geprueft */ }
+  return isDir(docs) ? docs : '';
+}
+
+function writable(dir) {
+  try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch (e) { return false; }
 }
 
 // ----------------------------------------------------------- Benutzer-Ablagen
@@ -60,6 +93,26 @@ function iconFile(appRoot) {
   return fs.existsSync(alt) ? alt : p;
 }
 
+// ----------------------------------------------------------------- Menueleiste
+/**
+ * macOS: Vorlage fuer Menu.buildFromTemplate(). Ohne Anwendungsmenue gibt es
+ * dort weder Cmd+C/V/X/A/Z in Eingabefeldern noch Cmd+Q - unter Windows und
+ * Linux bleibt das Menue dagegen ganz weg (null). Reine Daten, damit diese
+ * Datei ohne Electron auskommt.
+ */
+function appMenuTemplate(appName) {
+  if (!IS_MAC) return null;
+  return [
+    { label: appName, submenu: [
+      { role: 'about' }, { type: 'separator' },
+      { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+      { type: 'separator' }, { role: 'quit' },
+    ] },
+    { role: 'editMenu' },
+    { role: 'windowMenu' },
+  ];
+}
+
 module.exports = {
-  IS_WIN, IS_LINUX, portableDir, iconFile,
+  IS_WIN, IS_LINUX, IS_MAC, portableDir, iconFile, appMenuTemplate,
 };

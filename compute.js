@@ -337,7 +337,22 @@
     if (!state.material.heatSlow) state.material.heatSlow = {};
     if (val == null) delete state.material.heatSlow[id]; else state.material.heatSlow[id] = val;
   }
+  // Drahtversorgung je Werkstoff (props.power): 'int' = interne Heißdrahtsteuerung
+  // (Heizstrom % über M3 S…, wie bisher), 'ext' = externes Netzteil. Bei 'ext'
+  // schaltet der Heizstromausgang nur noch ein Relais: fester Pegel (props.relayLvl,
+  // Standard 100 % = volle Ausgangsspannung), keine Vorschub-Abhängigkeit. Spannung/
+  // Strom am Netzteil (props.extV/extA) sind reine Einstellvorgaben für den Bediener.
+  function matExtPower(id) { return matField(id, 'power', 'int') === 'ext'; }
+  function relayLevel(id) {
+    const l = +matField(id, 'relayLvl', 100);
+    return isFinite(l) ? Math.min(100, Math.max(0, l)) : 100;
+  }
+  function extPowerText(id) {
+    const v = +matField(id, 'extV', 0), a = +matField(id, 'extA', 0);
+    return (v > 0 ? v + ' V' : '? V') + ' / ' + (a > 0 ? a + ' A' : '? A');
+  }
   function heatPair(id) {
+    if (matExtPower(id)) { const l = relayLevel(id); return { slow: l, fast: l, varies: false, ext: true }; }
     const fast = matHeat(id), slow = matHeatSlow(id);
     return { slow: slow != null ? slow : fast, fast, varies: slow != null };
   }
@@ -759,7 +774,7 @@
   migrateExtOverBlock(state.cfg);
   Object.assign(App, { currentFeed, currentHeat, currentKerf, currentWireS, cutKerf, delMaterial, effSweep, extEffTip, migrateExtOverBlock });
   Object.assign(App, { feedPair, inheritRootExtensions, kerfForSpeed, kerfPair, lerpProfile, matField, matHeat, matOptions });
-  Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor });
+  Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor, matExtPower, relayLevel, extPowerText });
   Object.assign(App, { matPair, moveSeg, polyPerim, profIsAll, profSet, profShowIndices, profToggle, projectCut, rootAtRight });
   Object.assign(App, { recompute, removeSeg, setFeed, setHeat, setKerf, setMatField, setPair, sheetActive });
   Object.assign(App, { matCtx, matIdFor, blockH, sheetFor, sparKerfHalf, splitSeg, startAtTop, updateFeedWarn });

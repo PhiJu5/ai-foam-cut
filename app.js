@@ -68,6 +68,9 @@
       else if (name === 'rumpf' && window.Rumpf) Rumpf.show();
       else if (name === 'fraese' && window.Fraese) Fraese.show();
       else if (name === 'schrift' && window.Schrift) Schrift.show();
+      else if (name === 'aero' && window.Aero) Aero.show();
+      else if (name === 'ausl' && window.Auslegung) Auslegung.show();
+      else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     });
   }
   // Den gerade sichtbaren Reiter vollständig neu zeichnen (mit den aktuellen
@@ -90,6 +93,9 @@
     else if (name === 'rumpf' && window.Rumpf) Rumpf.show();
     else if (name === 'fraese' && window.Fraese) Fraese.show();
     else if (name === 'schrift' && window.Schrift) Schrift.show();
+    else if (name === 'aero' && window.Aero) Aero.show();
+    else if (name === 'ausl' && window.Auslegung) Auslegung.show();
+    else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     else if (name === 'cut' && App.renderBlock) App.renderBlock();
   }
   function wireUp() {
@@ -372,7 +378,7 @@
       sel.onchange = () => { state.cfg.ribShow = sel.value; document.querySelectorAll('select[data-show]').forEach(s => s.value = sel.value); render(); };
     });
     window.addEventListener('resize', render);
-    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Rumpf && state.activeTab === 'rumpf') Rumpf.resize(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); });
+    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Rumpf && state.activeTab === 'rumpf') Rumpf.resize(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); if (window.Aero && state.activeTab === 'aero') Aero.resize(); });
   }
 
   // Beim Start: gespeicherte Maschinen-/Werkstoff-Einstellungen laden.

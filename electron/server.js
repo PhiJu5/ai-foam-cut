@@ -103,6 +103,26 @@ function createServer(rootDir, getState) {
       res.statusCode = 405; res.end(); return;
     }
 
+    // Profildatenbank (foildb.js): eine Datei neben der Einstellungsdatei,
+    // gemeinsam fuer alle Maschinen-Einstellungsdateien.
+    if (pathname === '/__foildb__') {
+      const file = path.join(st.settingsFile ? path.dirname(st.settingsFile) : rootDir, 'hotwing-profile.json');
+      if (req.method === 'GET') {
+        fs.readFile(file, (err, data) => { if (err) sendJson(res, '', 404); else sendJson(res, data); });
+        return;
+      }
+      if (req.method === 'POST') {
+        const chunks = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          fs.writeFile(file, Buffer.concat(chunks), err => { if (err) sendJson(res, '{"ok":false}', 500); else sendJson(res, '{"ok":true}'); });
+        });
+        req.on('error', () => sendJson(res, '{"ok":false}', 500));
+        return;
+      }
+      res.statusCode = 405; res.end(); return;
+    }
+
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.statusCode = 405; res.end(); return;
     }

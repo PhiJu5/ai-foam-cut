@@ -316,7 +316,9 @@
         if (App.autoFeedOn() && !(App.autoFeedVal() > 0))
           App.hint(set, '⚠ Für diesen Werkstoff ist noch kein „Vorschub schnell" eingetragen (Werkstoff-Datenbank → Kalibrierung). Bis dahin gelten die manuellen Vorschübe.');
         App.hint(set, T('Eingegebener Vorschub ') + state.cfg.feed + T(' mm/min → wirksamer Abbrand ')
-          + App.currentKerf().toFixed(2) + T(' mm · Heizung ') + App.currentHeat() + T(' %. (Vorschub im Reiter „G-Code".)'));
+          + App.currentKerf().toFixed(2) + (App.matExtPower(App.matIdFor())
+            ? T(' mm · Externes Netzteil ') + App.extPowerText(App.matIdFor()) + T('. (Vorschub im Reiter „G-Code".)')
+            : T(' mm · Heizung ') + App.currentHeat() + T(' %. (Vorschub im Reiter „G-Code".)')));
       }
       body.appendChild(set);
     });

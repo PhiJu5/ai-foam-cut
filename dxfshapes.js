@@ -166,7 +166,7 @@
   function dxfNewSeg(src) {
     const s = { sync: [], start: 0, dir: 1, density: 240, densMode: 'total', perMM: 1,
       span: 300, kerf: true, safeLead: true, pathEdit: null,
-      block: { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10 } };
+      block: { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10, zf: null, zr: null, zt: null, zb: null } };
     if (src) { Object.keys(src).forEach(k => { if (k !== 'block') s[k] = src[k]; }); if (src.block) Object.assign(s.block, src.block); }
     return s;
   }
@@ -208,7 +208,8 @@
       d.segs = [dxfNewSeg({ sync: d.sync || [], start: d.start, dir: d.dir, density: d.density,
         densMode: d.densMode, perMM: d.perMM, span: d.span, kerf: d.kerf, safeLead: d.safeLead,
         pathEdit: d.pathEdit,
-        block: { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin } })];
+        block: { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin,
+                 zf: d.blockZF != null ? d.blockZF : null, zr: d.blockZR != null ? d.blockZR : null, zt: d.blockZT != null ? d.blockZT : null, zb: d.blockZB != null ? d.blockZB : null } })];
       d.activeSeg = 0; d.ribModel = 2;
     }
     if (d.ribModel !== 2) dxfMigratePairs();
@@ -241,7 +242,8 @@
     const d = state.dxf; const s = d.segs && d.segs[d.activeSeg]; if (!s) return;
     ['start', 'dir', 'density', 'densMode', 'perMM', 'span', 'kerf', 'safeLead', 'pathEdit'].forEach(k => s[k] = d[k]);
     s.sync = d.sync;
-    s.block = { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin };
+    s.block = { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin,
+                zf: d.blockZF != null ? d.blockZF : null, zr: d.blockZR != null ? d.blockZR : null, zt: d.blockZT != null ? d.blockZT : null, zb: d.blockZB != null ? d.blockZB : null };
   }
   // Snapshot des aktiven Segments in die Flachfelder laden (Aliasse setzen).
   function dxfLoadActive() {
@@ -255,6 +257,8 @@
     const b = s.block || (s.block = { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10 });
     d.blockLenX = b.lenX || 0; d.blockHeightY = b.heightY || 0;
     d.blockOvF = b.ovF; d.blockOvR = b.ovR; d.blockMargin = b.margin;
+    d.blockZF = b.zf != null ? b.zf : null; d.blockZR = b.zr != null ? b.zr : null;
+    d.blockZT = b.zt != null ? b.zt : null; d.blockZB = b.zb != null ? b.zb : null;
   }
   // Aktives Segment wechseln (stash → laden → auflösen).
   function dxfSetActive(k) {
@@ -424,11 +428,15 @@
       const getSpan = () => isAct ? d.span : (sg ? sg.span : 0);
       const setSpan = v => { if (isAct) d.span = v; else if (sg) sg.span = v; App.render(); };
       const getLX = () => isAct ? (d.blockLenX || 0) : (blk ? blk.lenX || 0 : 0);
-      const setLX = v => { v = Math.max(0, v); if (isAct) d.blockLenX = v; else if (blk) blk.lenX = v; renderDxf(); App.render(); };
+      // Feste Länge/Höhe blendet die davon ersetzte Zugabe aus -> Seitenleiste neu aufbauen.
+      const setLX = v => { v = Math.max(0, v); if (isAct) d.blockLenX = v; else if (blk) blk.lenX = v; App.buildSidebar(); renderDxf(); App.render(); };
       const getHY = () => isAct ? (d.blockHeightY || 0) : (blk ? blk.heightY || 0 : 0);
-      const setHY = v => { v = Math.max(0, v); if (isAct) d.blockHeightY = v; else if (blk) blk.heightY = v; renderDxf(); App.render(); };
+      const setHY = v => { v = Math.max(0, v); if (isAct) d.blockHeightY = v; else if (blk) blk.heightY = v; App.buildSidebar(); renderDxf(); App.render(); };
       const getMg = () => isAct ? (d.blockMargin || 0) : (blk ? blk.margin || 0 : 0);
-      const setMg = v => { v = Math.max(0, v); if (isAct) d.blockMargin = v; else if (blk) blk.margin = v; renderDxf(); };
+      // Blockzugabe je Seite (null = alter Rundum-Abstand).
+      const ZK = { zf: 'blockZF', zr: 'blockZR', zt: 'blockZT', zb: 'blockZB' };
+      const getZ = key => () => { const v = isAct ? d[ZK[key]] : (blk ? blk[key] : null); return v != null ? v : getMg(); };
+      const setZ = key => v => { v = Math.max(0, v); if (isAct) d[ZK[key]] = v; else if (blk) blk[key] = v; renderDxf(); App.render(); };
       const box = document.createElement('div');
       box.style.cssText = 'margin:-2px 0 6px 10px;padding:4px 6px 2px;border-left:2px solid ' + (isAct ? 'var(--accent)' : 'var(--line)');
       if (isAct) {
@@ -452,28 +460,49 @@
             + 'Seite und Abstand zum Portal gelten wie im Tragflächendesigner.' });
         App.numRow(box, 'Blocklänge X (mm, 0 = auto)', getLX, setLX,
           { step: 1, min: 0, norender: true, hint: 'Feste Blocklänge in Schnittrichtung (X). 0 = automatisch aus '
-            + 'Geometrie + Zugaben vorne/hinten. Wirkt auf das gezeigte Rohmaß UND die 3D-Simulation; der '
-            + 'Schneidepfad selbst bleibt unverändert.' });
+            + 'Geometrie + Abstand vorne/hinten. Bei fester Länge entfällt der Abstand vorne: er ergibt sich aus '
+            + 'Länge und Abstand hinten. Wirkt auf Rohmaß, 3D-Simulation, Nullpunkt und Blockzuschnitt; die Form selbst bleibt unverändert.' });
         App.numRow(box, 'Blockhöhe Y (mm, 0 = auto)', getHY, setHY,
-          { step: 1, min: 0, norender: true, hint: 'Feste Blockhöhe (Y). 0 = automatisch aus Geometrie + Rand '
-            + 'oben/unten. Wirkt auf Rohmaß und 3D-Simulation.' });
-        if (d.showBlock) {
-          App.numRow(box, 'Mindestabstand zum Profil (mm)', getMg, setMg, { step: 1, min: 0, norender: true,
-            hint: 'Kleinster Abstand des Blockrands zum Profil — rundum (vorne, hinten, oben, unten). '
-              + 'Wird für eine Seite eine feste Blocklänge X bzw. Blockhöhe Y gesetzt, gilt dort diese statt des Abstands.' });
-        }
+          { step: 1, min: 0, norender: true, hint: 'Feste Blockhöhe (Y). 0 = automatisch aus Geometrie + Abstand '
+            + 'oben/unten. Bei fester Höhe entfällt der Abstand oben: er ergibt sich aus Höhe und Abstand unten. '
+            + 'Wirkt auf Rohmaß, 3D-Simulation und Nullpunkt.' });
+        // Wirksame Zugaben aus dem Rohmaß (für die ausgeblendeten Seiten).
+        const gsrc = [d.inner, d.outer].filter(Boolean);
+        const gb = gsrc.length ? App.bounds.apply(null, gsrc) : null;
+        const br = gb ? dxfBlockRect(gb) : null;
+        const derived = (label, val) => {
+          const el = document.createElement('div'); el.style.cssText = 'font-size:12px;margin:2px 0 4px;color:' + (val < 0 ? 'var(--bad)' : 'var(--muted)');
+          el.textContent = T(label) + ': ' + (val == null ? '—' : val.toFixed(1) + ' mm')
+            + (val != null && val < 0 ? ' — ' + T('Block kleiner als der Querschnitt!') : ' ' + T('(aus Blockmaß berechnet)'));
+          box.appendChild(el);
+        };
+        if (getLX() > 0) derived('Abstand vorne', br ? gb.minx - br.minx : null);
+        else App.numRow(box, 'Abstand vorne (mm)', getZ('zf'), setZ('zf'), { step: 1, min: 0, norender: true,
+          hint: 'Abstand der Blockvorderkante VOR dem Querschnitt (kleinstes X von INNEN/AUSSEN, Nennmaß ohne Abbrand). '
+            + 'Hier setzt der vordere Blockzuschnitt an.' });
+        App.numRow(box, 'Abstand hinten (mm)', getZ('zr'), setZ('zr'), { step: 1, min: 0, norender: true,
+          hint: 'Abstand des hinteren Blockendes HINTER dem Querschnitt (größtes X). Hier setzt der hintere Blockzuschnitt an; '
+            + 'der Maschinennullpunkt liegt „Abstand in Flugrichtung X" dahinter.' });
+        if (getHY() > 0) derived('Abstand oben', br ? br.maxy - gb.maxy : null);
+        else App.numRow(box, 'Abstand oben (mm)', getZ('zt'), setZ('zt'), { step: 1, min: 0, norender: true,
+          hint: 'Abstand der Blockoberkante ÜBER dem Querschnitt (größtes Y von INNEN/AUSSEN).' });
+        App.numRow(box, 'Abstand unten (mm)', getZ('zb'), setZ('zb'), { step: 1, min: 0, norender: true,
+          hint: 'Abstand der Blockunterkante UNTER dem Querschnitt (kleinstes Y). Die Blockunterkante liegt '
+            + '„Höhe über Nullpunkt Y" über dem Maschinennullpunkt.' });
       } else {
         const info = document.createElement('div'); info.style.cssText = 'font-size:11px;color:var(--muted)';
         const fx = v => v > 0 ? Math.round(v) + ' mm' : T('auto');
-        info.textContent = T('Breite ') + Math.round(getSpan() || 0) + ' mm · X ' + fx(getLX()) + ' · Y ' + fx(getHY());
+        info.textContent = T('Breite ') + Math.round(getSpan() || 0) + ' mm · X ' + fx(getLX()) + ' · Y ' + fx(getHY())
+          + ' · ' + T('Abstand v/h/o/u ') + (getLX() > 0 ? '–' : Math.round(getZ('zf')())) + '/' + Math.round(getZ('zr')())
+          + '/' + (getHY() > 0 ? '–' : Math.round(getZ('zt')())) + '/' + Math.round(getZ('zb')()) + ' mm';
         box.appendChild(info);
       }
       sgg.body.appendChild(box);
     })(k);
     App.boolRow(sgg.body, 'Blockgrenze anzeigen', () => d.showBlock,
       v => { d.showBlock = v; App.buildSidebar(); renderDxf(); },
-      'Zeichnet das rechteckige Rohmaß (Styroporblock) um beide Profile. Reine Darstellung, '
-      + 'kein Einfluss auf die Form oder den G-Code.');
+      'Zeichnet das rechteckige Rohmaß (Styroporblock) um beide Profile. Nur die Anzeige — '
+      + 'Abstände, Nullpunkt und Blockzuschnitt gelten auch ausgeblendet.');
     const badd = document.createElement('button'); badd.className = 'primary';
     badd.textContent = T('+ Segment hinzufügen'); badd.onclick = dxfAddSeg;
     sgg.body.appendChild(badd);
@@ -710,6 +739,27 @@
       'Beginnt den Schnitt automatisch am HINTERSTEN Punkt (größtes X), damit die waagrechte '
       + 'An- und Abfahrt vom Maschinennullpunkt das Werkstück nicht kreuzt. Ändert nur die '
       + 'Anfahrt, nicht die Form.');
+    App.selectRow(op.body, 'Blockzuschnitt',
+      [['none', 'Ohne Blockschnitt'], ['before', 'Blockschnitt vor Formschnitt'],
+       ['after', 'Blockschnitt nach Formschnitt'], ['only', 'Nur Blockschnitt']],
+      // Dieselbe Einstellung wie „Schnittreihenfolge" im Reiter „G-Code" (state.cfg.cutOrder).
+      () => (state.cfg.cutOrder === 'wrap' ? 'before' : (state.cfg.cutOrder || 'none')),
+      v => { state.cfg.cutOrder = v; App.buildSidebar(); renderDxf(); App.render(); },
+      'Zwei senkrechte Schnitte durch den ganzen Block: Blockvorderkante (Abstand vorne vor dem Querschnitt) und '
+      + 'hinteres Blockende (Abstand hinten) — je bis auf Y0, um den halben Abbrand ins Verschnittmaterial versetzt, '
+      + 'damit der Block genau auf Maß steht. „Vor Formschnitt": erst vorne, dann hinten; aus dem hinteren Schnittspalt '
+      + 'geht es direkt in die Form. „Nach Formschnitt": erst die Form, dann hinten und vorne. „Nur Blockschnitt": ohne Form. '
+      + 'Dieselbe Einstellung wie „Schnittreihenfolge" im Reiter „G-Code".');
+    if ((state.cfg.cutOrder || 'none') !== 'none') {
+      const P = dxfProjection();
+      if (P && P.blockCut)
+        App.hint(op.body, T('Blockschnitt bei X ') + (P.origin.x - P.blockCut.rear.l).toFixed(1) + T(' mm (hinten) und X ')
+          + (P.origin.x - P.blockCut.front.l).toFixed(1) + T(' mm (vorne) · Blocklänge ')
+          + (P.block.maxx - P.block.minx).toFixed(1) + T(' mm · Abbrand ') + P.blockKerf.toFixed(2) + ' mm');
+      if (!((state.cfg.blockX || 0) > 0))
+        App.hint(op.body, '⚠ „Abstand in Flugrichtung X" (Blocklage) ist 0 — der hintere Blockschnitt läge dann im negativen X. '
+          + 'Einen Abstand von einigen mm einstellen.');
+    }
     App.hint(op.body, 'G-Code entsteht über „G-Code-Quelle → DXF-Formen" mit Vorschub, Achsen, '
       + 'Sicherheitshöhe und dem „Schneiden"-Ablauf der Maschine.');
     side.appendChild(op.g);
@@ -933,14 +983,19 @@
   }
   // Rohmaß-Rechteck des aktiven Segments aus Geometrie-Bounds + Zugaben, bzw. aus
   // festen Blockmaßen X/Y (0 = automatisch). Rückkante (max X) bleibt Bezug.
+  // Blockzugabe je Seite: vorne/hinten/oben/unten (blockZF/ZR/ZT/ZB, null = alter
+  // Rundum-Abstand blockMargin). Feste Blocklänge X ersetzt „vorne" (Bezug = hinten,
+  // dort hängt der Nullpunkt), feste Blockhöhe Y ersetzt „oben" (Bezug = unten).
+  function dxfBlockZ(d) {
+    const m = d.blockMargin || 0, z = v => (v != null ? v : m);
+    return { f: z(d.blockZF), r: z(d.blockZR), t: z(d.blockZT), b: z(d.blockZB) };
+  }
   function dxfBlockRect(gb) {
-    const d = state.dxf, m = d.blockMargin || 0;   // Mindestabstand rundum zum Profil
+    const d = state.dxf, z = dxfBlockZ(d);
     const lenX = d.blockLenX || 0, hY = d.blockHeightY || 0;
     let minx, maxx, miny, maxy;
-    if (lenX > 0) { maxx = gb.maxx + m; minx = maxx - lenX; }
-    else { minx = gb.minx - m; maxx = gb.maxx + m; }
-    if (hY > 0) { const mid = (gb.miny + gb.maxy) / 2; miny = mid - hY / 2; maxy = mid + hY / 2; }
-    else { miny = gb.miny - m; maxy = gb.maxy + m; }
+    maxx = gb.maxx + z.r; minx = lenX > 0 ? maxx - lenX : gb.minx - z.f;
+    miny = gb.miny - z.b; maxy = hY > 0 ? miny + hY : gb.maxy + z.t;
     return { minx, miny, maxx, maxy };
   }
   // ===== Schneidepfad-Punkteditor (DXF) ==============================
@@ -1554,21 +1609,29 @@
       right.push({ x: pr(rp.x, tp.x, mw), y: pr(rp.y, tp.y, mw) });
       [rp, tp].forEach(p => { if (p.x > maxx) maxx = p.x; if (p.y < miny) miny = p.y; if (p.y > maxy) maxy = p.y; });
     }
-    const origin = { x: maxx + (state.cfg.blockX || 0), y: miny - (state.cfg.blockY || 0) };
-    return { left, right, rootPath, tipPath, zRoot, zTip, origin, maxy, miny };
+    // Rohblock aus dem NENNMASS (INNEN/AUSSEN ohne Abbrand) + Blockzugaben — dieselbe
+    // Grenze wie im Zeichenfenster. Nullpunkt wie im Kerndesign: „Abstand in
+    // Flugrichtung X" hinter dem hinteren Blockende, blockY unter der Blockunterkante.
+    const gsrc = [d.inner, d.outer].filter(Boolean);
+    const gb = gsrc.length ? App.bounds.apply(null, gsrc) : { minx: 0, maxx: maxx, miny: miny, maxy: maxy };
+    const block = dxfBlockRect(gb);
+    const origin = { x: Math.max(block.maxx, maxx) + (state.cfg.blockX || 0), y: Math.min(block.miny, miny) - (state.cfg.blockY || 0) };
+    // Blockzuschnitt: senkrechte Schnitte an Blockvorderkante/hinterem Blockende, um den
+    // halben Abbrand (gerader Schnitt, beide Portale gleich schnell) ins Verschnitt-
+    // material versetzt. Konstantes X -> an beiden Türmen gleich.
+    const blockKerf = App.kerfForSpeed ? App.kerfForSpeed(App.matIdFor('dxf'), App.currentFeed()) : (App.currentKerf() || 0);
+    const hk = blockKerf / 2;
+    const blockCut = { front: { l: block.minx - hk, r: block.minx - hk }, rear: { l: block.maxx + hk, r: block.maxx + hk } };
+    return { left, right, rootPath, tipPath, zRoot, zTip, origin, maxy, miny, block, blockCut, blockKerf };
   }
   // dxfGcode() (G-Code aus INNEN/AUSSEN) liegt in gcodegen.js (Funktion „G-Code-Erzeugung", abwählbar).
   // 3D-Szene für die Simulation: ein Block, der beide Formen umschließt.
   function buildDxfScene() {
     const P = dxfProjection();
-    const y0 = (state.cfg.blockY || 0);
     if (!P) return { machineWidth: state.cfg.machineWidth, ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV }, blocks: [], defaultSeg: 0, limits: {} };
-    // Rohmaß aus Welt-Bounds beider Bahnen + Zugaben bzw. festen Blockmaßen X/Y.
-    let gminx = 1e9, gmaxx = -1e9, gminy = 1e9, gmaxy = -1e9;
-    const acc = p => { if (p.x < gminx) gminx = p.x; if (p.x > gmaxx) gmaxx = p.x; if (p.y < gminy) gminy = p.y; if (p.y > gmaxy) gmaxy = p.y; };
-    P.rootPath.forEach(acc); P.tipPath.forEach(acc);
-    const br = dxfBlockRect({ minx: gminx, miny: gminy, maxx: gmaxx, maxy: gmaxy });
-    const y1 = y0 + (br.maxy - br.miny);
+    // Rohmaß = Nennmaß + Blockzugaben bzw. feste Blockmaße X/Y (wie G-Code-Nullpunkt).
+    const br = P.block;
+    const y0 = br.miny - P.origin.y, y1 = y0 + (br.maxy - br.miny);
     // X in Maschinenkoordinaten (origin.x − Welt-x); Block umschließt beide Konturen.
     const bxMin = P.origin.x - br.maxx, bxMax = P.origin.x - br.minx;
     return {

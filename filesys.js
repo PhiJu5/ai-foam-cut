@@ -192,9 +192,11 @@
     const f = await fh.getFile(); return { name: f.name, text: await f.text(), handle: fh };
   }
   // Profil-.dat verarbeiten (aus Datei-Input ODER Ladeordner) für das aktuelle importTarget.
-  function processDat(text) {
+  function processDat(text, name) {
     try {
       const prof = Airfoil.parseDat(text);
+      // Profildatenbank (optionales Feature): Dateiname als Anzeigename nachreichen.
+      if (window.FoilDB && name) FoilDB.add(prof, { file: name });
       const t = state.importTarget || { type: 'root' };
       const tid = t.type === 'root' ? 'root' : t.idx;
       // Endleistendicke beim Laden automatisch auf 0 schließen (scharfe EL). Das
@@ -222,7 +224,7 @@
       if (ext === 'dxf') dat = dxfToProfileDat(text);
       else if (ext === 'svg') dat = layersToProfileDat(parseSvgToLayers(text), 'Profil (SVG)');
     } catch (e) { alert(T('Import fehlgeschlagen: ') + T(e.message)); return; }
-    processDat(dat);
+    processDat(dat, name);
   }
   // Ein Dialog für alle Profilformate (.dat, .bez, .dxf, .svg).
   function loadProfileAny() {
@@ -337,6 +339,7 @@
     for (const f of files) {
       try {
         const prof = Airfoil.parseDat(f.text);
+        if (window.FoilDB) FoilDB.add(prof, { file: f.name });   // Profildatenbank (optional)
         // Schlüssel aus Dateiname (ohne Endung) UND aus dem Profilnamen in der
         // Datei — so greift die Zuordnung unabhängig davon, welcher dem XFLR5-
         // Foil-Namen entspricht.
@@ -1670,6 +1673,8 @@
     if (window.Model3D && Model3D.reset) { try { Model3D.reset(); } catch (e) {} }
     // Reiter „Schriften" (optional): Text, Schrift und Einstellungen zurücksetzen.
     if (window.Schrift && Schrift.reset) { try { Schrift.reset(); } catch (e) {} }
+    // Reiter „Auslegung": Altprojekte ohne cfg.ausl starten mit den Vorgaben.
+    if (window.Auslegung && Auslegung.reset) { try { Auslegung.reset(); } catch (e) {} }
     // Generierter G-Code, aktive Auswahl, Projekt-Notizen, Projektname.
     state.lastGcode = null; state.gcodeEdited = false;
     state.activeSeg = 0; state.activeSpar = null;

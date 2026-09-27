@@ -511,6 +511,8 @@
     const bd = document.createElement('button'); bd.textContent = T('Profil laden…');
     bd.onclick = () => { state.importTarget = importKey; App.loadProfileAny(); };
     rl.appendChild(bd); body.appendChild(rl);
+    // Aufklappmenü der Profildatenbank (optionales Feature foildb.js): Gruppen als Abschnitte.
+    if (App.foildbPickerRow) App.foildbPickerRow(body, importKey);
     hint(body, 'Profil laden: .dat (Selig/Lednicer), .bez (Bézier-Kontrollpunkte, wird abgetastet) oder DXF/SVG '
       + '(größte Kontur der Datei). Reihenfolge/Skalierung werden automatisch normalisiert.');
     const r2 = document.createElement('div'); r2.className = 'row full';
@@ -2003,6 +2005,14 @@
     // --- Reiter „Schriften" (schrift, optionales Feature) -----------------
     if (App.schriftSidebar) App.schriftSidebar(side);
 
+    // --- Reiter „Aerodynamik" (aero, optionales Feature) ------------------
+    if (App.aeroSidebar) App.aeroSidebar(side);
+
+    // --- Reiter „Auslegung" (ausl, optionales Feature) --------------------
+    if (App.auslSidebar) App.auslSidebar(side);
+
+    // --- Reiter „Profildatenbank" (foildb, optionales Feature) ------------
+    if (App.foildbSidebar) App.foildbSidebar(side);
 
     // --- Reiter „DXF-Formen" (dxf) ------------------------------------
     // Abwählbare Funktionen: nur aufbauen, wenn das Modul im Build steckt.
@@ -2150,6 +2160,28 @@
     mdb.body.appendChild(feedWarn);
     App.updateFeedWarn(feedWarn);
 
+    subhead(mdb.body, 'Drahtversorgung');
+    selectRow(mdb.body, 'Drahtstrom aus', [['int', 'Interne Heißdrahtsteuerung'], ['ext', 'Externes Netzteil']],
+      () => App.matField(state.material.id, 'power', 'int'),
+      v => { App.setMatField('power', v); saveSettings(); buildSidebar(); renderMaterial(); render(); },
+      'Intern: die Steuerung regelt den Heizstrom über den Heizstromausgang (M3 S…). Extern: der Draht hängt an einem '
+      + 'eigenen Netzteil; Spannung und Strom werden dort von Hand eingestellt, der Heizstromausgang schaltet nur noch ein Relais.');
+    if (App.matExtPower(state.material.id)) {
+      numRow(mdb.body, 'Spannung am Netzteil (V)', () => App.matField(state.material.id, 'extV', 0),
+        v => { App.setMatField('extV', v); saveSettings(); renderMaterial(); render(); },
+        { min: 0, step: 0.1, norender: true, hint: 'Diese Spannung am externen Netzteil für diesen Werkstoff einstellen. Steht als Kommentar im Kopf jedes G-Codes.' });
+      numRow(mdb.body, 'Strom am Netzteil (A)', () => App.matField(state.material.id, 'extA', 0),
+        v => { App.setMatField('extA', v); saveSettings(); renderMaterial(); render(); },
+        { min: 0, step: 0.1, norender: true, hint: 'Diesen Strom (Strombegrenzung) am externen Netzteil für diesen Werkstoff einstellen.' });
+      subhead(mdb.body, 'Heizstromausgang → Relais');
+      selectRow(mdb.body, 'Spannung Relais', [['100', '100 % — volle Ausgangsspannung'], ['75', '75 %'], ['50', '50 % (z. B. 12-V-Relais an 24-V-Ausgang)'], ['42', '42 % (z. B. 5-V-Relais an 12-V-Ausgang)'], ['21', '21 % (z. B. 5-V-Relais an 24-V-Ausgang)']],
+        () => String(App.relayLevel(state.material.id)),
+        v => { App.setMatField('relayLvl', +v); saveSettings(); renderMaterial(); render(); },
+        'Der Heizstromausgang (M3/M5) schaltet jetzt das Relais des externen Netzteils statt den Draht zu heizen. '
+        + 'Pegel des Ausgangs beim Einschalten: 100 % = Dauer-EIN ohne PWM (empfohlen, v. a. für SSR). Kleinere Werte nur, wenn die '
+        + 'Relaisspule eine kleinere Spannung braucht als der Ausgang liefert — dann wird per PWM gemittelt '
+        + '(Freilaufdiode an der Spule!). Die Heizstrom-Werte der internen Steuerung bleiben gespeichert.');
+    } else {
     subhead(mdb.body, 'Drahtheizung (%)');
     numRow(mdb.body, 'Heizstrom 1 (schnell)', () => App.matHeat(state.material.id),
       v => { App.setHeat(v); renderMaterial(); }, { min: 0, max: 100, hint: 'Heizstrom der Kalibrierpunkte 1 (schnell) und 2 (langsam). Ohne Punkt 3 konstant während des Schnitts.' });
@@ -2161,6 +2193,7 @@
     if (App.heatPair(state.material.id).varies)
       numRow(mdb.body, 'Heizstrom 2 (langsam)', () => App.heatPair(state.material.id).slow,
         v => { App.setHeatSlow(v); renderMaterial(); }, { min: 0, max: 100 });
+    }
     }
     subhead(mdb.body, 'Schmelzen / Aufheizen');
     numRow(mdb.body, 'Verweilzeit am Nullpunkt (s)', () => state.material.meltDwell,
@@ -2326,6 +2359,9 @@
       + '„Ohne Blockschnitt": Draht fährt hinten am Nullpunkt auf Höhe der EL-Verlängerung, '
       + 'horizontal von hinten ins Profil, schneidet die Kontur, fährt horizontal zurück und dann vertikal auf Null. '
       + 'Sicherheitshöhe: Reiter „Projektübersicht".');
+    if (state.cfg.gcodeSource === 'dxf')
+      hint(sb.body, 'Quelle „DXF-Formen": Die Abstände vorne/hinten/oben/unten stehen im Reiter „DXF-Formen" beim Segment. '
+        + '„Blockschnitt während Profilschnitt" wird bei DXF-Formen wie „vor Profilschnitt" ausgeführt.');
     // Welche Profilseite(n): beide (Standard) oder nur Ober-/Unterseite — über den
     // Zug-Ablauf (hotwire_gcode.js emitPasses), in beiden Schnittrichtungen.
     const sidesVal = state.cfg.cutSides || 'both';

@@ -256,7 +256,7 @@
     if (fmt >= 100002) { r.i32(); r.i32(); r.i32(); r.i32(); r.color(); r.bool(); r.str(); }
     for (let i = 0; i < 4; i++) p.wings.push(xflWing(r));
     p.biplane = r.bool(); p.stab = r.bool(); p.fin = r.bool();
-    r.bool(); r.bool(); r.bool();
+    p.doubleFin = r.bool(); p.symFin = r.bool(); r.bool();
     for (let i = 0; i < 4; i++)
       p.wings[i].le = { x: r.f64(), y: r.f64(), z: r.f64(), tilt: r.f64() };
     const hasBody = r.bool(); r.f64(); r.f64();
@@ -273,29 +273,164 @@
     return p;
   }
 
-  // Vorgabe-Polare des Projekts: nur überlesen, wir brauchen sie nicht.
-  function xflSkipWPolar(r) {
+  // Flugzeugpolare (WPolar). Mit keep=true kommen die gerechneten Punkte mit:
+  // je Punkt 20 double (Reihenfolge wie WPolar::serializeWPlrXFL) + 16 double
+  // Eigenwerte. Zusatzwiderstand (4 × Fläche·Beiwert) erst ab Format 200013.
+  // Alles in SI (m, m², kg, m/s).
+  function xflWPolar(r, keep) {
     const pf = r.i32();
     if (pf < 200000 || pf > 205000) throw new Error(T('Unbekanntes Polarenformat ') + pf);
-    r.str(); r.str();
-    r.skip(24);                                    // RefArea, RefChord, RefSpan
+    const w = { fmt: pf, plane: r.str(), name: r.str() };
+    w.S = r.f64(); w.c = r.f64(); w.b = r.f64();
     if (pf < 200014) { r.i32(); r.i32(); r.color(); r.bool(); r.bool(); }
     else r.style();
-    r.i32(); r.i32();                              // Rechenverfahren, Polarentyp
-    r.skip(6);                                     // sechs Schalter
-    r.bool(); r.f64();                             // Bodeneffekt + Höhe
-    r.skip(16);                                    // Dichte, Zähigkeit
-    r.i32();                                       // Bezugsfläche
-    r.bool(); r.skip(8 + 3 * 8 + 4 * 8);           // Masse, Schwerpunkt, Trägheiten
+    w.method = r.i32();                            // 1 LLT, 2 VLM, 3 Panel, 4/5 Dreiecke
+    w.type = r.i32();                              // 1 v fest, 2 Auftrieb fest, 4 α fest, 5 β, 7 Stabilität
+    w.vlm1 = r.bool(); w.thin = r.bool(); w.tilted = r.bool(); r.bool();
+    w.viscous = r.bool(); w.ignoreBody = r.bool();
+    w.ground = r.bool(); w.height = r.f64();
+    w.rho = r.f64(); w.nu = r.f64();
+    w.refDim = r.i32();
+    r.bool(); w.mass = r.f64();
+    w.cg = { x: r.f64(), y: r.f64(), z: r.f64() };
+    r.skip(4 * 8);                                 // Trägheiten
     const nc = r.i32();
     if (nc < 0 || nc > 1000) throw new Error(T('Unplausible Steuerflächenzahl.'));
     r.skip(nc * 8);
     r.i32(); r.skip(16);                           // Nachlauf
-    r.skip(24);                                    // Geschwindigkeit, Alpha, Beta
+    w.vSpec = r.f64(); w.aSpec = r.f64(); w.beta = r.f64();
     const n = r.i32();
     if (Math.abs(n) > 10000) throw new Error(T('Unplausible Polarengröße.'));
-    r.skip(n * 36 * 8);
-    r.skip(19 * 4 + 4 + 35 * 8 + 4 * 8 + 4 * 8 + 7 * 8);
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      if (keep) {
+        const d = []; for (let j = 0; j < 20; j++) d.push(r.f64());
+        pts.push({ alpha: d[0], beta: d[1], v: d[2], ctrl: d[3], CL: d[4], CY: d[5], CDi: d[6], CDv: d[7],
+          Cm: d[8], XCP: d[15], XNP: d[19] });
+        r.skip(16 * 8);
+      } else r.skip(36 * 8);
+    }
+    r.skip(19 * 4 + 4 + 35 * 8);
+    let extra = 0;
+    { const a = [], c = [];
+      for (let i = 0; i < 4; i++) a.push(r.f64());
+      for (let i = 0; i < 4; i++) c.push(r.f64());
+      if (pf >= 200013) for (let i = 0; i < 4; i++) extra += a[i] * c[i]; }
+    r.skip(7 * 8);
+    w.extraArea = extra;                           // Σ Fläche·Cd (m²)
+    w.pts = pts;
+    return w;
+  }
+  // Vorgabe-Polare des Projekts: nur überlesen
+  function xflSkipWPolar(r) { xflWPolar(r, false); }
+
+  // Flügel-Betriebspunkt: je Station 22 double. Zwischen den Nachlauf-Zahlen
+  // und α stehen je nach Fassung 8 oder 24 Byte — deshalb wird α (aus dem
+  // Flugzeug-Betriebspunkt bekannt, gefolgt von β und v) als Anker gesucht.
+  function xflWingOpp(r, alpha, qinf) {
+    r.i32(); const name = r.str(); r.str(); r.i32(); r.bool();
+    const ns = r.i32(), nv = r.i32();
+    if (ns < 0 || ns > 5000 || nv < 0 || nv > 1e6) throw new Error(T('Unplausibler Betriebspunkt.'));
+    r.i32(); r.i32(); r.i32();
+    const o0 = r.o; let k = 0;
+    for (; k <= 64; k += 4)
+      if (o0 + k + 24 <= r.n && r.v.getFloat64(o0 + k) === alpha && r.v.getFloat64(o0 + k + 16) === qinf) break;
+    if (k > 64) throw new Error(T('Unplausibler Betriebspunkt.'));
+    r.o = o0 + k + 6 * 8;
+    const CL = r.f64(); r.skip(12 * 8);
+    if (r.o + ns * 22 * 8 > r.n) throw new Error(T('Datei endet unerwartet.'));
+    const st = { y: [], chord: [], re: [], ai: [], cl: [], cdv: [], cdi: [], xtrT: [], xtrB: [] };
+    for (let i = 0; i < ns; i++) {
+      const b = r.o, f = j => r.v.getFloat64(b + 8 * j);
+      st.re.push(f(0)); st.chord.push(f(1)); st.ai.push(f(3)); st.cl.push(f(4)); st.cdv.push(f(5)); st.cdi.push(f(6));
+      st.xtrT.push(f(11)); st.xtrB.push(f(12)); st.y.push(f(20));
+      r.o += 22 * 8;
+    }
+    const nf = r.i32();
+    if (nf < 0 || nf > 1000) throw new Error(T('Unplausibler Betriebspunkt.'));
+    r.skip(nf * 8 + 20 * 4 + 50 * 8);
+    return { name, CL, st };
+  }
+
+  // Flugzeug-Betriebspunkt (PlaneOpp). Die Panelwerte (Cp, σ, Γ) stehen in
+  // alten Fassungen als double, in neuen als float — beide Größen werden
+  // probiert und am Folgefeld (Flügel vorhanden 0/1 + Flügelblock) geprüft.
+  function xflPlaneOpp(r) {
+    const f = r.i32();
+    if (f < 200000 || f > 200100) throw new Error(T('Unplausibler Betriebspunkt.'));
+    const o = { plane: r.str(), polar: r.str() };
+    if (f < 200002) { r.i32(); r.i32(); r.color(); r.bool(); r.bool(); } else r.style();
+    r.skip(4);                                     // bOut, VLM1, dünne Flächen, gekippt
+    o.type = r.i32(); o.method = r.i32();
+    const np = r.i32(); r.i32();
+    if (np < 0 || np > 5e6) throw new Error(T('Unplausibler Betriebspunkt.'));
+    o.alpha = r.f64(); o.v = r.f64(); o.beta = r.f64(); o.ctrl = r.f64(); o.mass = r.f64();
+    const o0 = r.o; let err = null;
+    for (const sz of (f >= 200003 ? [4, 8] : [8, 4])) {
+      r.o = o0; err = null;
+      try {
+        if (o.method !== 1) r.skip(3 * sz * np);
+        o.wings = [];
+        for (let iw = 0; iw < 4; iw++) {
+          const has = r.i32();
+          if (has !== 0 && has !== 1) throw new Error(T('Unplausibler Betriebspunkt.'));
+          if (has) { const w = xflWingOpp(r, o.alpha, o.v); w.idx = iw; o.wings.push(w); }
+        }
+        break;
+      } catch (e) { err = e; }
+    }
+    if (err) throw err;
+    o.CL = r.f64(); r.f64(); r.f64();              // CL, CX, CY
+    o.CDv = r.f64(); o.CDi = r.f64();
+    const Cmv = r.f64(), Cmi = r.f64(); o.Cm = Cmv + Cmi;
+    r.skip(7 * 8 + 18 * 8 + 4 + 6 * 8 + 8 * 8 + 32 * 8);
+    o.XNP = r.f64();
+    r.skip(80 * 8 + 20 * 4 + 50 * 8);
+    return o;
+  }
+
+  // Profil, sequentiell überlesen (Felder wie beim Signatur-Scan unten)
+  function xflFoilSeq(r) {
+    const f = r.i32();
+    if (f < 100000 || f > 110000) throw new Error(T('Unbekanntes Profilformat ') + f);
+    r.str(); r.str();
+    if (f >= 100007) r.style(); else { r.i32(); r.i32(); r.color(); r.bool(); r.bool(); }
+    r.skip(3 + 48);
+    const nb = r.i32();
+    if (nb < 0 || nb > 100000) throw new Error(T('Unplausible Profilpunktzahl.'));
+    r.skip(16 * nb);
+  }
+  // Profilpolare: je Punkt 11 Werte (α, Cd, Cdp, Cl, Cm, XTr1, XTr2, HMom,
+  // Cpmin, Re, XCp) — Format 100005 schreibt sie als double, neuere
+  // XFLR5-Fassungen als float. Beide probieren, am Folgefeld prüfen.
+  function xflFoilPolar(r) {
+    const f = r.i32();
+    if (f < 100000 || f > 110000) throw new Error(T('Unbekanntes Polarenformat ') + f);
+    const p = { foil: r.str(), name: r.str() };
+    if (f >= 100005) r.style(); else { r.i32(); r.i32(); r.color(); r.bool(); r.bool(); }
+    p.type = r.i32(); r.i32(); r.i32();            // Typ, früher MaType/ReType
+    p.Re = r.f64(); p.Mach = r.f64(); r.f64(); r.f64(); r.f64(); p.ncrit = r.f64();
+    const n = r.i32();
+    if (n < 0 || n > 100000) throw new Error(T('Unplausible Polarengröße.'));
+    const o0 = r.o;
+    for (const sz of (f >= 100006 ? [4, 8] : [8, 4])) {
+      const end = o0 + 11 * sz * n + (f < 100005 ? 4 : 0) + 19 * 4 + 50 * 8;
+      if (end > r.n) continue;
+      if (end + 4 <= r.n) {                        // Folgefeld: nächste Polare oder Anzahl
+        const nx = r.v.getInt32(end);
+        if (!(nx >= 100000 && nx <= 110000) && !(nx >= 0 && nx < 1e6)) continue;
+      }
+      const rd = sz === 8 ? (o => r.v.getFloat64(o)) : (o => r.v.getFloat32(o));
+      const pts = [];
+      for (let i = 0; i < n; i++) {
+        const b = o0 + 11 * sz * i, g = j => rd(b + sz * j);
+        pts.push({ alpha: g(0), cd: g(1), cdp: g(2), cl: g(3), cm: g(4), xtrT: g(5), xtrB: g(6), re: g(9) });
+      }
+      if (!pts.every(q => isFinite(q.cl) && isFinite(q.cd) && Math.abs(q.alpha) < 180 && Math.abs(q.cl) < 20)) continue;
+      p.pts = pts; r.o = end;
+      return p;
+    }
+    throw new Error(T('Unplausible Polarengröße.'));
   }
 
   // --- Profilblöcke über Signatur finden -----------------------------------
@@ -345,9 +480,10 @@
   }
 
   // ArrayBuffer -> { planes:[{name,wings:[…]}], foils:{normName:Profil}, foilNames:[…] }
+  // opts.results: zusätzlich wpolars[], popps[], foilPolars[] (Vergleich im Aero-Reiter)
   // Die Flügelobjekte haben dieselbe Gestalt wie beim XML-Import, damit
   // toWingConfig() unverändert greift.
-  function parseXfl(buf) {
+  function parseXfl(buf, opts) {
     const r = new Rd(buf);
     const fmt = r.i32();
     if (fmt < 200001 || fmt > 200002)
@@ -382,9 +518,30 @@
         w.tilt = w.le ? w.le.tilt : 0;
         wings.push(w);
       });
-      planes.push({ name: p.name || (T('Flugzeug ') + (i + 1)), desc: p.desc, wings: wings });
+      planes.push({ name: p.name || (T('Flugzeug ') + (i + 1)), desc: p.desc, wings: wings,
+        doubleFin: p.doubleFin, symFin: p.symFin });
     }
-    return { kind: 'xfl', unit: 1, planes: planes, foils: foils, foilNames: foilNames };
+    const out = { kind: 'xfl', unit: 1, planes: planes, foils: foils, foilNames: foilNames,
+      wpolars: [], popps: [], foilPolars: [], resultsError: null };
+    // Ergebnisse (Flugzeugpolaren, Betriebspunkte, Profilpolaren) — nur auf
+    // Wunsch; bricht etwas ab, bleibt das bis dahin Gelesene erhalten.
+    if (opts && opts.results) {
+      try {
+        const nW = r.i32();
+        if (nW < 0 || nW > 100000) throw new Error(T('Unplausible Polarenzahl.'));
+        for (let i = 0; i < nW; i++) out.wpolars.push(xflWPolar(r, true));
+        const nO = r.i32();
+        if (nO < 0 || nO > 1e6) throw new Error(T('Unplausibler Betriebspunkt.'));
+        for (let i = 0; i < nO; i++) out.popps.push(xflPlaneOpp(r));
+        const nF = r.i32();
+        if (nF < 0 || nF > 100000) throw new Error(T('Unplausible Profilzahl.'));
+        for (let i = 0; i < nF; i++) xflFoilSeq(r);
+        const nP = r.i32();
+        if (nP < 0 || nP > 1e6) throw new Error(T('Unplausible Polarenzahl.'));
+        for (let i = 0; i < nP; i++) out.foilPolars.push(xflFoilPolar(r));
+      } catch (e) { out.resultsError = e.message || String(e); }
+    }
+    return out;
   }
 
   global.XFLR5 = { parse, parseXfl, listWings, toWingConfig, normName };

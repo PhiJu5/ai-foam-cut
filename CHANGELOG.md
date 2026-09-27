@@ -4,6 +4,44 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.5] — 2026-09-27
+### DXF-Formen: Blockzuschnitt und Abstände vorne/hinten/oben/unten (2026-09-27)
+- Je Segment **Abstand vorne, hinten, oben und unten** (Abstand der Blockkante zum Querschnitt, gemessen am
+  Nennmaß ohne Abbrand) statt des bisherigen „Mindestabstands zum Profil" rundum. Alte Projekte übernehmen den
+  bisherigen Abstand für alle vier Seiten.
+- Feste **Blocklänge X** blendet den Abstand vorne aus, feste **Blockhöhe Y** den Abstand oben — beide werden dann aus
+  dem Blockmaß berechnet angezeigt (rot, wenn der Block kleiner als der Querschnitt ist). Bezug bleiben hinten und
+  unten (Nullpunkt). Eine feste Blockhöhe sitzt damit nicht mehr mittig um den Querschnitt, sondern ab dem Abstand unten.
+- **Blockzuschnitt** für DXF-Formen: zwei senkrechte Schnitte bis Y0 an Blockvorderkante und hinterem Blockende, um den
+  halben Abbrand ins Verschnittmaterial versetzt (Block steht genau auf Maß). Gesteuert über „Schnittreihenfolge"
+  im Reiter „G-Code" (auch im Reiter „DXF-Formen" → Schnitt wählbar); „während Profilschnitt" läuft wie „vor".
+- **Geändert:** Der DXF-Nullpunkt bezieht sich jetzt wie im Kerndesign auf den Rohblock — „Abstand in Flugrichtung X"
+  hinter dem hinteren Blockende, „Höhe über Nullpunkt Y" unter der Blockunterkante (bisher auf die Schnittbahn).
+  G-Code, 3D-Simulation und Blockgrenze passen damit zusammen. Sicherheitshöhe über der Blockoberkante.
+- Die waagrechte An-/Abfahrt durch den Abstand hinten läuft mit Schnittvorschub statt mit dem Außen-Vorschub.
+
+### Hinzugefügt
+- Neuer Reiter **„Profildatenbank“** (`foildb.js`): jedes irgendwo geladene Profil landet automatisch in einer
+  maschinenweiten Datenbank (`hotwing-profile.json` neben der Einstellungsdatei, im reinen Browser im
+  Browser-Speicher). Vergleichen mit Kennwerte-Tabelle, Bearbeiten (Dicke/Wölbung/Endleiste/Punktzahl),
+  NACA-4 anlegen, .dat-Export, in Wurzel/Segment einsetzen, frei benennbare Gruppen — die auch im neuen
+  Aufklappmenü „aus Profildatenbank wählen“ im Tragflächendesigner erscheinen.
+  JSON-Export/-Import; Funktion `foildb`. `launcher.py` und `electron/server.js` bedienen dafür `/__foildb__`.
+- Werkstoff-Datenbank → **„Drahtversorgung“**: Interne Heißdrahtsteuerung oder **Externes Netzteil** mit Spannung (V)
+  und Strom (A) als Kommentar im Kopf jedes G-Codes; der Heizstromausgang schaltet dann nur ein Relais mit festem
+  Pegel. Die Abbrand-Kalibrierung zeigt bei externem Netzteil nur Punkt 1+2.
+- `build_tool_electron.py`: Ziele **Linux** (AppImage) und **macOS** (`.app` im zip, Apple Silicon/Intel/beide).
+  Unter Windows laufen beide in WSL („Linux-Werkzeuge einrichten" richtet node, electron und electron-builder
+  ein), unter Linux/macOS direkt. CLI: `--target linux|mac [--arch arm64|x64|beide] [--distro …]`.
+- `build_tool.py` (Browser-Variante): Ziel **Linux** — PyInstaller-Datei `dist/<Name>-linux`, in WSL gebaut.
+  CLI: `--linux [--distro …]`. Gemeinsame WSL-Hilfen in `wslbuild.py`.
+- Electron auf dem Mac: Einstellungen neben der `.app` (bei „Programme" in `Dokumente/AI Foam Cut`),
+  Programm-/Bearbeiten-Menü für Cmd+C/V/Q. `icon/icon-1024.png` für das Mac-Symbol.
+
+### Behoben
+- `launcher.py`: Die Meldung „läuft im Browser" hält den Server jetzt auch unter Linux/macOS offen
+  (vorher beendete er sich sofort); Browserstart ohne PyInstaller-Bibliothekspfad; kein Absturz ohne Bildschirm.
+
 ## [1.4] — 2026-09-25
 
 Erste quelloffene Fassung. AI Foam Cut steht ab hier unter der GPL-3.0-or-later.

@@ -177,7 +177,9 @@
         v => { state.block.feed = v; renderBlock(); refreshCutSource('block'); }, { min: 1, norender: true });
       hint(zuV.body, T('Zwei planare Vertikalschnitte, um Abbrand/2 nach außen versetzt (Abbrand-kompensiert) → Block misst exakt die Länge. Draht ')
         + App.kerfForSpeed(App.matIdFor('wing'), state.block.feed).toFixed(2)
-        + T(' mm Abbrand · Heizung ') + App.currentHeat() + T(' % (aus Werkstoff). Als G-Code-Quelle „Block" wählbar.'));
+        + (App.matExtPower(App.matIdFor('wing'))
+          ? T(' mm Abbrand · Externes Netzteil ') + App.extPowerText(App.matIdFor('wing')) + T('. Als G-Code-Quelle „Block" wählbar.')
+          : T(' mm Abbrand · Heizung ') + App.currentHeat() + T(' % (aus Werkstoff). Als G-Code-Quelle „Block" wählbar.')));
       side.appendChild(zuV.g);
 
       // 3) Block horizontal ---------------------------------------------
@@ -248,6 +250,20 @@
         v => { cb.withKerf = v; refreshCutSource('calib'); },
         'Ohne: Rohschnitt auf Nennmaß — das Rechteck wird um den Abbrand kleiner (Differenz = Abbrand). '
         + 'Mit: um Abbrand/2 nach außen versetzt — das FERTIGE Rechteck sollte das Nennmaß haben (Kontrolle).');
+      if (App.matExtPower(mid)) {
+        // Externes Netzteil: Heizung fest am Netzteil -> nur Punkt 1+2 (Abbrand-Gerade).
+        hint(ca.body, 'Werkstoff mit externem Netzteil: vor dem Testschnitt am Netzteil ' + App.extPowerText(mid)
+          + ' einstellen. Der Heizstromausgang schaltet nur das Relais. Zwei Kalibrierpunkte (schnell/langsam) ergeben die Abbrand-Gerade.').classList.add('hint-open');
+        if (cb.speed === 'slowH') cb.speed = 'fast';
+        selectRow(ca.body, 'Testschnitt', [['fast', '1: schnell'], ['slow', '2: langsam']],
+          () => cb.speed, v => { cb.speed = v; refreshCutSource('calib'); });
+        subhead(ca.body, 'Punkt 1: schnell');
+        numRow(ca.body, 'Vorschub schnell (mm/min)', () => App.feedPair(mid).fast, v => { App.setFeed('fast', v); App.syncAutoFeed(); renderMaterial(); refreshCutSource('calib'); }, { min: 1, norender: true });
+        numRow(ca.body, 'Abbrand schnell (mm)', () => App.kerfPair(mid).fast.toFixed(2), v => { App.setKerf('fast', v); renderMaterial(); refreshCutSource('calib'); }, { step: 0.05, min: 0, norender: true });
+        subhead(ca.body, 'Punkt 2: langsam');
+        numRow(ca.body, 'Vorschub langsam (mm/min)', () => App.feedPair(mid).slow, v => { App.setFeed('slow', v); renderMaterial(); refreshCutSource('calib'); }, { min: 1, norender: true });
+        numRow(ca.body, 'Abbrand langsam (mm)', () => App.kerfPair(mid).slow.toFixed(2), v => { App.setKerf('slow', v); renderMaterial(); refreshCutSource('calib'); }, { step: 0.05, min: 0, norender: true });
+      } else {
       hint(ca.body, 'Drei Kalibrierpunkte: 1 = schnell mit Heizstrom 1, 2 = langsam mit Heizstrom 1, 3 = langsam mit Heizstrom 2. '
         + 'Punkt 1+2 ergeben die Abbrand-Gerade über den Vorschub (konische Teile: innen/außen unterschiedlich schnell). '
         + 'Punkt 1+3 ergeben davon unabhängig die Heizstrom-Gerade über den Vorschub (Heizung folgt dem Vorschub).');
@@ -273,6 +289,7 @@
         hint(ca.body, 'Heizstrom 2 so einstellen, dass der Abbrand bei langsamer Geschwindigkeit GLEICH dem Abbrand von Punkt 1 (schnelle Geschwindigkeit, hoher Heizstrom) ist. Testschnitt 3 so lange wiederholen, bis dieses Maß erreicht ist.').classList.add('hint-open');
         numRow(ca.body, 'Abbrand (= Punkt 1, mm)', () => App.kerfPair(mid).fast.toFixed(2), () => {}, { readonly: true,
           roTitle: 'Per Definition gleich dem Abbrand von Punkt 1 — Heizstrom 2 so einstellen, dass der Testschnitt 3 dieses Maß ergibt.' });
+      }
       }
       const done = state.material.cal && state.material.cal[mid];
       const bcal = document.createElement('button'); bcal.className = done ? '' : 'primary';

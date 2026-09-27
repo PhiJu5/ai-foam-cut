@@ -263,12 +263,28 @@
      * Höhe der Spitze (Anschluss an nachfolgende Blockschnitte). */
     function emitProfileHorizontal(finish) {
       em(`G0 ${ax.x}${f(0)} ${ax.y}${fy(L[0].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[0].y)} ; hoch auf Höhe der EL-Verlängerung`);
+      if (leadThrough(L[0], R[0])) {
+        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; ` + T('horizontal von hinten bis zum hinteren Blockende (außerhalb Block)'));
+        em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zur Form (Schnittvorschub)'));
+      } else
       em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; horizontal von hinten zum Profil (außerhalb Block)`);
       emitContour();
       // Von der Verlängerungsspitze direkt horizontal raus (kein Zug nach vorne).
+      if (leadThrough(L[last], R[last])) {
+        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[last].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
+      }
       em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[last].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[last].y)} F${airF.toFixed(0)} ; horizontal zurück (außerhalb Block)`);
       if (finish !== false)
         em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal auf Null (außerhalb Block)`);
+    }
+
+    // Hintere Blockfläche (opt.leadFace, Turmkoordinaten wie L/R; nur DXF-Formen): liegt
+    // sie zwischen Null-X und dem Konturpunkt, läuft die waagrechte An-/Abfahrt ab dort
+    // durch Material (Blockzugabe hinten) und bekommt den Schnittvorschub.
+    const LF = opt.leadFace || null;
+    const mXl = v => (sx > 0 ? v - ox : ox - v);
+    function leadThrough(Lp, Rp) {
+      return !!LF && mXl(LF.l) > 1e-6 && mXl(LF.l) < mXl(Lp.x) - 1e-6 && mXl(LF.r) < mXl(Rp.x) - 1e-6;
     }
 
     // Holm-Injektion an der Nase (Modus „Holmschnitt nach Oberseitenschnitt").
@@ -522,10 +538,15 @@
       // Zuerst senkrecht (am hinteren Blockende) auf die Höhe des Profilanfangs,
       // dann horizontal an den Profilanfang — nicht schräg.
       em(`G1 ${ax.x}${fx(bc.rear.l)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(bc.rear.r)} ${ax.v}${fy(R[0].y)} F${feed.toFixed(0)} ; vertikal hoch auf Höhe des Profilanfangs (im Blockschnitt, Schnittvorschub)`);
+      if (leadThrough(L[0], R[0]))
+        em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zur Form (Schnittvorschub)'));
+      else
       em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; horizontal zum Profilanfang (außerhalb Block, max)`);
       emitContour();
       // Verlassen ohne Sicherheitshöhe: von der Verlängerungsspitze waagerecht
       // bis zum Null-X, dann vertikal nach unten auf Null.
+      if (leadThrough(L[last], R[last]))
+        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[last].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
       em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[last].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[last].y)} F${airF.toFixed(0)} ; horizontal zum Null-X (außerhalb Block, max)`);
       em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal nach unten auf Null (außerhalb Block, max)`);
     } else if (mode === 'wrap' && bc && stackN === 1) {

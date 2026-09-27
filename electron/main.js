@@ -212,6 +212,14 @@ function setupSerial(session, parent) {
   session.setDevicePermissionHandler(function (details) { return details.deviceType === 'serial'; });
 }
 
+// Menueleiste: unter Windows/Linux keine, auf dem Mac die kleinste sinnvolle
+// (Programm-, Bearbeiten- und Fenstermenue) - ohne sie gingen dort weder
+// Kopieren/Einfuegen in Eingabefeldern noch Cmd+Q.
+function setAppMenu() {
+  const tpl = P.appMenuTemplate(CFG.APP_NAME);
+  Menu.setApplicationMenu(tpl ? Menu.buildFromTemplate(tpl) : null);
+}
+
 // --------------------------------------------------------------- Hauptfenster
 function createMainWindow(startUrl) {
   // Wasserzeichen in der Titelzeile: bei einer personalisierten Ausgabe steht
@@ -227,7 +235,7 @@ function createMainWindow(startUrl) {
       backgroundThrottling: false,
     },
   });
-  Menu.setApplicationMenu(null);
+  setAppMenu();
   // Kein Energiesparen/Bildschirm-Aus-Drosseln waehrend die App laeuft.
   try { require('electron').powerSaveBlocker.start('prevent-app-suspension'); } catch (e) {}
   win.maximize();
@@ -390,6 +398,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async function () {
+    setAppMenu();
     if (!checkExpiry()) { app.quit(); return; }
 
 

@@ -15,7 +15,10 @@
   // Kommentar zur Drahtheizung im G-Code-Kopf: konstant oder (mit zweitem
   // Heizungs-Kalibrierpunkt) aus dem Vorschub interpoliert.
   function heatNote() {
-    return App.heatPair(App.matIdFor()).varies
+    const mid = App.matIdFor();
+    if (App.matExtPower && App.matExtPower(mid))
+      return T(' % (Relais — externes Netzteil einstellen: ') + App.extPowerText(mid) + ')';
+    return App.heatPair(mid).varies
       ? T(' % (aus Kalibrierung langsam/schnell für Vorschub ') + state.cfg.feed + ' mm/min)'
       : T(' % (konstant während des Schnitts)');
   }
@@ -701,7 +704,17 @@
    * Letzter gemeinsamer Schritt aller G-Code-Quellen (autoGen() hier und
    * program() in app.js) — deshalb sitzt das Wasserzeichen hier. */
   function applyFeedMode(text) {
-    return watermark(applyRelay(state.cfg.feedMode === 'g93' ? toInverseTime(text) : text));
+    return watermark(applyExtPower(applyRelay(state.cfg.feedMode === 'g93' ? toInverseTime(text) : text)));
+  }
+  // Werkstoff mit externem Netzteil: Einstellvorgabe (V/A) als Kopfkommentar in
+  // JEDES Programm — der Heizstromausgang schaltet dann nur das Relais.
+  function applyExtPower(text) {
+    const mid = App.matIdFor();
+    if (!text || !App.matExtPower || !App.matExtPower(mid)) return text;
+    return '; ' + T('Externes Netzteil einstellen auf') + ': ' + App.extPowerText(mid)
+      + ' (' + T('Werkstoff') + ' ' + App.matField(mid, 'name', mid) + ')\n'
+      + '; ' + T('Heizstromausgang schaltet das Relais') + ' (M3 S' + App.wireSFor(App.relayLevel(mid)) + ' = ' + App.relayLevel(mid) + ' %)\n'
+      + text;
   }
 
   /* Schaltausgang (Relais/SSR) parallel zur Drahtheizung.
@@ -941,12 +954,23 @@
   function dxfGcode() {
     const P = App.dxfProjection();
     if (!P) return { text: '; ' + T('DXF-Formen: mindestens 1 Synchronpaar nötig.') + '\nM2 ; ' + T('Ende'), lines: 2, cutLengthFoam: 0, estMinutes: 0 };
-    const safeY = (P.maxy - P.origin.y) + (state.material.safeH || 10);
+    // Sicherheitshöhe über der Blockoberkante (Rohblock inkl. Rand), nicht nur über der Form.
+    const safeY = (Math.max(P.maxy, P.block ? P.block.maxy : P.maxy) - P.origin.y) + (state.material.safeH || 10);
+    // Blockzuschnitt = Schnittreihenfolge des Reiters „G-Code" (dieselbe Einstellung wie
+    // im Reiter „DXF-Formen" → Schnitt): vorne/hinten senkrecht auf Y0. „Während" braucht
+    // eine Profilnase -> bei DXF-Formen wie „vor".
+    let order = state.cfg.cutOrder || 'none';
+    if (order === 'wrap') order = 'before';
+    const withBlock = order !== 'none' && P.blockCut;
     return HotWire.gcode(P, {
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
       feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), safeY, precision: state.cfg.precision,
       maxFeed: state.cfg.maxFeed || 0, outsideFeed: outsideFeed(),
-      origin: P.origin, cutMode: 'none', blockCut: null,
+      origin: P.origin, cutMode: withBlock ? order : 'none', blockCut: withBlock ? P.blockCut : null,
+      // Die waagrechte Anfahrt vom hinteren Blockende bis zur Form läuft durch die
+      // Blockzugabe hinten -> ab dort mit Schnittvorschub (nicht in Luft-Tempo).
+      leadFace: P.block ? { l: P.block.maxx, r: P.block.maxx } : null,
+      meltDwell: +state.material.meltDwell || 0,
       header: (state.cfg.header ? state.cfg.header + '\n' : '') + '; --- DXF-Form (INNEN/AUSSEN) ---',
       footer: state.cfg.footer
     });

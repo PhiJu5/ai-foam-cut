@@ -10,6 +10,11 @@ und das Umschreiben der HTML kommen aus build_tool.py - dieses Werkzeug fuegt
 nur den Electron-Teil hinzu: electron/config.js und package.json anpassen,
 node_modules verlinken, electron-builder aufrufen.
 
+Ziele: Windows (.exe), Linux (AppImage) und macOS (.app im zip, je Prozessor).
+Linux und macOS packt electron-builder nicht unter Windows - dort laeuft der
+Bau in WSL (siehe wslbuild.py, "Linux-Werkzeuge einrichten"). Unter Linux
+oder macOS laeuft er direkt.
+
 Voraussetzungen: Node.js und die Abhaengigkeiten aus package.json. Einmalig
   npm install --prefix %USERPROFILE%\\afc-build
 
@@ -29,6 +34,7 @@ import threading
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import build_tool as bt                                    # noqa: E402  Funktionslogik
+import wslbuild as WSL                                     # noqa: E402  Linux/Mac-Bau
 
 PROFILE_DIR = os.path.join(HERE, "build_profiles_electron")
 NODE_MODULES = os.path.join(os.path.expanduser("~"), "afc-build", "node_modules")
@@ -37,6 +43,43 @@ OUT_BASE = os.path.join(HERE, "dist-electron")
 STAGE_BASE = os.path.join(HERE, "build")
 EXTRA = ["LICENSE", "THIRD_PARTY_LICENSES.md"]             # Lizenztexte muessen mit
 BASENAME = "AI Foam Cut"
+TARGETS = ("win", "linux", "mac")
+LX_OUT = "dist-out"                                        # Ausgabe im Stage (Linux/Mac)
+MAC_ARCHS = {"arm64": ["arm64"], "x64": ["x64"], "beide": ["arm64", "x64"]}
+MAC_ICON = "icon/icon-1024.png"                            # daraus wird die .icns
+MAC_LIESMICH_NAME = "LIESMICH - README.txt"
+MAC_LIESMICH = """AI Foam Cut fuer macOS
+======================
+
+1. "{app}" aus diesem zip in einen EIGENEN Ordner ziehen, z. B. Dokumente/AI Foam Cut.
+   Daneben legt das Programm seine Einstellungen ab.
+   (Liegt die App unter "Programme", landen sie in Dokumente/AI Foam Cut.)
+
+2. Die App ist nicht von Apple beglaubigt (kein Entwicklerzertifikat).
+   macOS meldet deshalb beim ersten Start "beschaedigt" oder
+   "nicht verifizierter Entwickler". Einmalig im Terminal:
+
+       xattr -cr "/Pfad/zu/{app}"
+
+   (Tipp: "xattr -cr " tippen und die App ins Terminalfenster ziehen.)
+   Danach startet sie normal per Doppelklick.
+
+3. Maschine: der USB-Anschluss erscheint als /dev/cu.usbserial-... oder
+   /dev/cu.usbmodem-... in der Portauswahl.
+
+------------------------------------------------------------------------------
+
+AI Foam Cut for macOS
+
+1. Drag "{app}" out of this zip into a folder of its own (e.g.
+   Documents/AI Foam Cut). Settings are stored next to it.
+2. The app is not notarized. On first start macOS says it is "damaged" or
+   from an "unidentified developer". Run once in Terminal:
+
+       xattr -cr "/path/to/{app}"
+
+3. The machine's USB port shows up as /dev/cu.usbserial-... or /dev/cu.usbmodem-...
+"""
 
 
 def open_dir(p):
@@ -59,7 +102,9 @@ def profile_path(name):
 def list_profiles():
     if not os.path.isdir(PROFILE_DIR):
         return []
-    return sorted(f[:-5] for f in os.listdir(PROFILE_DIR) if f.endswith(".json"))
+    # "_linux.json" usw. sind Einstellungen des Werkzeugs, keine Profile.
+    return sorted(f[:-5] for f in os.listdir(PROFILE_DIR)
+                  if f.endswith(".json") and not f.startswith("_"))
 
 
 def save_profile(name, data):
@@ -158,9 +203,29 @@ def patch_package_json(src, name, version, target, stage_files):
     b["productName"] = name
     b["files"] = stage_files
     if target == "linux":
-        b["directories"] = {"output": "dist-linux"}
+        b["directories"] = {"output": LX_OUT}
         b.setdefault("linux", {})["artifactName"] = "${productName}.${ext}"
         b.setdefault("appImage", {})["artifactName"] = "${productName}.${ext}"
+    elif target == "mac":
+        # Unsigniert (identity None): signieren kann nur ein Mac mit Apple-
+        # Zertifikat. Die Anleitung im zip erklaert "xattr -cr".
+        b["directories"] = {"output": LX_OUT}
+        b.setdefault("mac", {}).update({
+            "target": [{"target": "zip", "arch": ["arm64", "x64"]}],
+            "icon": MAC_ICON,
+            "category": "public.app-category.graphics-design",
+            "artifactName": "${productName}-mac-${arch}.${ext}",
+            "identity": None, "hardenedRuntime": False, "gatekeeperAssess": False,
+            "minimumSystemVersion": "11.0",
+            "extendInfo": {
+                "NSDocumentsFolderUsageDescription":
+                    "AI Foam Cut speichert Einstellungen und Projekte im Ordner Dokumente.",
+                "NSDesktopFolderUsageDescription":
+                    "AI Foam Cut oeffnet und speichert Projekte auf dem Schreibtisch.",
+                "NSDownloadsFolderUsageDescription":
+                    "AI Foam Cut oeffnet Dateien aus dem Ordner Downloads.",
+            },
+        })
     else:
         b["directories"] = {"output": os.path.join(OUT_BASE, name).replace("\\", "/")}
         b.setdefault("win", {})["artifactName"] = "${productName}.${ext}"
@@ -173,7 +238,9 @@ def patch_package_json(src, name, version, target, stage_files):
 def run_build(cfg, log, cancel=None):
     """cfg: {name, version, edition, expiry, features:[ids], profile, target, devtools}
 
-    Baut dist-electron/<name>/<name>.exe (Windows) bzw. das AppImage.
+    Baut dist-electron/<name>/<name>.exe (Windows), <name>.AppImage (Linux)
+    bzw. <name>-mac-<arch>.zip (macOS; cfg["mac_arch"] = arm64|x64|beide).
+    Linux/Mac laufen unter Windows in WSL (cfg["distro"]).
     Wirft bei Fehlern eine Exception.
     """
     feats = bt.load_manifest()
@@ -187,6 +254,12 @@ def run_build(cfg, log, cancel=None):
     cfg["expiry"] = bt.normalize_expiry(cfg.get("expiry", ""))
     name = cfg["name"]
     target = cfg.get("target", "win")
+    if target not in TARGETS:
+        raise RuntimeError("Unbekanntes Ziel: %r" % target)
+    if target == "win" and os.name != "nt":
+        raise RuntimeError("Die Windows-exe laesst sich nur unter Windows bauen.")
+    if target == "mac" and not os.path.isfile(os.path.join(HERE, MAC_ICON)):
+        raise RuntimeError("%s fehlt - einmal \"python make_icon.py\" laufen lassen." % MAC_ICON)
 
     # Dateien zusammenstellen: Kern + gewaehlte Funktionen
     files = list(bt.core_files(feats, html))
@@ -217,6 +290,7 @@ def run_build(cfg, log, cancel=None):
         "date": datetime.date.today().isoformat(), "profile": cfg.get("profile") or "",
         "edition": cfg.get("edition", ""), "features": sorted(selected),
         "demo": [], "variant": "electron",
+        "plattform": {"linux": "linux", "mac": "macos"}.get(target, "windows"),
     }
 
     # --- Stage aufbauen
@@ -257,10 +331,13 @@ def run_build(cfg, log, cancel=None):
     if cancel is not None and cancel():
         raise RuntimeError("Abgebrochen.")
 
+    if target in ("linux", "mac"):
+        return _build_unix(cfg, name, target, stage, build_info, log, cancel)
+
     link_node_modules(stage, log)
 
     # --- electron-builder
-    cmd = builder_cmd() + (["--linux"] if target == "linux" else ["--win"])
+    cmd = builder_cmd() + ["--win"]
     log("Aufruf: " + " ".join(cmd))
     p = subprocess.Popen(cmd, cwd=stage, env=node_env(), stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -274,28 +351,63 @@ def run_build(cfg, log, cancel=None):
         raise RuntimeError("electron-builder ist mit Fehler %d beendet worden." % p.returncode)
 
     # --- Ergebnis einsammeln
-    if target == "linux":
-        out_dir = os.path.join(stage, "dist-linux")
-        ext = ".AppImage"
-    else:
-        out_dir = os.path.join(OUT_BASE, name)
-        ext = ".exe"
+    out_dir = os.path.join(OUT_BASE, name)
+    ext = ".exe"
     built = [os.path.join(out_dir, f) for f in os.listdir(out_dir)
              if f.endswith(ext)] if os.path.isdir(out_dir) else []
     if not built:
         raise RuntimeError("Keine Ausgabedatei in %s gefunden." % out_dir)
     final = built[0]
-    if target == "linux":
-        os.makedirs(os.path.join(OUT_BASE, name), exist_ok=True)
-        ziel = os.path.join(OUT_BASE, name, os.path.basename(final))
-        shutil.move(final, ziel)
-        final = ziel
     with open(final + ".build.json", "w", encoding="utf-8") as f:
         json.dump(build_info, f, ensure_ascii=False, indent=2)
     log("")
     log("Fertig: %s  (%.1f MB)" % (final, os.path.getsize(final) / 1048576.0))
     shutil.rmtree(stage, ignore_errors=True)
     return final
+
+
+def _build_unix(cfg, name, target, stage, build_info, log, cancel):
+    """Linux-AppImage oder Mac-zips: in WSL (unter Windows) bzw. direkt."""
+    if target == "mac":
+        archs = MAC_ARCHS.get(cfg.get("mac_arch") or "beide", MAC_ARCHS["beide"])
+        builder = "--mac zip " + " ".join("--" + a for a in archs)
+        outs = ["%s/%s-mac-%s.zip" % (LX_OUT, name, a) for a in archs]
+    else:
+        builder = "--linux AppImage --x64"
+        outs = ["%s/%s.AppImage" % (LX_OUT, name)]
+    dest = os.path.join(OUT_BASE, name)
+    # Nur die eigenen Zieldateien entfernen - eine Windows- oder Linux-Ausgabe
+    # derselben Version liegt im selben Ordner und bleibt stehen.
+    for o in outs:
+        f = os.path.join(dest, os.path.basename(o))
+        if os.path.isfile(f):
+            os.remove(f)
+    got = WSL.build(cfg.get("distro", ""), stage, dest,
+                    "node " + WSL.BUILD_DIR + "/node_modules/electron-builder/cli.js " + builder,
+                    outs, log, cancel=cancel, what="Mac" if target == "mac" else "Linux",
+                    link_node_modules=True)
+    shutil.rmtree(stage, ignore_errors=True)
+    if target == "mac":
+        import zipfile
+        for z in got:
+            with zipfile.ZipFile(z, "a", compression=zipfile.ZIP_DEFLATED) as zf:
+                if MAC_LIESMICH_NAME not in zf.namelist():
+                    zf.writestr(MAC_LIESMICH_NAME, MAC_LIESMICH.format(app=name + ".app"))
+        info = os.path.join(dest, name + "-mac.build.json")
+    else:
+        info = got[0] + ".build.json"
+    with open(info, "w", encoding="utf-8") as f:
+        json.dump(build_info, f, ensure_ascii=False, indent=2)
+    log("")
+    for g in got:
+        log("Fertig: %s  (%.1f MB)" % (g, os.path.getsize(g) / 1048576.0))
+    if target == "mac":
+        log("Mac: -arm64 = Apple Silicon (M1 und neuer), -x64 = Intel. Unsigniert - beim ersten "
+            "Start einmal  xattr -cr \"/Pfad/zu/%s.app\"  (Anleitung liegt im zip)." % name)
+    else:
+        log("Linux: chmod +x, starten; noetig sind libfuse2 fuer AppImages und die Gruppe "
+            "\"dialout\" fuer die Maschine.")
+    return got[0]
 
 
 # ---------------------------------------------------------------- Fenster
@@ -346,18 +458,41 @@ def run_ui():
     ttk.Entry(top, textvariable=exp_var, width=12).grid(row=4, column=2, sticky="w", padx=4)
 
     ttk.Label(top, text="Ziel:").grid(row=5, column=0, sticky="w")
-    target_var = tk.StringVar(value="win")
+    lin_set = WSL.load_settings(PROFILE_DIR)
+    target_var = tk.StringVar(value="win" if os.name == "nt" else "linux")
     tf = ttk.Frame(top)
     tf.grid(row=5, column=1, columnspan=4, sticky="w", padx=4)
     ttk.Radiobutton(tf, text="Windows (.exe)", variable=target_var, value="win").pack(side="left")
     ttk.Radiobutton(tf, text="Linux (AppImage)", variable=target_var,
                     value="linux").pack(side="left", padx=(12, 0))
+    ttk.Radiobutton(tf, text="macOS (.app im zip)", variable=target_var,
+                    value="mac").pack(side="left", padx=(12, 0))
     dev_var = tk.BooleanVar(value=True)
     ttk.Checkbutton(tf, text="Entwicklerwerkzeuge (F12)",
                     variable=dev_var).pack(side="left", padx=(20, 0))
 
+    # Linux/Mac: Bauumgebung (unter Windows WSL) und Mac-Prozessor
+    lf = ttk.Frame(top)
+    lf.grid(row=6, column=1, columnspan=4, sticky="w", padx=4, pady=(2, 0))
+    ttk.Label(lf, text="Mac-Prozessor:").pack(side="left")
+    arch_var = tk.StringVar(value=lin_set.get("mac_arch", "beide"))
+    ttk.Combobox(lf, textvariable=arch_var, width=7, state="readonly",
+                 values=list(MAC_ARCHS)).pack(side="left", padx=(2, 12))
+    dist_var = tk.StringVar(value=lin_set.get("distro", ""))
+    if os.name == "nt":
+        ttk.Label(lf, text="WSL-Distribution:").pack(side="left")
+        dist_cb = ttk.Combobox(lf, textvariable=dist_var, width=14, values=WSL.distros())
+        dist_cb.pack(side="left", padx=(2, 8))
+        if not dist_var.get() and dist_cb.cget("values"):
+            dist_var.set(dist_cb.cget("values")[0])
+    ttk.Button(lf, text="Umgebung pruefen", command=lambda: do_lin_check()).pack(side="left")
+    ttk.Button(lf, text="Linux-Werkzeuge einrichten...",
+               command=lambda: do_lin_setup()).pack(side="left", padx=4)
+    arch_var.trace_add("write", lambda *a: WSL.save_settings(PROFILE_DIR, {"mac_arch": arch_var.get()}))
+    dist_var.trace_add("write", lambda *a: WSL.save_settings(PROFILE_DIR, {"distro": dist_var.get().strip()}))
+
     name_lbl = ttk.Label(top, text="", foreground="#555")
-    name_lbl.grid(row=6, column=0, columnspan=5, sticky="w")
+    name_lbl.grid(row=7, column=0, columnspan=5, sticky="w")
 
     def out_name():
         v = ver_var.get().strip().lstrip("vV")
@@ -366,13 +501,18 @@ def run_ui():
         return (n + " " + s) if s else n
 
     def refresh_name(*_):
-        ext = ".AppImage" if target_var.get() == "linux" else ".exe"
+        t = target_var.get()
+        if t == "mac":
+            datei = "  ".join("%s-mac-%s.zip" % (out_name(), a)
+                              for a in MAC_ARCHS.get(arch_var.get(), ["arm64"]))
+        else:
+            datei = out_name() + (".AppImage" if t == "linux" else ".exe")
         ed = ed_var.get().strip()
-        name_lbl.config(text="Datei: dist-electron%s%s%s%s%s    Fenstertitel: %s"
-                        % (os.sep, out_name(), os.sep, out_name(), ext,
+        name_lbl.config(text="Datei: dist-electron%s%s%s%s    Fenstertitel: %s"
+                        % (os.sep, out_name(), os.sep, datei,
                            BASENAME + ((" " + ed) if ed else "")))
 
-    for _v in (ver_var, suffix_var, ed_var, target_var):
+    for _v in (ver_var, suffix_var, ed_var, target_var, arch_var):
         _v.trace_add("write", refresh_name)
     refresh_name()
 
@@ -482,7 +622,7 @@ def run_ui():
                     status.config(text=s[2], foreground="#080" if s[1] else "#b00")
                     if s[1]:
                         prof_cb.config(values=list_profiles())
-                        if messagebox.askyesno("Fertig", s[2] + "\n\nOrdner oeffnen?"):
+                        if s[3] and messagebox.askyesno("Fertig", s[2] + "\n\nOrdner oeffnen?"):
                             open_dir(os.path.dirname(s[3]) if s[3] else OUT_BASE)
                     else:
                         messagebox.showerror("Build fehlgeschlagen", s[2])
@@ -497,6 +637,7 @@ def run_ui():
         return {"name": out_name(), "version": ver_var.get().strip().lstrip("vV"),
                 "edition": ed_var.get().strip(), "expiry": exp_var.get().strip(),
                 "target": target_var.get(), "devtools": bool(dev_var.get()),
+                "mac_arch": arch_var.get(), "distro": dist_var.get().strip(),
                 "profile": prof_var.get().strip(),
                 "features": [i for i, v in vars_.items() if v.get()]}
 
@@ -524,9 +665,11 @@ def run_ui():
                                "normalerweise leer. Wirklich mit Ablaufdatum bauen?"
                                % cfg["expiry"]):
             return
-        if cfg["target"] == "linux" and os.name == "nt":
-            log("HINWEIS: Die Linux-Ausgabe baut electron-builder nur unter Linux "
-                "oder in WSL - unter Windows bricht der Bau ab.")
+        if cfg["target"] != "win" and os.name == "nt" and not WSL.distros():
+            txt.delete("1.0", "end")
+            txt.insert("end", WSL.FEHLT + "\n")
+            status.config(text="Kein WSL installiert", foreground="#b00")
+            return
         state.update(running=True, cancel=False)
         build_btn.config(state="disabled")
         cancel_btn.config(state="normal")
@@ -543,6 +686,54 @@ def run_ui():
 
         threading.Thread(target=work, daemon=True).start()
 
+    def bg(what, worker):
+        """Pruefen/Einrichten im Hintergrund (worker() gibt die Schlussmeldung)."""
+        if state["running"]:
+            return
+        state.update(running=True, cancel=False)
+        build_btn.config(state="disabled")
+        cancel_btn.config(state="normal")
+        status.config(text=what + " laeuft ...", foreground="#555")
+        txt.delete("1.0", "end")
+
+        def work():
+            try:
+                q.put((True, True, worker(), ""))
+            except Exception as e:                                   # noqa: BLE001
+                log("FEHLER: %s" % e)
+                q.put((True, False, str(e), ""))
+        threading.Thread(target=work, daemon=True).start()
+
+    def do_lin_check():
+        def work():
+            ok, bericht = WSL.check(dist_var.get().strip(), "node")
+            for ln in bericht.splitlines():
+                log(ln)
+            if not ok:
+                raise RuntimeError("Die Linux-Bauumgebung ist noch nicht fertig - siehe Protokoll.")
+            return "Linux-Umgebung in Ordnung"
+        bg("Pruefen", work)
+
+    def do_lin_setup():
+        if os.name == "nt" and not WSL.distros():
+            txt.delete("1.0", "end")
+            txt.insert("end", WSL.FEHLT + "\n")
+            return
+        if not messagebox.askyesno(
+                "Linux-Werkzeuge einrichten",
+                "In der Linux-Umgebung werden node/npm (falls noch nicht da) sowie electron "
+                "und electron-builder nach ~/afc-build installiert (etwa 500 MB).\n\n"
+                "Nur einmal noetig. Jetzt einrichten?"):
+            return
+        with open(os.path.join(HERE, "package.json"), encoding="utf-8") as f:
+            pkg = json.load(f)
+
+        def work():
+            WSL.setup(dist_var.get().strip(), "node", log, cancel=lambda: state["cancel"],
+                      package_json=pkg)
+            return "Linux-Werkzeuge eingerichtet"
+        bg("Einrichten", work)
+
     def do_save_profile():
         name = prof_var.get().strip() or simpledialog.askstring(
             "Profil", "Name des Profils:", parent=root)
@@ -552,6 +743,7 @@ def run_ui():
         save_profile(name, {"features": cfg["features"], "known": [ft["id"] for ft in feats],
                             "expiry": cfg["expiry"], "suffix": suffix_var.get().strip(),
                             "edition": cfg["edition"], "target": cfg["target"],
+                            "mac_arch": cfg["mac_arch"],
                             "devtools": cfg["devtools"]})
         prof_var.set(name)
         prof_cb.config(values=list_profiles())
@@ -574,6 +766,8 @@ def run_ui():
             ed_var.set(p["edition"])
         suffix_var.set(p.get("suffix", ""))
         target_var.set(p.get("target", "win"))
+        if p.get("mac_arch") in MAC_ARCHS:
+            arch_var.set(p["mac_arch"])
         dev_var.set(bool(p.get("devtools", True)))
         status.config(text="Profil geladen: " + name, foreground="#555")
 
@@ -603,7 +797,11 @@ def run_cli(argv):
     ap.add_argument("--version", default=None, help="Standard: zuletzt gebaute Version")
     ap.add_argument("--edition", default="", help="Zusatz im Fenstertitel")
     ap.add_argument("--expiry", default="", help="JJJJ-MM-TT, leer = kein Ablaufdatum")
-    ap.add_argument("--target", choices=["win", "linux"], default="win")
+    ap.add_argument("--target", choices=list(TARGETS), default=None,
+                    help="win | linux | mac (Linux/Mac unter Windows ueber WSL)")
+    ap.add_argument("--arch", choices=list(MAC_ARCHS), default=None,
+                    help="nur mac: arm64 (Apple Silicon), x64 (Intel) oder beide")
+    ap.add_argument("--distro", default=None, help="WSL-Distribution (leer = Standard)")
     ap.add_argument("--profile", default="", help="Profil aus build_profiles_electron/")
     ap.add_argument("--features", default="",
                     help="Komma-Liste; leer = alle Standardfunktionen")
@@ -616,6 +814,7 @@ def run_cli(argv):
         cfg = {"features": bt.profile_features(p, feats), "profile": a.profile,
                "edition": p.get("edition", ""), "expiry": p.get("expiry", ""),
                "target": p.get("target", "win"), "devtools": bool(p.get("devtools", True)),
+               "mac_arch": p.get("mac_arch", ""),
                "version": p.get("version", "")}
     else:
         cfg = {"features": [ft["id"] for ft in feats if ft.get("default", True)],
@@ -628,6 +827,9 @@ def run_cli(argv):
         cfg["expiry"] = a.expiry
     if a.target:
         cfg["target"] = a.target
+    lin = WSL.load_settings(PROFILE_DIR)
+    cfg["mac_arch"] = a.arch or cfg.get("mac_arch") or lin.get("mac_arch", "beide")
+    cfg["distro"] = a.distro if a.distro is not None else lin.get("distro", "")
     if a.no_devtools:
         cfg["devtools"] = False
     cfg["version"] = (a.version or cfg.get("version") or bt.next_version()).lstrip("vV")

@@ -388,7 +388,8 @@
            showBlock: true, blockMargin: 10,   // Mindestabstand des Blockrands zum Profil (rundum, mm)
            blockOvF: 20, blockOvR: 20,         // (Alt) getrennte Zugabe vorne/hinten — nicht mehr in der UI
            blockLenX: 0, blockHeightY: 0,      // feste Blockmaße X/Y (0 = automatisch aus Geometrie + Zugaben)
-           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
+           blockZF: null, blockZR: null,       // Blockzugabe vor/hinter dem Querschnitt (mm, null = blockMargin)
+           blockZT: null, blockZB: null,       // Blockzugabe über/unter dem Querschnitt (mm, null = blockMargin)           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
            // Profile (je ein Layer aus dem geteilten Pool d.layers + Verschiebung),
            // jedes benachbarte Paar bildet ein Segment. segs = Snapshot je Segment
            // (Länge = ribs.length-1). Die obigen Flachfelder spiegeln activeSeg.

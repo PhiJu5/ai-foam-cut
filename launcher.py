@@ -21,10 +21,46 @@ def exe_dir():
     return os.path.dirname(os.path.abspath(__file__))
 
 def msgbox(text, title):
+    """Meldung, die WARTET, bis sie weggeklickt ist - main() beendet danach den
+    Server. Unter Windows das Systemfenster, unter Linux/macOS ein tkinter-
+    Fenster; ohne beides blockiert die Konsole (Strg+C beendet)."""
+    if os.name == "nt":
+        try:
+            ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)
+            return
+        except Exception:
+            pass
     try:
-        ctypes.windll.user32.MessageBoxW(0, text, title, 0x10)
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo(title, text, parent=root)
+        root.destroy()
+        return
     except Exception:
-        print(text)
+        pass
+    print(text)
+    try:
+        input("[Eingabetaste beendet] ")
+    except (EOFError, RuntimeError, OSError):
+        # Keine Konsole (grafisch gestartet): bis zum Beenden des Prozesses warten.
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+
+
+def open_browser(url):
+    """Browser oeffnen. Unter Linux setzt PyInstaller LD_LIBRARY_PATH auf die
+    eigenen Bibliotheken - ein Browser, der das erbt, stuerzt ab oder startet
+    nicht. Fuer den Aufruf die urspruengliche Umgebung wiederherstellen."""
+    if sys.platform.startswith("linux") and getattr(sys, "frozen", False):
+        orig = os.environ.get("LD_LIBRARY_PATH_ORIG")
+        if orig is not None:
+            os.environ["LD_LIBRARY_PATH"] = orig
+        else:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+    webbrowser.open(url)
 
 def check_expiry():
     if EXPIRY is None:
@@ -77,7 +113,11 @@ def choose_settings_file(folder):
         return default_path
 
     result = {"path": None}
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except Exception:
+        # Kein Bildschirm (Linux ohne grafische Sitzung): Standarddatei nehmen.
+        return default_path
     root.title("AI Foam Cut")
     root.attributes("-topmost", True)
     root.resizable(False, False)
@@ -150,6 +190,8 @@ def main():
     os.chdir(root)
 
     settings_file = choose_settings_file(exe_dir())
+    # Profildatenbank (foildb.js): eine Datei fuer alle Einstellungsdateien/Maschinen.
+    foildb_file = os.path.join(exe_dir(), "hotwing-profile.json")
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         # HTTP/1.1 mit Keep-Alive: der Browser laedt HTML + viele JS-Dateien
@@ -218,6 +260,13 @@ def main():
                 else:
                     self._send_json_bytes(b"", status=404)
                 return
+            if path == "/__foildb__":
+                try:
+                    with open(foildb_file, "rb") as f:
+                        self._send_json_bytes(f.read())
+                except Exception:
+                    self._send_json_bytes(b"", status=404)
+                return
             return super().do_GET()
 
         def do_POST(self):
@@ -227,6 +276,16 @@ def main():
                     length = int(self.headers.get("Content-Length", "0"))
                     data = self.rfile.read(length)
                     with open(settings_file, "wb") as f:
+                        f.write(data)
+                    self._send_json_bytes(b'{"ok":true}')
+                except Exception:
+                    self._send_json_bytes(b'{"ok":false}', status=500)
+                return
+            if path == "/__foildb__":
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                    data = self.rfile.read(length)
+                    with open(foildb_file, "wb") as f:
                         f.write(data)
                     self._send_json_bytes(b'{"ok":true}')
                 except Exception:
@@ -272,7 +331,7 @@ def main():
     url = "http://127.0.0.1:%d/AI%%20Foam%%20Cut.html?_=%d" % (port, int(_t.time()))
 
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    webbrowser.open(url)
+    open_browser(url)
 
     msgbox(
         "AI Foam Cut laeuft jetzt im Browser.\n\n"
