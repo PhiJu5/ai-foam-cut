@@ -36,3 +36,7 @@ _intern/
 
 # --- Wrangler: lokaler Zustand + Cloudflare-Konto-ID (nicht veroeffentlichen) --
 website/.wrangler/
+
+# --- Niemals veroeffentlichen: Website und Handbuch-Bilder (nur lokal) -----
+website/
+handbuch_bilder/
