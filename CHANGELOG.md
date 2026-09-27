@@ -5,6 +5,17 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
 ## [1.5] — 2026-09-27
+### Schneiden: eigene G-Code-Quelle „DXF-Formen" (2026-09-27)
+- Im Reiter „Schneiden" gibt es jetzt die Quelle **DXF-Formen**. Bisher kamen DXF-Formen nur über „G-Code
+  (Kern/Negativschale)" an, und auch nur dann, wenn im Reiter „G-Code" gerade DXF-Formen als Quelle gewählt war.
+  „G-Code (Kern/Negativschale)" liefert jetzt nur noch Kern bzw. Negativschale. „✂ Schneiden" im G-Code-Reiter
+  wählt bei DXF-Formen automatisch die neue Quelle.
+
+### Behoben: Warnung „Vorschub überschritten" bei Außen-Vorschub „Maximum" (2026-09-27)
+- Die 3D-Simulation warnte auch dann, wenn der Vorschub genau dem „Max. Vorschub" der Maschine entsprach. Ursache:
+  Im G93-Modus wird die Geschwindigkeit aus dem gerundeten F zurückgerechnet (z. B. 500,01 statt 500). Die Warnung
+  kommt jetzt erst, wenn der Vorschub wirklich darüber liegt (Toleranz 0,1 %, mind. 0,5 mm/min).
+
 ### DXF-Formen: Blockzuschnitt und Abstände vorne/hinten/oben/unten (2026-09-27)
 - Je Segment **Abstand vorne, hinten, oben und unten** (Abstand der Blockkante zum Querschnitt, gemessen am
   Nennmaß ohne Abbrand) statt des bisherigen „Mindestabstands zum Profil" rundum. Alte Projekte übernehmen den

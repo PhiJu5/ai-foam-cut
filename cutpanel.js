@@ -457,6 +457,10 @@
   function cutWireUp() {
     if (!window.GrblPanel || !window.Sim3D) return;
     Sim3D.mountMonitor('cSimM');         // gleicher Renderer im Reiter „Schneiden" (folgt Ausführung)
+    // Quelle „DXF-Formen" nur anbieten, wenn das DXF-Formen-Modul mitgebaut ist.
+    if (!App.buildDxfScene) {
+      const o = document.querySelector('#cutSource option[value="dxf"]'); if (o) o.remove();
+    }
     // grblHAL-Pendant — Achsnamen und G-Code kommen aus der App. Die G-Code-
     // Quelle (Tragfläche/G-Code oder Blockzurichten) wählt der Reiter „Schneiden".
     GrblPanel.init({
@@ -500,8 +504,13 @@
         // G-Code-Reiters übernehmen (eigene Quelle „3D-Modell"). Steht dort gerade
         // 'model', mit der letzten Nicht-Modell-Quelle erzeugen und danach den
         // ursprünglichen Zustand wiederherstellen.
+        // Quelle „DXF-Formen" erzwingt die DXF-Formen-Erzeugung, gleich welche Quelle
+        // im G-Code-Reiter steht; „G-Code" nimmt dann nie die DXF-Formen.
         const saved = state.cfg.gcodeSource;
-        const eff = (saved === 'model') ? (state.cfg.gcodeSourceLast || 'core') : saved;
+        const wantDxf = !!(src && src.value === 'dxf');
+        let eff = (saved === 'model' || saved === 'plate') ? (state.cfg.gcodeSourceLast || 'core') : saved;
+        if (wantDxf) eff = 'dxf';
+        else if (eff === 'dxf') eff = 'core';
         state.cfg.gcodeSource = eff;
         render();
         const text = (state.lastGcode && state.lastGcode.text) || '';
@@ -525,7 +534,7 @@
       toCut.style.display = '';
       toCut.onclick = () => {
         const gs = state.cfg.gcodeSource;
-        const want = (gs === 'model' || gs === 'plate') ? gs : 'gcode';
+        const want = (gs === 'model' || gs === 'plate' || gs === 'dxf') ? gs : 'gcode';
         const src = document.getElementById('cutSource');
         if (src && [...src.options].some(o => o.value === want)) src.value = want;
         App.switchView('cut');

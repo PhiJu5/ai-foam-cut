@@ -283,7 +283,10 @@
     if (Fmax > 0) {
       let fMax = 0;
       for (const m of moves) if (!m.rapid && m.feed > fMax) fMax = m.feed;
-      if (fMax > Fmax + 0.001) return { msg: `${T('Vorschub überschritten: F = ')}${fMax.toFixed(0)}${T(' mm/min (max ')}${Fmax} mm/min)`,
+      // Erst ÜBER dem Maximum warnen, nicht bei Gleichheit: in G93 wird die Geschwindigkeit
+      // aus dem gerundeten F (1/Blockdauer) zurückgerechnet und liegt dann z. B. bei 500,01
+      // statt 500 — Toleranz 0,1 % (mind. 0,5 mm/min), also alles, was als „500" angezeigt würde.
+      if (fMax > Fmax + Math.max(0.5, Fmax * 1e-3)) return { msg: `${T('Vorschub überschritten: F = ')}${fMax.toFixed(0)}${T(' mm/min (max ')}${Fmax} mm/min)`,
                                         tips: advice({ kind: 'feed', axis: 'F', val: fMax, limit: Fmax }) };
     }
     return null;
