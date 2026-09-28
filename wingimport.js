@@ -120,6 +120,8 @@
     rec.cfg = rec.cfg || {};
     // V-Form steckt segmentweise in den mm-Werten -> globale Ausrichtung aus.
     if (rec.cfg.align) rec.cfg.align.enable = false;
+    // Glatter Grundriss für den Formenbau (nur .pc2-Import); jeder andere Import verwirft ihn.
+    rec.cfg.formPlanSrc = cfg.planSrc || null;
   }
 
   // Eindeutigen Namen finden (importierte Flügel heißen oft gleich).

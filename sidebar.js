@@ -1482,6 +1482,9 @@
     side.appendChild(shc.g);
     if (App.kernTeileSidebar) App.kernTeileSidebar(side);   // Kern zerteilen (Stege) + Schale erhalten
 
+    // --- Elliptische Fläche aus Planform Creator (pc2wing.js) ---------
+    if (App.pc2WingSidebar) App.pc2WingSidebar(side);
+
     // --- Profilhöhenausrichtung (V-Form) ------------------------------
     const al = grp('Profilhöhenausrichtung', true, 'wing');
     const alc = state.cfg.align;
@@ -1536,6 +1539,14 @@
                           : 'Winkel zwischen der V-Linie dieser Gruppe und der Vorgruppe.')
               : 'Höhenanstieg der V-Linie über die Spannweite dieser Gruppe.' });
       });
+    }
+    if (alc.enable && state.segments.length > 1) {
+      const last = state.segments[state.segments.length - 1];
+      boolRow(al.body, 'Randbogenprofil im Verlauf ausrichten', () => !!last.alignTrendTip,
+        v => { last.alignTrendTip = v; App.recompute(); render(); },
+        'Die äußerste Rippe wird nicht am gewählten Merkmal (z. B. Scharnierpunkt) ausgerichtet, sondern ihre Sehne '
+        + 'setzt die Neigung des letzten Segments fort. Sinnvoll für ein sehr kleines Randbogenprofil, das sonst '
+        + 'sichtbar nach oben oder unten springt.');
     }
     hint(al.body, 'Wirkt auf Vorschau UND G-Code (V-Form ist immer in den Schnitt eingerechnet).');
     side.appendChild(al.g);
@@ -2237,6 +2248,17 @@
       v => { state.cfg[key] = v; if (window.Sim3D && Sim3D.refreshWarn) Sim3D.refreshWarn(); }, h);
     warnRow('Warnung: Portal fährt ins Negative', 'warnNeg',
       'Meldung, wenn eine Achse unter 0 (Maschinennullpunkt) fahren würde — z. B. beim Durchschneiden unter Y0 oder bei Anfahrwegen vor dem Block.');
+    // Erlaubter Fahrweg ins Negative (horizontal/vertikal, je beide Portale): bis zu diesem Wert keine Warnung/Sperre.
+    // Vorzeichen wird automatisch negativ gesetzt (3 → -3), 0 = nichts erlaubt.
+    hint(ml.body, 'Erlaubter Fahrweg ins Negative: Bis zu diesem Wert dürfen die beiden horizontalen bzw. vertikalen Achsen unter den Maschinennullpunkt fahren, '
+      + 'ohne Warnung und ohne Startsperre. Der Wert ist negativ (z. B. -5), das Vorzeichen wird automatisch gesetzt. 0 = nichts erlaubt. '
+      + 'Der negative Weg wird vom max. Fahrweg abgezogen: bei 500 mm Fahrweg und -5 sind nach oben noch 495 mm erlaubt. '
+      + 'Achtung: Die Maschine muss diesen Weg tatsächlich fahren können (Endschalter/Auflage prüfen).');
+    [['Erlaubt ins Negative horizontal (mm)', 'negTravelH'], ['Erlaubt ins Negative vertikal (mm)', 'negTravelV']].forEach(([label, key]) => {
+      const inp = numRow(ml.body, label, () => -Math.abs(state.cfg[key] || 0),
+        v => { state.cfg[key] = -Math.abs(v); if (window.Sim3D && Sim3D.refreshWarn) Sim3D.refreshWarn(); }, { max: 0, step: 0.5 });
+      inp.onblur = () => { inp.value = -Math.abs(state.cfg[key] || 0); };
+    });
     warnRow('Warnung: Max. Fahrweg überschritten', 'warnTravel',
       'Meldung, wenn eine Achse über den oben eingetragenen max. Fahrweg hinausfährt (nur mit Wert > 0).');
     warnRow('Warnung: Max. Vorschub überschritten', 'warnFeed',

@@ -201,6 +201,27 @@
     const d = S.moves[lo].dur || 1e-9;
     return { i: lo, u: Math.max(0, Math.min(1, (t - t0) / d)) };
   }
+  /* Zeitschritt der Wiedergabe begrenzen: schnelle, lange Fahrten (Eilgang bzw.
+     „Geschwindigkeit außerhalb Block" = Maximum) dauern in Simulationszeit nur
+     Sekundenbruchteile und würden sonst innerhalb EINES Bildes übersprungen —
+     der Draht spränge, die Fahrt wäre nie zu sehen. Jede Fahrt ab MIN_SHOW_LEN
+     läuft deshalb über mindestens MIN_SHOW_FRAMES Bilder. Die Länge liegt bewusst
+     über dem Punktabstand der Kontur (wenige mm): Konturschritte dürfen NICHT
+     gebremst werden, sonst läuft die ganze Simulation um ein Vielfaches langsamer. */
+  const MIN_SHOW_LEN = 20, MIN_SHOW_FRAMES = 6;
+  function stepTime(t, adv) {
+    if (!S.moves.length || !(adv > 0)) return t + adv;
+    const lenOf = m => Math.max(Math.hypot(m.to.lx - m.from.lx, m.to.ly - m.from.ly),
+                                Math.hypot(m.to.rx - m.from.rx, m.to.ry - m.from.ry));
+    const isLong = m => m && !m.dwell && m.dur > 0 && lenOf(m) >= MIN_SHOW_LEN;
+    const i = moveAt(t + 1e-9).i, m = S.moves[i];
+    let t2 = t + (isLong(m) ? Math.min(adv, m.dur / MIN_SHOW_FRAMES) : adv);
+    // Nicht ÜBER eine lange Fahrt hinwegspringen: der Schritt endet spätestens an
+    // ihrem Beginn, das nächste Bild läuft dann in ihr weiter.
+    for (let k = i + 1; k < S.moves.length && S.cum[k - 1] < t2; k++)
+      if (isLong(S.moves[k])) { t2 = S.cum[k - 1]; break; }
+    return t2;
+  }
   function lerpMove(m, u) {
     return {
       lx: m.from.lx + (m.to.lx - m.from.lx) * u, ly: m.from.ly + (m.to.ly - m.from.ly) * u,
@@ -259,25 +280,27 @@
   /* Fahrweg-Prüfung für die Simulation: negative Koordinaten sind immer
      unzulässig (Portal unter Maschinennullpunkt), Obergrenze nur bei Limit>0.
      Rückgabe: Warntext oder null. */
-  function computeWarn(moves, scene) {
+  function baseWarn(moves, scene) {
     if (!scene || !moves || !moves.length) return null;
     const lim = scene.limits || {}, ax = scene.ax;
     const wNeg = lim.warnNeg !== false, wTr = lim.warnTravel !== false, wF = lim.warnFeed !== false;
     const H = wTr ? (+lim.h || 0) : 0, V = wTr ? (+lim.v || 0) : 0, Fmax = wF ? (+lim.f || 0) : 0;
-    const chans = [['lx', ax.x, H], ['rx', ax.u, H], ['ly', ax.y, V], ['ry', ax.v, V]];
+    // 4. Wert = erlaubte Untergrenze horiz./vert. (≤ 0, Menü „Maschinengrenzen & Warnungen")
+    const lo = k => -Math.abs(+lim[k] || 0);
+    const chans = [['lx', ax.x, H, lo('negH')], ['rx', ax.u, H, lo('negH')], ['ly', ax.y, V, lo('negV')], ['ry', ax.v, V, lo('negV')]];
     let neg = null, over = null;
     const consider = pt => {
-      for (const [k, name, limit] of chans) {
+      for (const [k, name, limit, min] of chans) {
         const val = pt[k];
-        if (wNeg && val < -0.001 && (!neg || val < neg.val)) neg = { name, val };
+        if (wNeg && val < min - 0.001 && (!neg || (val - min) < (neg.val - neg.min))) neg = { name, val, min };
         if (limit > 0 && val > limit + 0.001 && (!over || (val - limit) > (over.val - over.limit))) over = { name, val, limit };
       }
     };
     for (const m of moves) consider(m.to);
     consider(moves[0].from);
     const advice = v => (window.App && App.limitAdvice) ? App.limitAdvice(v) : [];
-    if (neg) return { msg: `${T('Portal fährt ins Negative: ')}${neg.name} = ${neg.val.toFixed(1)}${T(' mm (< 0, Maschinennullpunkt)')}`,
-                      tips: advice({ kind: 'neg', axis: neg.name, val: neg.val, limit: 0 }) };
+    if (neg) return { msg: `${T('Portal fährt ins Negative: ')}${neg.name} = ${neg.val.toFixed(1)}${neg.min < 0 ? T(' mm (erlaubt bis ') + neg.min + ' mm)' : T(' mm (< 0, Maschinennullpunkt)')}`,
+                      tips: advice({ kind: 'neg', axis: neg.name, val: neg.val, limit: neg.min }) };
     if (over) return { msg: `${T('Fahrweg überschritten: ')}${over.name} = ${over.val.toFixed(1)}${T(' mm (max ')}${over.limit} mm)`,
                        tips: advice({ kind: 'max', axis: over.name, val: over.val, limit: over.limit }) };
     if (Fmax > 0) {
@@ -292,8 +315,18 @@
     return null;
   }
 
-  /* Rote Warnleiste oben im Viewport: Meldung + Lösungsvorschläge darunter. */
-  function drawWarn(w) {
+  /* Maschinengrenzen-Warnung + optionale Zusatzmeldung der Quelle (scene.extraWarn,
+     z. B. DXF-Formen: Werkstück-Vorschub durch Max.-Vorschub gebremst). Beide
+     vorhanden -> Array, die Leisten werden untereinander gezeichnet. */
+  function computeWarn(moves, scene) {
+    const w = baseWarn(moves, scene), x = scene && scene.extraWarn;
+    return w && x ? [w, x] : (w || x || null);
+  }
+
+  /* Rote Warnleiste oben im Viewport: Meldung + Lösungsvorschläge darunter.
+     Array = mehrere Leisten untereinander. */
+  function drawWarn(w, y0) {
+    if (Array.isArray(w)) { let y = 8; for (const it of w) y = drawWarn(it, y) + 6; return y; }
     const msg = typeof w === 'string' ? w : w.msg, tips = (typeof w === 'string' ? [] : (w.tips || []));
     ctx.save();
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
@@ -319,7 +352,7 @@
     let tw = 0;
     ctx.font = FH; for (const ln of headLines) tw = Math.max(tw, ctx.measureText(ln).width);
     ctx.font = FT; for (const ln of tipLines) tw = Math.max(tw, ctx.measureText(ln).width);
-    const lhH = 16, lh = 15, bw = Math.min(avail, tw + 24), bx = 8, by = 8;
+    const lhH = 16, lh = 15, bw = Math.min(avail, tw + 24), bx = 8, by = y0 || 8;
     const bh = 10 + headLines.length * lhH + (tipLines.length ? tipLines.length * lh + 4 : 0);
     ctx.fillStyle = 'rgba(150,24,24,.94)'; ctx.strokeStyle = '#ff6b6b'; ctx.lineWidth = 1.5;
     ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
@@ -330,6 +363,7 @@
     ctx.fillStyle = '#ffd0d0'; ctx.font = FT;
     for (const ln of tipLines) { ctx.fillText(ln, bx + 12, y + lh / 2); y += lh; }
     ctx.restore();
+    return by + bh;
   }
 
   // ---------- Zeichnen ---------------------------------------------------
@@ -792,7 +826,7 @@
     const dt = Math.min(0.1, (now - S.last) / 1000 || 0); S.last = now;
     if (S.playing) {
       const prevS = S.t;
-      S.t += dt * S.speed;
+      S.t = stepTime(S.t, dt * S.speed);
       // Auto-Pause an M0-Stellen: an der ersten Pausenzeit im Intervall anhalten
       // (Draht bleibt dort stehen; erneutes „Start" setzt die Fahrt fort).
       let ptS = null;
@@ -803,7 +837,7 @@
     }
     if (MON.playing) {
       const prev = MON.t;
-      MON.t += dt * S.speed;
+      withDataset(MON, () => { MON.t = stepTime(MON.t, dt * S.speed); });
       // Auto-Pause an M0-Stellen: erste Pausenzeit im Intervall (prev, MON.t].
       let pt = null;
       if (MON.pauseTimes) for (const q of MON.pauseTimes) { if (q > prev + 1e-9 && q <= MON.t) { pt = q; break; } }

@@ -38,6 +38,9 @@
     // umgekehrter Reihenfolge (untere EL-Verlängerung → Unterseite → Nase →
     // Oberseite). Bei gestapelten Kopien nicht möglich (dann immer 'top').
     let L = proj.left, R = proj.right, RP = proj.rootPath || null;
+    // TP (Außenpfad, AUSSEN-Profil am Werkstück): nur für den Kommentar je Konturzeile,
+    // wenn opt.tipSpeed gesetzt ist (DXF-Formen: Werkstück innen UND außen).
+    let TP = (opt.tipSpeed && proj.tipPath && proj.tipPath.length === (proj.left || []).length) ? proj.tipPath : null;
     const _stackN0 = (proj.stack && proj.stack.count > 1) ? proj.stack.count : 1;
     // „Von vorne": die Reihenfolge Ober-/Unterseite regelt emitFront() je Zug.
     if (!front && opt.profileDir === 'bottom' && _stackN0 === 1 && L.length > 2) {
@@ -50,7 +53,7 @@
       if (cl) { for (let k = nn - 2; k >= 0; k--) perm.push(k); perm.push(nn - 2); }
       else    { for (let k = nn - 1; k >= 0; k--) perm.push(k); }
       const permute = a => { if (!a) return a; const o = perm.map(i => ({ x: a[i].x, y: a[i].y })); o.name = a.name; return o; };
-      L = permute(L); R = permute(R); RP = permute(RP);
+      L = permute(L); R = permute(R); RP = permute(RP); TP = permute(TP);
     }
     const N = L.length;
     const feed = opt.feed;
@@ -113,7 +116,10 @@
     // Blockschnitt: Positionier-/Horizontalfahrten mit MAX-Geschwindigkeit, die
     // VERTIKALEN Schnitte durch den Block (runter UND wieder hoch) in Schnitt-
     // geschwindigkeit. maxMove = Max.-Vorschub (bzw. 3000 mm/min ersatzweise).
-    const maxMove = maxFeed > 0 ? maxFeed : 3000;
+    // Seit 2026-09-28 folgt maxMove der Einstellung „Geschwindigkeit außerhalb
+    // Block" (outF: Maximum / wie Schnitt / freier Wert) — vorher fest Maximum,
+    // der eingestellte Außen-Vorschub blieb in den Blockschnitt-Modi wirkungslos.
+    const maxMove = opt.outsideFeed ? outF : (maxFeed > 0 ? maxFeed : 3000);
     // gBlock0: waagrechte Positionierfahrt (auf Sicherheitshöhe) — MAX.
     const gBlock0 = (xl, yv, xr, cm) => em(`G1 ${ax.x}${xl} ${ax.y}${f(yv)} ${ax.u}${xr} ${ax.v}${f(yv)} F${maxMove.toFixed(0)}${cm ? ' ; ' + cm : ''}`);
     // gBlock1: vertikaler Blockschnitt — Schnittgeschwindigkeit.
@@ -176,6 +182,21 @@
     // gewählten Schnittvorschub. Ohne Blockschnitt gilt die Einstellung
     // „Geschwindigkeit außerhalb Block" (outF).
     const airF = mode !== 'none' ? maxMove : outF;
+    // Roh-Vorschub F (schnelleres Portal) eines Konturschritts. Bezug ist der
+    // Werkstückweg: ohne Außenpfad die Wurzelrippe (dRoot). Mit Außenpfad (TP,
+    // DXF-Formen) die SCHNELLERE Werkstückseite max(innen, außen) — der Vorschub
+    // ist dann die Obergrenze für BEIDE Seiten, die langsamere läuft entsprechend
+    // langsamer (innen wird gebremst, wenn außen mehr Weg hat, und umgekehrt).
+    function rawF(dMax, dRoot, dTip) {
+      const dRef = dTip != null ? Math.max(dRoot, dTip) : dRoot;
+      // Sub-Auflösungs-Segmente (< 0,02 mm) nicht hochrechnen — dRef≈0 risse F
+      // sonst auf maxFeed hoch (Geschwindigkeitsspitze, z. B. an Holm-Schlitzen).
+      return dRef > 0.02 ? capF(feed * dMax / dRef) : capF(feed);
+    }
+    // Nach dem 3-Punkt-Median: mit Außenpfad darf die Glättung F nie über den
+    // Rohwert heben (sonst läge eine Werkstückseite über dem Vorschub) — Spitzen
+    // werden weiter gekappt, Senken bleiben.
+    const despikedF = (Fm, Fraw) => (TP ? Math.min(Fm, Fraw) : Fm);
     function emitContour(from, to) {
       // Modus „Holmschnitt nach Oberseitenschnitt": beim VOLLEN Konturaufruf die
       // Kontur an der Nase (iLE) teilen — erst die Oberseite, dann Pause + Holm-
@@ -198,10 +219,9 @@
         const dMax = Math.max(dL, dR);                 // längeres Portal = Master
         const dRoot = RP && RP[i] && RP[i-1]
           ? Math.hypot(RP[i].x - RP[i-1].x, RP[i].y - RP[i-1].y) : dMax;
-        // Sub-Auflösungs-Segmente (< 0,02 mm) nicht hochrechnen — dRoot≈0 risse F
-        // sonst auf maxFeed hoch (Geschwindigkeitsspitze, z. B. an Holm-Schlitzen).
-        const Fraw = dRoot > 0.02 ? capF(feed * dMax / dRoot) : capF(feed);   // Werkstück = feed, auf maxFeed gedeckelt
-        seg.push({ i, dL, dR, dMax, dRoot, Fraw });
+        const dTip = TP && TP[i] && TP[i-1] ? Math.hypot(TP[i].x - TP[i-1].x, TP[i].y - TP[i-1].y) : null;
+        const Fraw = rawF(dMax, dRoot, dTip);   // Werkstück = feed, auf maxFeed gedeckelt
+        seg.push({ i, dL, dR, dMax, dRoot, dTip, Fraw });
       }
       // Median je zusammenhängendem Konturschnitt-Lauf (Stapel-Übergänge trennen).
       let s = 0;
@@ -210,7 +230,7 @@
         let e = s; while (e < seg.length && !seg[e].trans) e++;
         const run = seg.slice(s, e).map(o => o.Fraw);
         const dz = medianDespike(run, false);
-        for (let k = 0; k < dz.length; k++) seg[s + k].F = dz[k];
+        for (let k = 0; k < dz.length; k++) seg[s + k].F = despikedF(dz[k], seg[s + k].Fraw);
         s = e;
       }
       for (let s2 = 0; s2 < seg.length; s2++) {
@@ -234,25 +254,31 @@
       const vL = dMax > 1e-6 ? o.dL * F / dMax : F;
       const vR = dMax > 1e-6 ? o.dR * F / dMax : F;
       const vRoot = dMax > 1e-6 ? o.dRoot * F / dMax : F;   // = feed, außer bei Deckelung/Glättung
+      // Mit Außenpfad: Werkstück innen (INNEN-Profil) UND außen (AUSSEN-Profil).
+      const vTip = o.dTip != null ? (dMax > 1e-6 ? o.dTip * F / dMax : F) : null;
       em(`G1 ${ax.x}${fx(Lp.x)} ${ax.y}${fy(Lp.y)} ${ax.u}${fx(Rp.x)} ${ax.v}${fy(Rp.y)} F${F.toFixed(0)}`
-        + ` ; ${T('Portal ')}${ax.x}${ax.y}=${vL.toFixed(0)} ${ax.u}${ax.v}=${vR.toFixed(0)}${T(', Werkstück=')}${vRoot.toFixed(0)} mm/min`);
+        + ` ; ${T('Portal ')}${ax.x}${ax.y}=${vL.toFixed(0)} ${ax.u}${ax.v}=${vR.toFixed(0)}`
+        + (vTip != null
+          ? `${T(', Werkstück innen=')}${vRoot.toFixed(0)} ${T('außen=')}${vTip.toFixed(0)} mm/min`
+          : `${T(', Werkstück=')}${vRoot.toFixed(0)} mm/min`));
       totalFoam += o.dRoot;                    // Schnittlänge an der Wurzelrippe
       totalTime += vRoot > 1e-6 ? o.dRoot / vRoot : 0;   // Zeit = Werkstücklänge / Werkstückvorschub
     }
     // Ein offener Zug (Punkt 0 = Startpunkt, bereits angefahren) — gleiche
     // Vorschubrechnung wie emitContour (Werkstück = feed, Median gegen Spitzen).
-    function emitRun(Lp, Rp, RPp) {
+    function emitRun(Lp, Rp, RPp, TPp) {
       const seg = [];
       for (let i = 1; i < Lp.length; i++) {
         const dL = Math.hypot(Lp[i].x - Lp[i-1].x, Lp[i].y - Lp[i-1].y);
         const dR = Math.hypot(Rp[i].x - Rp[i-1].x, Rp[i].y - Rp[i-1].y);
         const dMax = Math.max(dL, dR);
         const dRoot = RPp ? Math.hypot(RPp[i].x - RPp[i-1].x, RPp[i].y - RPp[i-1].y) : dMax;
-        const Fraw = dRoot > 0.02 ? capF(feed * dMax / dRoot) : capF(feed);
-        seg.push({ dL, dR, dMax, dRoot, Fraw });
+        const dTip = TPp ? Math.hypot(TPp[i].x - TPp[i-1].x, TPp[i].y - TPp[i-1].y) : null;
+        const Fraw = rawF(dMax, dRoot, dTip);
+        seg.push({ dL, dR, dMax, dRoot, dTip, Fraw });
       }
       const dz = medianDespike(seg.map(o => o.Fraw), false);
-      seg.forEach((o, k) => { o.F = dz[k]; cutLine(Lp[k + 1], Rp[k + 1], o); });
+      seg.forEach((o, k) => { o.F = despikedF(dz[k], o.Fraw); cutLine(Lp[k + 1], Rp[k + 1], o); });
     }
 
     /* Profilschnitt mit HORIZONTALER Anfahrt (Modus „ohne Blockschnitt" und
@@ -263,29 +289,39 @@
      * Höhe der Spitze (Anschluss an nachfolgende Blockschnitte). */
     function emitProfileHorizontal(finish) {
       em(`G0 ${ax.x}${f(0)} ${ax.y}${fy(L[0].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[0].y)} ; hoch auf Höhe der EL-Verlängerung`);
-      if (leadThrough(L[0], R[0])) {
-        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; ` + T('horizontal von hinten bis zum hinteren Blockende (außerhalb Block)'));
+      if (leadThrough(L[0], R[0], 0)) {
+        em(`G1 ${ax.x}${faceStop(LF.l, L[0])} ${ax.y}${fy(L[0].y)} ${ax.u}${faceStop(LF.r, R[0])} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; ` + T('horizontal von hinten bis zum hinteren Blockende (außerhalb Block)'));
         em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zur Form (Schnittvorschub)'));
       } else
       em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; horizontal von hinten zum Profil (außerhalb Block)`);
       emitContour();
       // Von der Verlängerungsspitze direkt horizontal raus (kein Zug nach vorne).
-      if (leadThrough(L[last], R[last])) {
-        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[last].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
+      if (leadThrough(L[last], R[last], last)) {
+        em(`G1 ${ax.x}${faceStop(LF.l, L[last])} ${ax.y}${fy(L[last].y)} ${ax.u}${faceStop(LF.r, R[last])} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
       }
       em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[last].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[last].y)} F${airF.toFixed(0)} ; horizontal zurück (außerhalb Block)`);
       if (finish !== false)
         em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal auf Null (außerhalb Block)`);
     }
 
-    // Hintere Blockfläche (opt.leadFace, Turmkoordinaten wie L/R; nur DXF-Formen): liegt
-    // sie zwischen Null-X und dem Konturpunkt, läuft die waagrechte An-/Abfahrt ab dort
-    // durch Material (Blockzugabe hinten) und bekommt den Schnittvorschub.
+    // Hintere Blockfläche (opt.leadFace, Profilkoordinaten wie L/R; nur DXF-Formen): liegt
+    // der Konturpunkt HINTER ihr (im Block), läuft die waagrechte An-/Abfahrt ab der
+    // Blockfläche durch Material und bekommt den Schnittvorschub. Das gilt auch, wenn die
+    // Blockfläche genau auf Null-X oder dahinter liegt (dann ist die ganze Fahrt im
+    // Material) — und schon dann, wenn nur EINE Seite (links/rechts bzw. innen/außen)
+    // im Block liegt: sobald der Draht im Werkstoff ist, nie schneller als der Vorschub.
+    // i = Punktindex für den Werkstückbezug (RP innen, TP außen), optional.
     const LF = opt.leadFace || null;
     const mXl = v => (sx > 0 ? v - ox : ox - v);
-    function leadThrough(Lp, Rp) {
-      return !!LF && mXl(LF.l) > 1e-6 && mXl(LF.l) < mXl(Lp.x) - 1e-6 && mXl(LF.r) < mXl(Rp.x) - 1e-6;
+    function leadThrough(Lp, Rp, i) {
+      if (!LF) return false;
+      const past = (face, p) => !!p && mXl(face) < mXl(p.x) - 1e-6;
+      return past(LF.l, Lp) || past(LF.r, Rp)
+        || (i != null && (past(LF.in != null ? LF.in : LF.l, RP && RP[i]) || past(LF.out != null ? LF.out : LF.r, TP && TP[i])));
     }
+    // Übergabepunkt Luft → Material je Turm (Maschinen-X als Text): die Blockfläche,
+    // höchstens bis zum Konturpunkt und nie hinter Null-X.
+    const faceStop = (face, q) => { const m = Math.min(mXl(face), mXl(q.x)); return m > 1e-6 ? f(m) : f(0); };
 
     // Holm-Injektion an der Nase (Modus „Holmschnitt nach Oberseitenschnitt").
     // Der Draht steht nach der Oberseite an der Nase (L[iLE]/R[iLE]). Ablauf OHNE
@@ -487,14 +523,14 @@
       const hasTop = ps.some(q => q.top);
       let sparDone = false;
       ps.forEach((q, k) => {
-        const Lp = q.idx.map(i => L[i]), Rp = q.idx.map(i => R[i]), RPp = RP ? q.idx.map(i => RP[i]) : null;
+        const Lp = q.idx.map(i => L[i]), Rp = q.idx.map(i => R[i]), RPp = RP ? q.idx.map(i => RP[i]) : null, TPp = TP ? q.idx.map(i => TP[i]) : null;
         const sNear = startsNear(q);
         const noseFirst = front ? sNear : !sNear;   // Zug beginnt an der Nase?
         em('; --- ' + (stackN > 1 ? T('Kopie ') + (q.copy + 1) + ' · ' : '')
           + T(q.top ? (noseFirst ? 'Oberseite: Nase → Endleiste' : 'Oberseite: Endleiste → Nase')
                     : (noseFirst ? 'Unterseite: Nase → Endleiste' : 'Unterseite: Endleiste → Nase')) + ' ---');
         approach(Lp, Rp, sNear);
-        emitRun(Lp, Rp, RPp);
+        emitRun(Lp, Rp, RPp, TPp);
         if (mode === 'wrap' && k === 0) faceAtEnd(Lp, Rp, sNear); else exitPass(Lp, Rp, sNear);
         if (useSpar && !sparDone && (q.top || (!hasTop && k === ps.length - 1))) { injectSpar(k < ps.length - 1); sparDone = true; }
       });
@@ -538,15 +574,17 @@
       // Zuerst senkrecht (am hinteren Blockende) auf die Höhe des Profilanfangs,
       // dann horizontal an den Profilanfang — nicht schräg.
       em(`G1 ${ax.x}${fx(bc.rear.l)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(bc.rear.r)} ${ax.v}${fy(R[0].y)} F${feed.toFixed(0)} ; vertikal hoch auf Höhe des Profilanfangs (im Blockschnitt, Schnittvorschub)`);
-      if (leadThrough(L[0], R[0]))
+      // Der Draht steht im Schnittspalt des hinteren Blockendes: liegt der Profilanfang
+      // im Block, ist die ganze Fahrt dorthin im Material -> Schnittvorschub.
+      if (leadThrough(L[0], R[0], 0))
         em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zur Form (Schnittvorschub)'));
       else
       em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; horizontal zum Profilanfang (außerhalb Block, max)`);
       emitContour();
       // Verlassen ohne Sicherheitshöhe: von der Verlängerungsspitze waagerecht
       // bis zum Null-X, dann vertikal nach unten auf Null.
-      if (leadThrough(L[last], R[last]))
-        em(`G1 ${ax.x}${fx(LF.l)} ${ax.y}${fy(L[last].y)} ${ax.u}${fx(LF.r)} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
+      if (leadThrough(L[last], R[last], last))
+        em(`G1 ${ax.x}${faceStop(LF.l, L[last])} ${ax.y}${fy(L[last].y)} ${ax.u}${faceStop(LF.r, R[last])} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
       em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[last].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[last].y)} F${airF.toFixed(0)} ; horizontal zum Null-X (außerhalb Block, max)`);
       em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal nach unten auf Null (außerhalb Block, max)`);
     } else if (mode === 'wrap' && bc && stackN === 1) {
@@ -561,6 +599,9 @@
       gBlock1(fx(bc.rear.l), 0, fx(bc.rear.r), 'vertikal auf Null (hinteres Blockende)');
       if ((opt.meltDwell || 0) > 0) em('G4 P' + opt.meltDwell + ' ; ' + T('am Nullpunkt verweilen (durchschmelzen)'));
       em(`G1 ${ax.x}${fx(bc.rear.l)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(bc.rear.r)} ${ax.v}${fy(R[0].y)} F${feed.toFixed(0)} ; vertikal hoch auf Höhe des Profilanfangs (im Blockschnitt, Schnittvorschub)`);
+      if (leadThrough(L[0], R[0], 0))
+        em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zur Form (Schnittvorschub)'));
+      else
       em(`G1 ${ax.x}${fx(L[0].x)} ${ax.y}${fy(L[0].y)} ${ax.u}${fx(R[0].x)} ${ax.v}${fy(R[0].y)} F${airF.toFixed(0)} ; horizontal zum Profilanfang (außerhalb Block, max)`);
       // 2) Oberseite bis zur Nase.
       emitContour(1, iLE);
@@ -577,6 +618,8 @@
       em(`G1 ${ax.x}${fx(L[iLE].x)} ${ax.y}${fy(L[iLE].y)} ${ax.u}${fx(R[iLE].x)} ${ax.v}${fy(R[iLE].y)} F${feed.toFixed(0)} ; horizontal zurück zur Nase (im Schnittspalt, Schnittvorschub)`);
       // 4) Unterseite zurück bis zur EL-Verlängerung, dann hinten aus dem Block auf Null.
       emitContour(iLE + 1, last);
+      if (leadThrough(L[last], R[last], last))
+        em(`G1 ${ax.x}${faceStop(LF.l, L[last])} ${ax.y}${fy(L[last].y)} ${ax.u}${faceStop(LF.r, R[last])} ${ax.v}${fy(R[last].y)} F${capF(feed).toFixed(0)} ; ` + T('horizontal durch den Abstand hinten zum hinteren Blockende (Schnittvorschub)'));
       em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[last].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[last].y)} F${airF.toFixed(0)} ; horizontal zum Null-X (außerhalb Block, max)`);
       em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal nach unten auf Null (außerhalb Block, max)`);
     } else if (mode === 'after') {

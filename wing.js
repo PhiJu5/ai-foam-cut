@@ -200,6 +200,12 @@
       ? ribRefY(prevProf, N, { chord: prevChord, washoutDeg: 0, twistRefX: rootTR, leOffset: 0, z: 0 }, AL.ref, s0.hingeSide, s0.hingePct)
       : 0;
 
+    // Außenrippe „im Verlauf" (seg.alignTrendTip, nur bei aktiver Ausrichtung): die Rippe wird NICHT an ihrem
+    // Merkmal ausgerichtet, sondern ihre Sehne setzt die Neigung des Vorsegments fort (plus einem V-Knick der
+    // Ausrichtlinie an diesem Segment). Gedacht für das dünne Randbogenprofil, das mit dem Scharnierpunkt auf
+    // der Linie sichtbar nach oben/unten springen würde. Ein Folgesegment übernimmt dieselbe Höhe als Wurzel.
+    const alSlope = k => (alignYAt[k + 1] - alignYAt[k]) / ((zBound[k + 1] - zBound[k]) || 1);
+    let prevAL = null;   // { root, tip, span, trend } des Vorsegments (Höhen ohne globale V-Form)
     cfg.segments.forEach((s, k) => {
       const zRootAbs = cumZ, zTipAbs = cumZ + s.span;
       let rootRise, tipRise;
@@ -211,8 +217,11 @@
         // ergibt sich rootRise = 0 -> sie bleibt an ihrer Starthöhe.
         const rRef = ribRefY(prevProf, N, { chord: prevChord, washoutDeg: prevTwist, twistRefX: prevTwistRef, leOffset: 0, z: 0 }, AL.ref, s.hingeSide, s.hingePct);
         const tRef = ribRefY(s.profile, N, { chord: s.chord, washoutDeg: s.washout, twistRefX: trOf(s), leOffset: 0, z: 0 }, AL.ref, s.hingeSide, s.hingePctTip);
-        rootRise = alignTarget(zRootAbs) + refRoot - rRef;
+        rootRise = (prevAL && prevAL.trend) ? prevAL.tip : alignTarget(zRootAbs) + refRoot - rRef;
         tipRise  = alignTarget(zTipAbs) + refRoot - tRef;
+        const trend = !!(s.alignTrendTip && prevAL);
+        if (trend) tipRise = rootRise + s.span * ((prevAL.tip - prevAL.root) / (prevAL.span || 1) + alSlope(k) - alSlope(k - 1));
+        prevAL = { root: rootRise, tip: tipRise, span: s.span, trend };
         cumAng = Math.atan2(alignTarget(zTipAbs) - alignTarget(zRootAbs), s.span || 1) * 180 / Math.PI;
         cumY = alignTarget(zTipAbs);
       } else {

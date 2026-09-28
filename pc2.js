@@ -100,28 +100,6 @@
     const te = (xn) => refx(xn) + (1 - cr(xn)) * chord(xn);
     const le0 = le(0);
     const leOffset = (xn) => le(xn) - le0;
-    // Scharnierlinie: PC2 legt sie je Sektion als hinge_cn (Anteil der Sehne ab
-    // Nasenleiste) fest. Nur wenn die Datei sie an die Bezugslinie koppelt
-    // (hinge_equal_ref_line), gilt stattdessen cr.
-    const hingeTied = !!(d.flaps && d.flaps.hinge_equal_ref_line);
-    const hPts = (d.wingSections || [])
-      .filter(w => w.xn != null && w.hinge_cn != null)
-      .map(w => ({ x: +w.xn, y: +w.hinge_cn }))
-      .sort((a, b) => a.x - b.x);
-    const hingeCn = (xn) => {
-      if (hingeTied || !hPts.length) return cr(xn);
-      const x = Math.max(0, Math.min(1, xn));
-      if (x <= hPts[0].x) return hPts[0].y;
-      for (let i = 1; i < hPts.length; i++) {
-        if (x <= hPts[i].x + 1e-12) {
-          const a = hPts[i - 1], b = hPts[i];
-          const u = (b.x - a.x) > 1e-12 ? (x - a.x) / (b.x - a.x) : 0;
-          return a.y + (b.y - a.y) * u;
-        }
-      }
-      return hPts[hPts.length - 1].y;
-    };
-    const hingeFromTE = (xn) => (1 - hingeCn(xn)) * 100;   // Klappentiefe in % von hinten
 
     // Klappengruppe eines Feldes: PC2 vermerkt sie an der INNEREN Sektion; das
     // Feld von dort nach außen gehört dazu. 0 = keine Klappe.
@@ -142,6 +120,52 @@
                hinge_cn: s.hinge_cn, flap_group: s.flap_group };
     }).filter(s => s.xn != null).sort((a, b) => a.xn - b.xn);
 
+    // Scharnierlinie wie in PC2 (Flaps._get_hinge_points / hinge_polyline): Polylinie in ABSOLUTEN
+    // Grundriss-Koordinaten durch die Sektionen mit hinge_cn (Punkt = Nase + hinge_cn·Sehne), gerade
+    // dazwischen, nach außen bis zur Spitze verlängert, vor dem ersten Punkt konstant. Bei elliptischer
+    // Fläche ist der Anteil an der Sehne deshalb NICHT linear. hinge_equal_ref_line: Bezugslinie
+    // (Sehnenanteil cr, gerade mit sweep_angle). Weniger als 2 Punkte: PC2 setzt Wurzel/Spitze auf 0,75.
+    const hingeTied = !!(d.flaps && d.flaps.hinge_equal_ref_line);
+    let hDef = sections.filter(s => s.hinge_cn != null).map(s => ({ x: s.xn, h: le(s.xn) + (+s.hinge_cn) * chord(s.xn) }));
+    if (hDef.length < 2) hDef = [{ x: 0, h: le(0) + 0.75 * chord(0) }, { x: 1, h: le(1) + 0.75 * chord(1) }];
+    if (hDef[hDef.length - 1].x < 1 - 1e-9) {
+      const p = hDef[hDef.length - 2], q = hDef[hDef.length - 1];
+      hDef.push({ x: 1, h: q.h + (q.h - p.h) / ((q.x - p.x) || 1e-9) * (1 - q.x) });
+    }
+    const hingeX = (xn) => {
+      if (hingeTied) return refx(xn);
+      if (xn <= hDef[0].x) return hDef[0].h;
+      for (let i = 1; i < hDef.length; i++) {
+        if (xn <= hDef[i].x + 1e-12) {
+          const a = hDef[i - 1], b = hDef[i];
+          return a.h + (b.h - a.h) * ((b.x - a.x) > 1e-12 ? (xn - a.x) / (b.x - a.x) : 0);
+        }
+      }
+      return hDef[hDef.length - 1].h;
+    };
+    const hingeCn = (xn) => { const c = chord(xn); return c > 1e-9 ? Math.max(0, Math.min(1, (hingeX(xn) - le(xn)) / c)) : 1; };
+    // Knicke der Scharnierlinie (innere Definitionspunkte) -> dort beginnt eine neue gerade Scharnierstrecke.
+    const hingeKinks = hingeTied ? [] : hDef.slice(1, -1).map(p => p.x);
+    const hingeFromTE = (xn) => (1 - hingeCn(xn)) * 100;   // Klappentiefe in % von hinten
+
+    // Profil an Position xn wie in PC2 (WingSections.do_strak): Sektion mit eigenem Profil -> dieses;
+    // sonst Mischung („Strak") der Nachbarn mit Profil, Mischanteil nach Tiefe (cn) — bei gleicher Tiefe
+    // nach Lage xn —, auf 1 % gerundet. Gleiches Profil links/rechts -> keine Mischung.
+    const airfoilSpec = (xn) => {
+      const own = sections.find(s => s.airfoil && Math.abs(s.xn - xn) < 1e-6);
+      if (own) return { name: own.airfoil };
+      let L = null, R = null;
+      for (const s of sections) { if (!s.airfoil) continue; if (s.xn <= xn) L = s; else if (!R) R = s; }
+      if (!L && !R) return { name: null };
+      if (!L || !R) return { name: (L || R).airfoil };
+      if (L.airfoil === R.airfoil) return { name: L.airfoil };
+      const cl = cn(L.xn), cr_ = cn(R.xn);
+      let t = Math.abs(cr_ - cl) > 1e-12 ? (cn(xn) - cl) / (cr_ - cl) : (xn - L.xn) / ((R.xn - L.xn) || 1);
+      t = Math.round(Math.max(0, Math.min(1, t)) * 100) / 100;
+      if (t <= 0) return { name: L.airfoil };
+      if (t >= 1) return { name: R.airfoil };
+      return { name: null, a: L.airfoil, b: R.airfoil, t };
+    };
     // Profil an Position xn: nächste Sektion (mit Profil).
     const airfoilAt = (xn) => {
       let best = null, bd = Infinity;
@@ -156,8 +180,8 @@
     return {
       raw: d, name: d.wing_name || 'Planform', description: d.description || '',
       halfspan: half, chordRoot: croot, sweepAngle: sweep,
-      cn, chord, xnOfCn, cr, le, te, refx, leOffset, hingeFromTE, hingeCn,
-      flapGroupAt, airfoilAt, isTrapez, style,
+      cn, chord, xnOfCn, cr, le, te, refx, leOffset, hingeFromTE, hingeCn, hingeX, hingeKinks, hingeTied,
+      flapGroupAt, airfoilAt, airfoilSpec, isTrapez, style,
       sections,
       chordTip: chord(1),
       // Vorschlag für Stationsgrenzen: Sektions-xn (inkl. 0 und 1), dedupliziert.
@@ -198,6 +222,20 @@
     return { max: maxE, mean: cnt ? sumE / cnt : 0 };
   }
 
+  // Mischprofil wie PC2-Strak: beide Profile gleich abtasten, punktweise mischen (Anteil t von a nach b).
+  function strak(pa, pb, t, name) {
+    const N = Math.max(120, pa.length, pb.length);
+    let out;
+    if (window.App && App.lerpProfile) out = App.lerpProfile(pa, pb, t, N).map(p => ({ x: p.x, y: p.y }));
+    else {
+      const ra = Airfoil.resample(pa, N), rb = Airfoil.resample(pb, N);
+      out = ra.map((p, i) => ({ x: p.x + (rb[i].x - p.x) * t, y: p.y + (rb[i].y - p.y) * t }));
+    }
+    out.name = name || 'Strak';
+    return out;
+  }
+  function strakName(sp) { return sp.a + ' / ' + sp.b + ' ' + Math.round(sp.t * 100) + '%'; }
+
   // Modell + Stationsgrenzen -> App-Wing-Konfiguration (Trapez-Rippenkette).
   function toWingConfig(model, opts) {
     opts = opts || {};
@@ -219,9 +257,18 @@
       return placeholder(foil);
     };
 
-    const rootFoil = model.airfoilAt(st[0]);
+    // Strak (Mischprofil zweier Nachbarn) — beide .dat nötig, sonst Platzhalter mit Strak-Namen.
+    const specProfile = (sp) => {
+      if (!sp || !sp.b) return resolveProfile(sp && sp.name);
+      const ha = foils[normName(sp.a)], hb = foils[normName(sp.b)];
+      [[sp.a, ha], [sp.b, hb]].forEach(([n, h]) => { if (!h && missing.indexOf(n) < 0) missing.push(n); });
+      if (ha && hb) return strak(ha, hb, sp.t, strakName(sp));
+      return placeholder(strakName(sp));
+    };
+    const holder = (sp) => ({ foilName: (sp && sp.name) || '', foilStrak: (sp && sp.b) ? { a: sp.a, b: sp.b, t: sp.t } : null });
+    const rootSpec = model.airfoilSpec ? model.airfoilSpec(st[0]) : { name: model.airfoilAt(st[0]) };
     const cfg = {
-      root: { profile: resolveProfile(rootFoil), chord: +model.chord(st[0]).toFixed(2), foilName: rootFoil || '' },
+      root: Object.assign({ profile: specProfile(rootSpec), chord: +model.chord(st[0]).toFixed(2) }, holder(rootSpec)),
       segments: [],
       meta: { name: model.name, halfspan: model.halfspan, nTrapez: st.length - 1, stations: st },
       missingFoils: missing
@@ -230,7 +277,7 @@
       const xi = st[k - 1], xo = st[k];
       const spanMM = (xo - xi) * model.halfspan;
       if (spanMM < 1e-3) continue;
-      const foil = model.airfoilAt(xo);
+      const spec = model.airfoilSpec ? model.airfoilSpec(xo) : { name: model.airfoilAt(xo) };
       // Klappengruppe des Feldes. Gruppe 0 = keine Klappe -> Scharniertiefe 0,
       // damit der Export sie nicht als Ruder schreibt. Ein Gruppenwechsel setzt
       // eine neue Scharnierlinien-Gruppe (hingeGroupStart) -- so bleiben die
@@ -238,8 +285,8 @@
       const grp = model.flapGroupAt ? model.flapGroupAt(xi) : 1;
       const prevGrp = k > 1 && model.flapGroupAt ? model.flapGroupAt(st[k - 2]) : null;
       const noFlap = grp === 0;
-      cfg.segments.push(mkSeg({
-        profile: resolveProfile(foil), foilName: foil || '',
+      cfg.segments.push(mkSeg(Object.assign({
+        profile: specProfile(spec),
         chord: +model.chord(xo).toFixed(2),
         span: +spanMM.toFixed(2),
         sweep: +(model.leOffset(xo) - model.leOffset(xi)).toFixed(2),
@@ -248,7 +295,7 @@
         hingePct: noFlap ? 0 : +model.hingeFromTE(xi).toFixed(1),
         hingePctTip: noFlap ? 0 : +model.hingeFromTE(xo).toFixed(1),
         hingeGroupStart: k > 1 && prevGrp !== null && grp !== prevGrp
-      }));
+      }, holder(spec))));
     }
     if (!cfg.segments.length) throw new Error(T('Keine Trapeze erzeugt.'));
     return cfg;
@@ -363,5 +410,49 @@
     return sol;
   }
 
-  global.PC2 = { parse, stations, chordError, toWingConfig, build, fitReference };
+  // ---------- Glatte Fläche über der Trapezkette (Tragflächendesign, Formenbau) ----------
+  /* Bildet die PC2-Kurve auf die tatsächliche Trapezkette ab. bounds[k] = { z, le, c } an den
+   * Trapezgrenzen st[k] (z = Spannweite ab Wurzel, le = Nasen-x, c = Sehne im App-Rahmen). Zwischen
+   * zwei Grenzen = lineare Verbindung + Abweichung der PC2-Kurve von ihrer eigenen Geraden (Nase)
+   * bzw. Tiefenverhältnis — an den Grenzen exakt die Trapezecken, spätere Änderungen wirken weiter.
+   * at(z) -> { xn, le, c, hinge } (hinge = Scharnier-x mit dem PC2-Sehnenanteil). */
+  function overlay(model, st, bounds) {
+    if (!model || !st || !bounds || st.length !== bounds.length || st.length < 2) return null;
+    const segs = [];
+    for (let k = 0; k < st.length - 1; k++) {
+      const a = bounds[k], b = bounds[k + 1];
+      segs.push({ a, b, x0: +st[k], x1: +st[k + 1], le0: model.le(st[k]), le1: model.le(st[k + 1]), c0: model.chord(st[k]), c1: model.chord(st[k + 1]) });
+    }
+    const zOfXn = (xn) => {
+      let k = 0; while (k < segs.length - 1 && xn > segs[k].x1) k++;
+      const s = segs[k], t = (s.x1 - s.x0) > 1e-12 ? (xn - s.x0) / (s.x1 - s.x0) : 0;
+      return s.a.z + (s.b.z - s.a.z) * t;
+    };
+    const at = (z) => {
+      let k = 0; while (k < segs.length - 1 && z > segs[k].b.z) k++;
+      const s = segs[k], dz = s.b.z - s.a.z, t = dz > 1e-9 ? Math.max(0, Math.min(1, (z - s.a.z) / dz)) : 0;
+      const xn = s.x0 + (s.x1 - s.x0) * t;
+      const Lm = s.le0 + (s.le1 - s.le0) * t, Cm = s.c0 + (s.c1 - s.c0) * t;
+      const le = s.a.le + (s.b.le - s.a.le) * t + (model.le(xn) - Lm);
+      const c = (s.a.c + (s.b.c - s.a.c) * t) * (Cm > 1e-9 ? model.chord(xn) / Cm : 1);
+      return { xn, le, c, hinge: le + model.hingeCn(xn) * c, seg: k };
+    };
+    return { at, zOfXn };
+  }
+  // Scharnierlage (Seite oben, % von hinten) + Gruppenwechsel je Segment aus der PC2-Scharnierlinie.
+  function hingeToSegments(model, st, segments) {
+    if (!model || !st || !segments || segments.length !== st.length - 1) return false;
+    segments.forEach((sg, k) => {
+      const xi = st[k], xo = st[k + 1];
+      const grp = model.flapGroupAt(xi), noFlap = grp === 0;
+      const prevGrp = k > 0 ? model.flapGroupAt(st[k - 1]) : null;
+      sg.hingeSide = 'top';
+      sg.hingePct = noFlap ? 0 : +model.hingeFromTE(xi).toFixed(1);
+      sg.hingePctTip = noFlap ? 0 : +model.hingeFromTE(xo).toFixed(1);
+      sg.hingeGroupStart = k > 0 && prevGrp !== null && grp !== prevGrp;
+    });
+    return true;
+  }
+
+  global.PC2 = { parse, stations, chordError, toWingConfig, build, fitReference, strak, strakName, overlay, hingeToSegments };
 })(window);

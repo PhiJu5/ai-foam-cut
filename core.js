@@ -102,6 +102,9 @@
       // eine neue V-Form-Gruppe; alignDih/alignDihMode = V-Form der Gruppe (nur am
       // Gruppenstart ab Gruppe 2 relevant — Gruppe 1 nutzt cfg.align.dih).
       alignGroupStart: false, alignDih: 0, alignDihMode: 'mm',
+      // Außenrippe dieses Segments bei der Profilhöhenausrichtung „im Verlauf" (Sehne setzt das Vorsegment
+      // fort) statt am Merkmal — für das Randbogenprofil (Wing.build).
+      alignTrendTip: false,
       // Schnittverlängerungen (Draht-Weg): je Wurzel/außen + proportional.
       leExt: 8, leExtTip: 8, leExtProp: false,      // X-Schlaufe: Schräge (A)
       leExt2: 12, leExt2Tip: 12, leExt2Prop: false, // X-Schlaufe: parallel (B)
@@ -237,6 +240,7 @@
       // Warnungen (Simulation + Reiter „Schneiden“) einzeln abschaltbar — Menü
       // „Maschinengrenzen & Warnungen“ im Reiter „Maschine“.
       warnNeg: true,                       // Portal fährt ins Negative (< 0, Maschinennullpunkt)
+      negTravelH: 0, negTravelV: 0,        // erlaubter Fahrweg ins Negative horiz./vert. (mm, Wert ≤ 0; 0 = keiner)
       warnTravel: true,                    // max. Fahrweg horiz./vert. überschritten
       warnFeed: true,                      // max. Vorschub überschritten
       limitTips: true,                     // Lösungsvorschläge zu Grenz-Warnungen anzeigen
@@ -389,7 +393,8 @@
            blockOvF: 20, blockOvR: 20,         // (Alt) getrennte Zugabe vorne/hinten — nicht mehr in der UI
            blockLenX: 0, blockHeightY: 0,      // feste Blockmaße X/Y (0 = automatisch aus Geometrie + Zugaben)
            blockZF: null, blockZR: null,       // Blockzugabe vor/hinter dem Querschnitt (mm, null = blockMargin)
-           blockZT: null, blockZB: null,       // Blockzugabe über/unter dem Querschnitt (mm, null = blockMargin)           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
+           blockZT: null, blockZB: null,       // Blockzugabe über/unter dem Querschnitt (mm, null = blockMargin)
+           blockOutOn: false, blockOut: null,  // eigene Blockgeometrie am AUSSEN-Profil ({lenX,heightY,zf,zr,zt,zb}) -> Block verjüngt           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
            // Profile (je ein Layer aus dem geteilten Pool d.layers + Verschiebung),
            // jedes benachbarte Paar bildet ein Segment. segs = Snapshot je Segment
            // (Länge = ribs.length-1). Die obigen Flachfelder spiegeln activeSeg.
@@ -600,6 +605,10 @@
     VPAL[v] = {}; PER_VIEW_KEYS.forEach(k => VPAL[v][k] = PAL_DEF[k]);
     VLST[v] = {}; LST_KEYS.forEach(k => VLST[v][k] = LST_DEFAULT[k] || 'auto');
   });
+  // DXF-Formen: Blockgrenzen (Rohmaß INNEN/AUSSEN) ab Werk gestrichelt, damit sie sich
+  // von den durchgezogenen Profilkonturen abheben.
+  VLST.dxf.block = 'dashed';
+  const DXF_BLOCK_DASH_KEY = 'hotwing.dxfBlockDashed';
   function loadViewPalettes() {
     let hasV = false, hasL = false;
     try { const s = localStorage.getItem(VPAL_KEY); if (s) { const o = JSON.parse(s); VIEWS.forEach(([v]) => { if (o[v]) Object.assign(VPAL[v], o[v]); }); hasV = true; } } catch (e) {}
@@ -608,6 +617,15 @@
     // Ansichten übernehmen, damit bestehende Anpassungen erhalten bleiben.
     if (!hasV) VIEWS.forEach(([v]) => PER_VIEW_KEYS.forEach(k => { if (PAL[k] != null) VPAL[v][k] = PAL[k]; }));
     if (!hasL) VIEWS.forEach(([v]) => LST_KEYS.forEach(k => { if (LST[k]) VLST[v][k] = LST[k]; }));
+    // Einmalig (2026-09-28): gespeicherte Strichtypen der DXF-Formen auf „gestrichelt"
+    // für die Blockgrenzen umstellen, sofern dort noch der alte Standard stand. Danach
+    // bleibt eine eigene Wahl in den Einstellungen erhalten.
+    try {
+      if (!localStorage.getItem(DXF_BLOCK_DASH_KEY)) {
+        if (VLST.dxf.block === 'solid' || VLST.dxf.block === 'auto') { VLST.dxf.block = 'dashed'; saveViewPalettes(); }
+        localStorage.setItem(DXF_BLOCK_DASH_KEY, '1');
+      }
+    } catch (e) {}
   }
   function saveViewPalettes() {
     try { localStorage.setItem(VPAL_KEY, JSON.stringify(VPAL)); localStorage.setItem(VLST_KEY, JSON.stringify(VLST)); } catch (e) {}
@@ -642,7 +660,13 @@
   // Abgeschaltete Warnungen liefern 0/false, sodass die Prüfungen still bleiben.
   function machineLimits() {
     const c = state.cfg;
-    return { h: c.maxTravelH, v: c.maxTravelV, f: c.maxFeed,
+    const ng = k => -Math.abs(+c[k] || 0);   // erlaubte Untergrenze horiz./vert. (≤ 0)
+    // Der max. Fahrweg ist der GESAMTE Weg der Achse: der erlaubte Weg ins Negative
+    // geht davon ab, nach oben bleibt also max. Fahrweg − |negativ| (0 = kein Limit).
+    const up = (max, neg) => (+max > 0) ? Math.max(0.001, +max + neg) : 0;
+    const nH = ng('negTravelH'), nV = ng('negTravelV');
+    return { h: up(c.maxTravelH, nH), v: up(c.maxTravelV, nV), f: c.maxFeed,
+      negH: nH, negV: nV,
       warnNeg: c.warnNeg !== false, warnTravel: c.warnTravel !== false, warnFeed: c.warnFeed !== false };
   }
   /* Lösungsvorschläge zu einer Grenzverletzung (Simulation + Reiter „Schneiden").
@@ -665,7 +689,7 @@
       return tips;
     }
     if (viol.kind === 'neg') {
-      const need = Math.max(0, -(+viol.val || 0));
+      const need = Math.max(0, (+viol.limit || 0) - (+viol.val || 0));   // limit = erlaubte Untergrenze (≤ 0)
       // Kernschnitt „von vorne": Nullpunkt liegt VOR der Nase — dort ragt die Nasenverlängerung heraus.
       const fr = c.cutDir === 'front' && (!c.gcodeSource || c.gcodeSource === 'core');
       if (horiz) {
@@ -678,6 +702,7 @@
       }
       tips.push(fr ? T('Maschinennullpunkt prüfen: Bei „von vorne" muss der Nullpunkt vor der Nase bzw. unter dem Block liegen.')
                    : T('Maschinennullpunkt prüfen: Der Nullpunkt muss hinter bzw. unter dem Block liegen.'));
+      tips.push(T('Falls die Maschine unter den Nullpunkt fahren darf: „Erlaubt ins Negative ' + (horiz ? 'horizontal' : 'vertikal') + '" im Reiter „Maschine" auf mindestens ') + r1(+viol.val) + T(' mm setzen.'));
       return tips;
     }
     // kind === 'max'
@@ -687,12 +712,12 @@
         tips.push(T('„Abstand in Flugrichtung X" (Reiter Block) um mindestens ') + r1(over) + T(' mm verringern (aktuell ') + c.blockX + ' mm).');
       tips.push(T('Schnittverlängerung an Nase/Endleiste kürzen (Reiter „G-Code") – spart Fahrweg vor und hinter dem Profil.'));
       tips.push(T('Teil in Flugrichtung verkleinern oder die Tragfläche in mehrere Segmente/Blöcke aufteilen.'));
-      tips.push(T('Falls die Maschine mehr Weg hat: „Max. Fahrweg horizontal" im Reiter „Maschine" auf mindestens ') + r1(+viol.val) + T(' mm setzen.'));
+      tips.push(T('Falls die Maschine mehr Weg hat: „Max. Fahrweg horizontal" im Reiter „Maschine" auf mindestens ') + r1(+viol.val + Math.abs(+c.negTravelH || 0)) + T(' mm setzen.'));
     } else {
       if ((c.blockY || 0) > 0)
         tips.push(T('„Höhe über Nullpunkt Y" (Reiter Block) um mindestens ') + r1(over) + T(' mm verringern (aktuell ') + c.blockY + ' mm).');
       tips.push(T('Block flacher legen: Anstellwinkel/Verwindung verringern oder Blockhöhe reduzieren.'));
-      tips.push(T('Falls die Maschine mehr Weg hat: „Max. Fahrweg vertikal" im Reiter „Maschine" auf mindestens ') + r1(+viol.val) + T(' mm setzen.'));
+      tips.push(T('Falls die Maschine mehr Weg hat: „Max. Fahrweg vertikal" im Reiter „Maschine" auf mindestens ') + r1(+viol.val + Math.abs(+c.negTravelV || 0)) + T(' mm setzen.'));
     }
     return tips;
   }

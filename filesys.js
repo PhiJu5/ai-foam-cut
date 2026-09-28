@@ -363,6 +363,14 @@
     const lib = state.xflrFoils || {};
     let assigned = 0; const missing = [];
     const use = (holder, setter) => {
+      // Strak aus dem Planform-Creator-Import: Mischprofil der beiden Nachbarn, sobald beide geladen sind.
+      const sk = holder.foilStrak;
+      if (sk && sk.a && sk.b && window.PC2) {
+        const ha = lib[XFLR5.normName(sk.a)], hb = lib[XFLR5.normName(sk.b)];
+        if (ha && hb) { setter(PC2.strak(ha, hb, +sk.t || 0, PC2.strakName(sk))); assigned++; }
+        [[sk.a, ha], [sk.b, hb]].forEach(([n, h]) => { if (!h && missing.indexOf(n) < 0) missing.push(n); });
+        return;
+      }
       const fn = holder.foilName; if (!fn) return;
       const hit = lib[XFLR5.normName(fn)];
       if (hit) { const c = hit.map(p => ({ x: p.x, y: p.y })); c.name = fn; setter(c); assigned++; }
@@ -411,7 +419,7 @@
   function openPc2Dialog(model) {
     // Startvorschlag: an den Profilschnitten (sinnvolle Trapezgrenzen).
     const initStations = model.sectionStations();
-    pc2dlg = { model, stations: initStations, mode: 'sections', n: Math.max(1, initStations.length - 1) };
+    pc2dlg = { model, stations: initStations, mode: 'sections', n: Math.max(1, initStations.length - 1), keepSec: true };
     document.getElementById('pc2Title').textContent = T('Planform importieren') + ' — ' + model.name;
     document.getElementById('pc2Modal').classList.add('open');
     buildPc2Controls();
@@ -445,6 +453,10 @@
       tz.style.color = 'var(--ok,#57d38c)';
       tz.textContent = T('Trapezfläche: mit der Verteilung „An Profilschnitten" wird die Fläche exakt übernommen (keine Näherung). Scharnierlinie und Klappengruppen kommen mit.');
       box.appendChild(tz);
+    } else {
+      const fz = document.createElement('div'); fz.className = 'hint';
+      fz.textContent = T('Die Trapeze gelten für den Heißdraht. Der glatte Grundriss wird zusätzlich gespeichert — der Formenbau leitet Urmodell und Formen direkt aus der Originalform ab.');
+      box.appendChild(fz);
     }
 
     // Ziel im Projekt — wie beim FLZ-/XFLR5-Import.
@@ -479,6 +491,15 @@
     sel.value = pc2dlg.mode;
     sel.onchange = () => { pc2dlg.mode = sel.value; if (pc2dlg.mode !== 'manual') pc2Regen(); buildPc2Controls(); renderPc2(); };
     box.appendChild(sel);
+
+    // Profilschnitte immer als Trapezgrenze: Profile sitzen dann exakt an der Stelle wie im Planform Creator.
+    if (pc2dlg.mode !== 'sections') {
+      const rk = mk('label'); rk.style.cssText = 'display:flex;gap:6px;align-items:center;font-size:12px';
+      const cb = mk('input'); cb.type = 'checkbox'; cb.checked = pc2dlg.keepSec !== false;
+      cb.onchange = () => { pc2dlg.keepSec = cb.checked; renderPc2(); };
+      rk.appendChild(cb); rk.appendChild(document.createTextNode(T('Profilschnitte immer als Trapezgrenze (Profile exakt wie im Planform Creator)')));
+      box.appendChild(rk);
+    }
 
     // Anzahl Trapeze (nur bei uniform/cosine)
     if (pc2dlg.mode === 'uniform' || pc2dlg.mode === 'cosine') {
@@ -533,6 +554,11 @@
   // Sortierte, gültige Stationsliste (0..1, inkl. 0 und 1).
   function pc2SortedStations() {
     let st = pc2dlg.stations.map(v => Math.max(0, Math.min(1, +v))).slice().sort((a, b) => a - b);
+    if (pc2dlg.keepSec !== false && pc2dlg.mode !== 'sections') {
+      // Profilschnitte erzwingen; freie Grenzen, die näher als 0,5 % daneben liegen, fallen weg.
+      const sec = pc2dlg.model.sectionStations();
+      st = st.filter(v => v <= 0 || v >= 1 || !sec.some(q => Math.abs(q - v) < 0.005)).concat(sec).sort((a, b) => a - b);
+    }
     st = Array.from(new Set(st.map(v => +v.toFixed(5))));
     if (st[0] > 0) st.unshift(0);
     if (st[st.length - 1] < 1) st.push(1);
@@ -603,6 +629,8 @@
     try {
       const st = pc2SortedStations();
       const cfg = PC2.toWingConfig(pc2dlg.model, { stations: st, foils: state.xflrFoils || {}, mkSeg });
+      // Glatten Grundriss mitspeichern: der Formenbau verwendet ihn statt der Trapeze.
+      if (!pc2dlg.model.isTrapez) cfg.planSrc = { raw: pc2dlg.model.raw, st: cfg.meta.stations.slice(), name: pc2dlg.model.name };
       const meta = cfg.meta, miss = cfg.missingFoils;
       // Ziel wie beim FLZ-/XFLR5-Import: vorhandene Tragfläche ersetzen oder
       // eine neue anlegen. Die Übernahme selbst macht wingimport.js.
@@ -616,6 +644,7 @@
       alert(T('Planform-Import: ') + meta.name + '\n'
         + meta.nTrapez + ' ' + T('Trapeze, Wurzelsehne ') + cfg.root.chord.toFixed(0) + ' mm.'
         + '\n' + T('V-Form/Schränkung = 0 (Planform Creator ist eine reine Draufsicht) — bei Bedarf je Segment ergänzen.')
+        + (cfg.planSrc ? '\n' + T('Der glatte Grundriss wurde mitgespeichert: der Formenbau baut Urmodell und Formen daraus (nicht aus den Trapezen).') : '')
         + missTxt);
     } catch (err) { const e = document.getElementById('pc2Err'); if (e) e.textContent = T('Fehler: ') + err.message; }
   }
@@ -1333,7 +1362,7 @@
   const SETTINGS_FILE = 'hotwing-settings.json';
   const SETTINGS_ENDPOINT = '/__settings__';
   const MACHINE_KEYS = ['checklistOn', 'checklist', 'machineWidth', 'axX', 'axY', 'axU', 'axV', 'precision', 'header', 'footer', 'feed',
-    'maxTravelH', 'maxTravelV', 'maxFeed', 'warnNeg', 'warnTravel', 'warnFeed', 'axMig', 'firmware', 'feedMode', 'feedMig',
+    'maxTravelH', 'maxTravelV', 'maxFeed', 'negTravelH', 'negTravelV', 'warnNeg', 'warnTravel', 'warnFeed', 'axMig', 'firmware', 'feedMode', 'feedMig',
     'relayOut', 'relayPin', 'relayP', 'relayOn', 'relayOff', 'relayMode'];
   let settingsReady = false;   // erst nach dem Laden automatisch speichern
   function collectSettings() {

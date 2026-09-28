@@ -22,7 +22,7 @@
   const WING_CFG_KEYS = [
     // Tragflächendesign
     'twistRef', 'points', 'sheeting', 'sheetMode', 'sheetSides', 'sheetTop', 'sheetBot',
-    'globalDih', 'align', 'hingeAlign', 'sweepRef', 'dihedralCut', 'profSegs',
+    'globalDih', 'align', 'hingeAlign', 'sweepRef', 'dihedralCut', 'profSegs', 'pc2Show', 'pc2ShowSec',
     // Kerndesign
     'leStyle', 'leAngle', 'leGap', 'eightW', 'eightH', 'eightCross', 'teStyle',
     'extOverBlockLE', 'extOverBlockClearLE', 'extOverBlockTE', 'extOverBlockClearTE', 'kerfDatum', 'shellCut', 'shellTop', 'shellBot',

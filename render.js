@@ -920,6 +920,8 @@
       }
       ctx.setLineDash([]);
     }
+    // Glatte Fläche aus Planform Creator (pc2wing.js): Kontur, Scharnierlinie, Profilschnitte.
+    const pc2Leg = App.pc2PlanOverlay ? App.pc2PlanOverlay({ ctx, V, poly }) : null;
     // Holmausschnitte im Grundriss: je Segment ein Band von der Wurzel- zur
     // Außenlage (Sehnen-Fußabdruck des Holms), Mittellinie gestrichelt.
     let anySpar = false, anyNonProp = false;
@@ -957,6 +959,7 @@
     if (state.cfg.showBlock) legP.push(L('#5d6b7d', T('Block (Rohling)'), dashFor('block', [7, 5]), 'rect'));
     if (anyHinge) legP.push(L(App.PAL.hinge, T('Scharnierlinie'), dashFor('hinge', [5, 4]), 'line', 1.6));
     if (anySpar) legP.push(Object.assign(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'rect'), { f: hexA(App.PAL.spar, 0.18) }));
+    if (pc2Leg) pc2Leg.forEach(e => legP.push(L(e[0], e[1], e[2], e[3], e[4])));
     legP.push(L('#ffffff44', T('Viertel-Sehnenlinie (t/4)'), [6, 4], 'line', 1));
     drawLegend(ctx, 14, 20, legP, { top: true });
     ctx.fillStyle = '#8b98a8'; ctx.font = '11px Segoe UI';

@@ -103,7 +103,7 @@
     const zR = pr.zRoot, zT = pr.zTip, mw = state.cfg.machineWidth, rot = pr.sweepRot;
     const feed = opt.feed, safeY = opt.safeY;
     const maxFeed = opt.maxFeed || 0, capF = v => (maxFeed > 0 ? Math.min(v, maxFeed) : v);
-    const maxMove = maxFeed > 0 ? maxFeed : 3000;
+    const maxMove = opt.outsideFeed ? capF(opt.outsideFeed) : (maxFeed > 0 ? maxFeed : 3000);   // Fahrten in Luft: „Geschwindigkeit außerhalb Block"
     const body = [], em = s => body.push(window.I18N ? window.I18N.tc(s) : s);
     let foam = 0, mins = 0, cutAny = false;
     // Gemeinsame Ausgabe einer Wurzel-/Rand-Sequenz (2D-Rippenpunkte, gleiche
@@ -862,9 +862,13 @@
       text = applyFeedMode(applyPreheat(g.text)); cutLen = g.cutLengthFoam || 0; mins = g.estMinutes || 0; lines = text.split('\n').length;
       state.lastGcode = { text, cutLengthFoam: cutLen, estMinutes: mins, lines };
       setGcode(text, feedJumpLines(text));
+      const cap = portalCapWarn(text);
       const info = document.getElementById('gInfo');
-      if (info) info.textContent = `${lines}${T(' Zeilen · DXF-Form · Schnittlänge ')}${cutLen.toFixed(0)}${T(' mm · ~')}${mins.toFixed(1)}${T(' min')}`;
-      Sim3D.load(text, App.buildDxfScene ? App.buildDxfScene() : null);
+      if (info) info.textContent = `${lines}${T(' Zeilen · DXF-Form · Schnittlänge ')}${cutLen.toFixed(0)}${T(' mm · ~')}${mins.toFixed(1)}${T(' min')}`
+        + (cap ? ` · ⚠ ${T('Werkstück-Vorschub durch Max.-Vorschub gebremst')}` : '');
+      const scene = App.buildDxfScene ? App.buildDxfScene() : null;
+      if (scene && cap) scene.extraWarn = cap;
+      Sim3D.load(text, scene);
       return;
     }
     // Quelle „Negativschalendesign": eigener Generator, immer aktives Segment.
@@ -949,6 +953,45 @@
     Sim3D.load(text, buildScene());
   }
 
+  /* DXF-Formen: Konturzeilen, in denen der Max.-Vorschub (cfg.maxFeed) das schnellere
+   * Portal deckelt und deshalb BEIDE Werkstückseiten unter dem Vorschub bleiben.
+   * Liest die Kommentare „Portal XY=a ZA=b, Werkstück innen=c außen=d mm/min" (vom
+   * fertigen Text, damit die Zeilennummer auch nach Vorwärmen/G93 stimmt).
+   * Rückgabe {msg, tips} für die rote Warnleiste der Simulation, sonst null. */
+  function portalCapWarn(text) {
+    const Fmax = +state.cfg.maxFeed || 0, feed = +state.cfg.feed || 0;
+    if (Fmax <= 0 || feed <= 0) return null;
+    const re = /(\w+)=(\d+) (\w+)=(\d+),[^=]*=(\d+) [^=]*=(\d+) mm\/min/;
+    const lns = text.split('\n');
+    let first = null, count = 0, need = 0;
+    for (let k = 0; k < lns.length; k++) {
+      const m = re.exec(lns[k]); if (!m) continue;
+      const vL = +m[2], vR = +m[4], vW = Math.max(+m[5], +m[6]);
+      const vP = Math.max(vL, vR);
+      // gedeckelt = Portal am Max.-Vorschub UND schnellere Werkstückseite spürbar unter
+      // dem Vorschub (Rundung der Kommentarwerte: ±1 mm/min).
+      if (vP < Fmax - 1 || vW >= feed - 1.5) continue;
+      count++;
+      if (vW > 0) need = Math.max(need, vP * feed / vW);
+      if (!first) first = { line: k + 1, right: vR >= vL, name: vR >= vL ? m[3] : m[1], vIn: +m[5], vOut: +m[6] };
+    }
+    if (!first) return null;
+    const seg = ((state.dxf && state.dxf.activeSeg) || 0) + 1;
+    const needR = Math.ceil(need / 10) * 10;
+    const msg = T('Die Geschwindigkeit bei Segment ') + seg + T(' (G-Code-Zeile ') + first.line
+      + T(') muss verringert werden, da Portal ') + T(first.right ? 'rechts' : 'links') + ' (' + first.name + ')'
+      + T(' den Max.-Vorschub von ') + Fmax + T(' mm/min überschreiten würde. Werkstück dort nur innen ')
+      + first.vIn + T(' / außen ') + first.vOut + T(' statt ') + feed + ' mm/min'
+      + (count > 1 ? T(' (insgesamt ') + count + T(' Zeilen betroffen)') : '') + '.';
+    const tips = [
+      T('Max.-Vorschub erhöhen auf mindestens ca. ') + needR + T(' mm/min, falls die Maschine das schafft.'),
+      first.right
+        ? T('Block näher ans rechte Portal legen (Abstand zum linken Portal vergrößern) — dann verlängert sich der Draht weniger über das Außenprofil hinaus und die Portalgeschwindigkeit sinkt.')
+        : T('Block näher ans linke Portal legen (Abstand zum linken Portal verkleinern) — dann verlängert sich der Draht weniger über das Innenprofil hinaus und die Portalgeschwindigkeit sinkt.')
+    ];
+    return { msg, tips };
+  }
+
   // ---- DXF-Formen (INNEN/AUSSEN + Synchronpaare) -> G-Code über HotWire.gcode ----
   // Nur vorhanden, wenn der Reiter „DXF-Formen" (dxfshapes.js) im Build steckt.
   function dxfGcode() {
@@ -969,8 +1012,9 @@
       origin: P.origin, cutMode: withBlock ? order : 'none', blockCut: withBlock ? P.blockCut : null,
       // Die waagrechte Anfahrt vom hinteren Blockende bis zur Form läuft durch die
       // Blockzugabe hinten -> ab dort mit Schnittvorschub (nicht in Luft-Tempo).
-      leadFace: P.block ? { l: P.block.maxx, r: P.block.maxx } : null,
-      meltDwell: +state.material.meltDwell || 0,
+      // l/r = Turmkoordinaten, in/out = am INNEN-/AUSSEN-Profil (verjüngter Block: verschieden).
+      leadFace: P.rearFace || (P.block ? { l: P.block.maxx, r: P.block.maxx } : null),      meltDwell: +state.material.meltDwell || 0,
+      tipSpeed: true,   // Kommentar je Konturzeile: Werkstück innen UND außen
       header: (state.cfg.header ? state.cfg.header + '\n' : '') + '; --- DXF-Form (INNEN/AUSSEN) ---',
       footer: state.cfg.footer
     });

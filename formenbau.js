@@ -47,6 +47,7 @@
     formLambda: 1,             // Glättungsgewicht (0 = reine Ausgleichung)
     formPts: 240,              // Punkte je Rippe (Ausgabe)
     formRingMm: 5,             // Ringabstand entlang der Spannweite (mm)
+    formPlan: 'smooth',        // Grundriss bei .pc2-Import: 'smooth' glatt wie im Planform Creator | 'trap' Trapeze (wie Heißdraht)
     formLoft: 'linear',        // Loft in Spannweite: 'linear' Regelfläche (wie Heißdraht) | 'spline' kubischer Spline über die Rippen
     formLoftAng: 2,            // Spline-Loft: neuer Zwischenring, sobald sich die Fläche um mehr als diesen Winkel (°) dreht
     formTipMode: 'round',      // 'round' parametrischer Randbogen | 'flat' | 'winglet'
@@ -141,6 +142,22 @@
     formHoleSides: 'both',     // 'both' | 'front' | 'rear'
     formHoleSeg: false,        // bei Segmentierung: Löcher je Druckstück verteilen (Anzahl je Stück wählbar)
     formHolePer: null,         // { '0': n, … } Anzahl je Seite je Druckstück (Index von der Wurzel); fehlt -> formHoleN
+    /* Schraublöcher am Stoß linke/rechte Fläche (Höhenleitwerk, von oben verschraubte Tragfläche): Senkung für den
+     * Schraubenkopf in der Ober-/Unterseite — im Urmodell eine Vertiefung, in der Negativform eine Erhöhung. */
+    formScrOn: false,
+    formScrPos: 'center',      // 'center' genau am Stoß (halbes Loch je Hälfte) | 'sides' links und rechts vom Stoß
+    formScrDz: 15,             // 'sides': Abstand Lochmitte vom Stoß (mm)
+    formScrSide: 'top',        // 'top' Oberseite | 'bot' Unterseite
+    formScrN: 2,               // Anzahl in Sehnenrichtung (1..4)
+    formScrXs: null,           // Lage je Loch in % der Wurzelsehne (ab Nase); fehlt -> 25 / 75 / 50 / 90
+    formScrHead: 'senk',       // 'senk' Senkkopf | 'zyl' Zylinderkopf
+    formScrPre: 'M3',          // Gewinde-Vorgabe ('' = eigene Maße)
+    formScrDk: 6,              // Kopfdurchmesser (mm)
+    formScrD: 3.4,             // Schaft-/Bohrungsdurchmesser (mm)
+    formScrAng: 90,            // Senkkopf: Senkwinkel (°)
+    formScrTz: 0,              // Senkkopf: zusätzlich versenkt (zylindrisch mit Kopfdurchmesser, mm)
+    formScrHk: 3,              // Zylinderkopf: Kopfhöhe = Senktiefe (mm)
+    formScrTs: 2,              // Schaftbohrung unter dem Kopf: Tiefe (mm, 0 = keine)
     formPin: false,            // Passbohrungen an der Trennebene Tragfläche / Randbogen bzw. Winglet (getrennter Export)
     formPinN: 2,               // Anzahl
     formPinShape: 'circle',    // 'circle' | 'rect'
@@ -502,6 +519,124 @@
     });
     return out;
   }
+  // ---------- Glatter Grundriss (Planform Creator) -------------------------
+  /* Beim .pc2-Import wird die glatte (meist elliptische) Fläche für den Heißdraht in Trapeze zerlegt; die
+   * Originalform liegt je Tragfläche in cfg.formPlanSrc = { raw, st, name } (st = Trapezgrenzen als
+   * Spannweitenanteil). Der Formenbau nimmt sie statt der Trapeze: jeder Ring wird um seine Nase skaliert
+   * und in Sehnenrichtung verschoben, bis Nasen- und Endleiste der glatten Kurve folgen. An den Stationen
+   * ist die Korrektur 0 (dort liegen die Trapezecken auf der Kurve); Profil, Schränkung und V-Form bleiben
+   * aus dem Tragflächendesign. Spätere Änderungen an Tiefe/Pfeilung einer Station wirken weiter (die
+   * Kurve wird nur als Abweichung von der geraden Verbindung aufgesetzt). */
+  function planInfo() {
+    const src = state.cfg.formPlanSrc;
+    if (!src || !src.raw || !Array.isArray(src.st) || src.st.length < 2 || !window.PC2) return null;
+    let m; try { m = PC2.parse(src.raw); } catch (e) { return { err: e.message }; }
+    return { m, st: src.st, name: src.name || m.name };
+  }
+  // Passt der gespeicherte Grundriss noch zur Segmentkette? (Anzahl Trapeze)
+  function planCheck() {
+    const pi = planInfo(); if (!pi) return null;
+    if (pi.err) return pi;
+    const n = (state.segments || []).length;
+    if (n !== pi.st.length - 1) return Object.assign({}, pi, { err: T('Segmentzahl geändert (') + n + ' ' + T('statt') + ' ' + (pi.st.length - 1) + T(') — glatter Grundriss wird nicht verwendet.') });
+    return pi;
+  }
+  function ribNC(pts) {   // Nase und Sehnenlänge (Nase -> Endleistenmitte)
+    const M = pts.length, N = pts[leIndex(M)], a = pts[0], b = pts[M - 1];
+    return { N, c: Math.hypot((a.x + b.x) / 2 - N.x, (a.y + b.y) / 2 - N.y) };
+  }
+  function planOf(stations) {
+    const pi = planCheck(); if (!pi || pi.err) return null;
+    const segs = [];
+    for (let k = 0; k < stations.length - 1; k++) {
+      const a = stations[k], b = stations[k + 1];
+      if (b.z - a.z > 1e-9) segs.push({ a: ribNC(a.sm), b: ribNC(b.sm), z0: a.z, z1: b.z });
+    }
+    if (segs.length !== pi.st.length - 1) return null;
+    const m = pi.m;
+    segs.forEach((s, k) => { s.x0 = +pi.st[k]; s.x1 = +pi.st[k + 1]; s.le0 = m.le(s.x0); s.le1 = m.le(s.x1); s.c0 = m.chord(s.x0); s.c1 = m.chord(s.x1); });
+    const target = z => {
+      let k = 0; while (k < segs.length - 1 && z > segs[k].z1) k++;
+      const s = segs[k], t = Math.max(0, Math.min(1, (z - s.z0) / (s.z1 - s.z0))), xn = s.x0 + (s.x1 - s.x0) * t;
+      const Lm = s.le0 + (s.le1 - s.le0) * t, Cm = s.c0 + (s.c1 - s.c0) * t;
+      const le = s.a.N.x + (s.b.N.x - s.a.N.x) * t + (m.le(xn) - Lm);
+      const c = (s.a.c + (s.b.c - s.a.c) * t) * (Cm > 1e-9 ? m.chord(xn) / Cm : 1);
+      return { le, c };
+    };
+    const onStation = z => segs.some(s => Math.abs(z - s.z0) < 1e-6 || Math.abs(z - s.z1) < 1e-6);
+    // Scharniere der Höhe nach ausgerichtet (Profilhöhenausrichtung, Bezug Scharnierlinie): der Scharnierpunkt
+    // jedes Rings liegt auf der Geraden zwischen den Scharnierpunkten der Stationen — sonst verschöbe das
+    // Skalieren um die Nase ihn in der Höhe und das Scharnier wäre zwischen den Stationen nicht mehr gerade.
+    let hinge = null;
+    const al = state.cfg.align;
+    if (al && al.enable && al.ref === 'hinge' && m.hingeCn && segs.length === (state.segments || []).length) {
+      const side = pts => { const M = pts.length, i = leIndex(M); return { i0: 0, i1: i, j0: M - 1, j1: i }; };
+      const yH = (pts, frac, bottom) => { const nc = ribNC(pts), sd = side(pts), x = nc.N.x + frac * nc.c;
+        return bottom ? yAtX(pts, sd.j0, sd.j1, x) : yAtX(pts, sd.i0, sd.i1, x); };
+      segs.forEach((s, k) => {
+        const sg = state.segments[k]; s.hBot = sg.hingeSide === 'bottom';
+        // Außenrippe „im Verlauf" (Randbogen) liegt nicht auf der Scharniergeraden -> dort nur um die Nase skalieren.
+        s.hOn = ((+sg.hingePct || 0) > 0 || (+sg.hingePctTip || 0) > 0) && !sg.alignTrendTip;
+        s.hA = yH(stations.find(q => Math.abs(q.z - s.z0) < 1e-9 && q.sm).sm, m.hingeCn(s.x0), s.hBot);
+        s.hB = yH(stations.filter(q => Math.abs(q.z - s.z1) < 1e-9)[0].sm, m.hingeCn(s.x1), s.hBot);
+      });
+      hinge = (z, pts) => {
+        let k = 0; while (k < segs.length - 1 && z > segs[k].z1) k++;
+        const s = segs[k]; if (!s.hOn) return 0;
+        const t = Math.max(0, Math.min(1, (z - s.z0) / (s.z1 - s.z0))), xn = s.x0 + (s.x1 - s.x0) * t;
+        return (s.hA + (s.hB - s.hA) * t) - yH(pts, m.hingeCn(xn), s.hBot);
+      };
+    }
+    return { target, onStation, hinge, name: pi.name };
+  }
+  function planApply(r, P) {
+    if (P.onStation(r.z)) return r;
+    const tg = P.target(r.z), nc = ribNC(r.pts);
+    if (nc.c < 1e-6 || !(tg.c > 0)) return r;
+    const N = nc.N, s = tg.c / nc.c, dx = tg.le - N.x;
+    let pts = r.pts.map(p => ({ x: N.x + dx + (p.x - N.x) * s, y: N.y + (p.y - N.y) * s }));
+    const dy = P.hinge ? P.hinge(r.z, pts) : 0;
+    if (dy) pts = pts.map(p => ({ x: p.x, y: p.y + dy }));
+    return Object.assign({}, r, { pts });
+  }
+  /* Ringe auf den glatten Grundriss setzen. Wo sich Nase/Endleiste zwischen zwei Ringen stark ändern
+   * (Spitze einer Ellipse), werden Zwischenringe eingefügt (höchstens tol mm Versatz je Ringband). */
+  function planRings(rings, P, tol) {
+    const out = [];
+    for (let i = 0; i < rings.length; i++) {
+      const a = rings[i], b = rings[i + 1]; out.push(a);
+      if (!b || b.z - a.z <= 1e-9) continue;
+      // Adaptiv halbieren: an der Ellipsenspitze ist die Tangente senkrecht (Tiefe ~ √Abstand), gleichmäßige
+      // Teilung ließe dort den ganzen Sprung im letzten Band.
+      const zs = [], dz = b.z - a.z;
+      const jump = (p, q) => Math.max(Math.abs(q.le - p.le), Math.abs(q.le + q.c - p.le - p.c));
+      const sub = (z0, t0, z1, t1, depth) => {
+        if (depth > 18 || z1 - z0 < 1e-3 || jump(t0, t1) <= tol) return;
+        const zm = (z0 + z1) / 2, tm = P.target(zm);
+        sub(z0, t0, zm, tm, depth + 1); zs.push(zm); sub(zm, tm, z1, t1, depth + 1);
+      };
+      sub(a.z, P.target(a.z), b.z, P.target(b.z), 0);
+      for (const z of zs) out.push({ pts: lerpRing(a.pts, b.pts, (z - a.z) / dz), z });
+    }
+    return out.map(r => planApply(r, P));
+  }
+
+  /* Glatter Grundriss: es gibt keinen eigenen Randbogen, die Kurve schließt die Spitze selbst. Als „Randbogen" für das
+   * Auslaufen von Blutrinne, Sicke und Nasen-Huckel (tipFade) gilt der Bereich, in dem Nasen- oder Endleiste steiler
+   * als 30° zur Spitze umbiegen — sonst liefen sie mit voller Höhe schräg der umbiegenden Endleiste nach und endeten an
+   * der Spitze mit einer senkrechten Wand. Rückgabe: Ringindex, ab dem ausgeblendet wird (null = kein solcher Bereich). */
+  function planFadeStart(rings) {
+    const N = rings.length; if (N < 3) return null;
+    const M = rings[0].pts.length, iLE = leIndex(M), TAN = Math.tan(30 * Math.PI / 180);
+    const le = r => r.pts[iLE].x, te = r => Math.max(r.pts[0].x, r.pts[M - 1].x);
+    let k = N - 1;
+    while (k > 0) {
+      const a = rings[k - 1], b = rings[k], dz = b.z - a.z;
+      if (dz > 1e-9 && Math.max(Math.abs(le(b) - le(a)), Math.abs(te(b) - te(a))) / dz < TAN) break;
+      k--;
+    }
+    return k < N - 1 ? k : null;
+  }
   /* Alle Ringe des Flügels (geglättet, mit Aufmaß, Zwischenringe, Randbogen).
    * Rückgabe { rings:[{pts,z}], stations:[{raw, sm, dev, z, name}], tipStart }. */
   function wingRings(opt) {
@@ -516,14 +651,17 @@
     }
     const last = stations[stations.length - 1], prev = stations[stations.length - 2];
     rings.push({ pts: last.sm, z: last.z });
+    const plan = opt.plan === 'smooth' ? planOf(stations) : null;
+    if (plan) rings = planRings(rings, plan, 0.5);
     const tipStart = rings.length - 1;
+    const fadeStart = plan ? planFadeStart(rings) : null;
     let wl = null;
     if (opt.tipMode === 'round' && opt.tipLen > 0) for (const r of tipRings(last, prev, opt)) rings.push(r);
     else if (opt.tipMode === 'winglet') wl = wingletRings(last, prev, opt);
     else if (opt.tipMode === 'wldraw') wl = wingletDrawRings(last, prev, opt);
     // globale Endleistendicke: Randbogen-/Winglet-Ringe sind skalierte Profile -> absolutes Maß erst hier
     if (opt.teThk > 0) { rings = rings.map(r => teThickApply(r, opt.teThk)); if (wl) wl = wl.map(r => teThickApply(r, opt.teThk)); }
-    return { rings, stations, tipStart, wl };
+    return { rings, stations, tipStart, wl, plan: plan ? plan.name : null, fadeStart };
   }
 
   /* Ringe (Rippen) senkrecht zur Nasenleiste in der Vorderansicht: jeder Ring wird als exakter Schnitt der
@@ -1524,11 +1662,13 @@
    * wedge % laufen als Keil auf 0 aus. Hinter dem Randbogen (Überstand auf der Trennebene) immer 0 —
    * keine dieser Zutaten darf auf die ebene Trennfläche hinauslaufen. */
   function tipFade(W, tip, wedge) {
-    const N = W.rings.length, ts = W.tipStart == null ? N - 1 : W.tipStart;
+    const N = W.rings.length, ts = W.fadeStart != null ? W.fadeStart : W.tipStart == null ? N - 1 : W.tipStart;
     const lim = tip == null ? 100 : tip, wd = Math.min(wedge || 0, lim);
+    // Glatter Grundriss: Anteil nach Länge in Spannweite (die Ringe liegen zur Spitze hin sehr dicht)
+    const zs = W.fadeStart != null ? Math.abs(W.rings[ts].z) : 0, zl = W.fadeStart != null ? Math.abs(W.rings[N - 1].z) - zs : 0;
     return k => {
       if (k <= ts || N - 1 <= ts) return 1;
-      const u = (k - ts) / (N - 1 - ts) * 100;
+      const u = zl > 1e-9 ? (Math.abs(W.rings[k].z) - zs) / zl * 100 : (k - ts) / (N - 1 - ts) * 100;
       if (u >= lim) return 0;
       return wd > 0 && u > lim - wd ? (lim - u) / wd : 1;
     };
@@ -1617,6 +1757,90 @@
       rings.push(Object.assign({}, r, { pts: Q })); changed = true;
     }
     return changed ? Object.assign({}, W, { rings, psIdx: idx }) : W;
+  }
+  /* Schraublöcher am Stoß linke / rechte Fläche (Höhenleitwerk, von oben verschraubte Tragfläche): Senkung für den
+   * Schraubenkopf (Senk- oder Zylinderkopf, Achse senkrecht = y) in der Ober- oder Unterseite, genau am Stoß (halbes
+   * Loch je Hälfte, bei Spiegelung ganz) oder je eines links und rechts davon. Im Urmodell eine Vertiefung, in der
+   * Negativform (dieselben Ringe) die passende Erhöhung. Umsetzung auf Ringebene, damit alle nachgelagerten Netz-
+   * Funktionen (Loft, Formhälften, Trennplatte, Segmentierung) unverändert bleiben: zusätzliche Ringe über die Loch-
+   * breite (auf der Regelfläche zwischen den Nachbarringen) und je Ring 2·K zusätzliche Profilpunkte — K je Seite,
+   * damit leIndex weiter stimmt; auf der anderen Seite und außerhalb des Lochs fallen sie in einem Punkt zusammen.
+   * Tiefenprofil d(r) um die Lochachse (r = Abstand von der Achse), senkrecht von der Oberfläche abgetragen (die
+   * Krümmung der Fläche über den Kopfdurchmesser ist vernachlässigbar):
+   *   Senkkopf:     Zylinder Ø Kopf (Zusatzversenkung tz) -> Kegel (Senkwinkel) bis Ø Schaft -> Schaftbohrung (ts)
+   *   Zylinderkopf: Zylinder Ø Kopf (Kopfhöhe hk) -> Schaftbohrung (ts)
+   * Je Ring werden die Schnittpunkte des Profils exakt gesetzt (Lochrand, Stufen), Originalpunkte im Loch abgesenkt. */
+  function screwRings(W, opt) {
+    const sc = opt.scr;
+    if (!sc || !sc.on || !sc.xs || !sc.xs.length || !W || W.frameAt || W.part === 'tip') return W;
+    const R = W.rings; if (!R || R.length < 2) return W;
+    const M = R[0].pts.length, iLE = leIndex(M);
+    if (M < 8 || iLE < 2 || R.some(r => r.pts.length !== M || r.pts.some(p => p.z != null))) return W;
+    const Rh = Math.max(0.5, sc.dk / 2), rs = Math.min(Math.max(0.2, sc.d / 2), Rh - 0.05);
+    const senk = sc.head === 'senk';
+    const hc = senk ? (Rh - rs) / Math.tan(Math.max(10, Math.min(85, sc.ang / 2)) * Math.PI / 180) : 0;
+    const tz = senk ? sc.tz : sc.hk;   // zylindrischer Teil mit Kopfdurchmesser: Zusatzversenkung bzw. Kopfhöhe
+    // Tiefenprofil: Stützstellen (r, d) von der Achse nach außen; gleiches r = senkrechte Stufe
+    const NC = 4, prof = [[0, tz + hc + sc.ts], [rs, tz + hc + sc.ts], [rs, tz + hc]];
+    for (let j = 1; j <= NC; j++) { const r = rs + (Rh - rs) * j / (NC + 1); prof.push([r, tz + hc * (Rh - r) / (Rh - rs)]); }
+    prof.push([Rh, tz], [Rh, 0]);
+    const K = prof.length;
+    const dep = r => {
+      if (r >= Rh) return 0;
+      for (let k = 0; k + 1 < K; k++) { const a = prof[k], b = prof[k + 1]; if (r >= a[0] && r <= b[0]) return b[0] - a[0] > 1e-12 ? a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]) : Math.min(a[1], b[1]); }
+      return 0;
+    };
+    // Lochmitten: x aus % der Wurzelsehne (ab Nase), z am Stoß (Wurzel) oder im Abstand dz davon
+    const P0 = R[0].pts, LE0 = P0[iLE], TE0 = teMid(P0), zH = R[0].z + (sc.pos === 'sides' ? sc.dz : 0);
+    const holes = sc.xs.map(pct => ({ x: LE0.x + (TE0.x - LE0.x) * Math.max(0.02, Math.min(0.98, pct / 100)), z: zH }));
+    // Zusätzliche Ringe über die Lochbreite (Regelfläche zwischen den Nachbarringen), nur bis zur letzten Rippe
+    const ts = W.tipStart == null ? R.length - 1 : Math.max(0, Math.min(R.length - 1, W.tipStart));
+    const zMin = R[0].z, zMax = R[ts].z, NZ = 8, out = R.slice(), added = [];
+    for (let k = -NZ; k <= NZ; k++) {
+      const z = zH + Rh * k / NZ;
+      if (z < zMin - 1e-9 || z > zMax + 1e-9 || out.some(r => Math.abs(r.z - z) < 1e-6)) continue;
+      let i = -1; for (let q = 0; q + 1 < out.length; q++) if (out[q].z <= z && z <= out[q + 1].z && out[q + 1].z - out[q].z > 1e-9) { i = q; break; }
+      if (i < 0) continue;
+      const t = (z - out[i].z) / (out[i + 1].z - out[i].z);
+      out.splice(i + 1, 0, { pts: lerpRing(out[i].pts, out[i + 1].pts, t), z }); added.push(z);
+    }
+    const shift = k => k == null ? k : k + added.filter(z => z < R[k].z).length;
+    const sgSide = sc.side === 'bot' ? -1 : 1;
+    // Eine Profilseite (Punkte in x fallend, Endleiste -> Nase): Lochquerschnitt einsetzen (sg = ±1) bzw. nur Füllpunkte (sg = 0)
+    const side = (O, sg, z) => {
+      let xMax = -Infinity, xMin = Infinity; for (const p of O) { if (p.x > xMax) xMax = p.x; if (p.x < xMin) xMin = p.x; }
+      const sAt = x => {   // Höhe der (unveränderten) Kontur an der Stelle x
+        for (let i = 0; i + 1 < O.length; i++) { const a = O[i], b = O[i + 1]; if ((a.x - x) * (b.x - x) <= 0) { const d = b.x - a.x; return Math.abs(d) < 1e-12 ? a.y : a.y + (b.y - a.y) * (x - a.x) / d; } }
+        return Math.abs(O[0].x - x) < Math.abs(O[O.length - 1].x - x) ? O[0].y : O[O.length - 1].y;
+      };
+      let L = O.map(p => ({ x: p.x, y: p.y }));
+      for (const h of holes) {
+        const a = Math.abs(z - h.z), inside = sg !== 0 && a < Rh, w = inside ? Math.sqrt(Rh * Rh - a * a) : 0;
+        const samp = (k, dir) => {
+          const r0 = prof[k][0], r = Math.max(r0, a), d = inside ? (r0 >= a ? prof[k][1] : dep(a)) : 0;
+          const x = Math.max(xMin, Math.min(xMax, h.x + dir * Math.sqrt(Math.max(0, r * r - a * a))));
+          return { x, y: sAt(x) - sg * d, ins: true };
+        };
+        const B = [];
+        for (let k = K - 1; k >= 0; k--) B.push(samp(k, 1));
+        for (let k = 0; k < K; k++) B.push(samp(k, -1));
+        if (inside) for (const p of L) { if (p.ins) continue; const u = p.x - h.x; if (Math.abs(u) < w) p.y -= sg * dep(Math.sqrt(u * u + a * a)); }
+        // in x-Reihenfolge einsortieren (Fenster ab dem ersten Punkt hinter dem Lochrand)
+        let i = 0; while (i < L.length && L[i].x >= B[0].x) i++;
+        const N = L.slice(0, i); let j = 0;
+        while (j < B.length) { if (i < L.length && L[i].x >= B[j].x) N.push(L[i++]); else N.push(B[j++]); }
+        while (i < L.length) N.push(L[i++]);
+        L = N;
+      }
+      return L.map(p => ({ x: p.x, y: p.y }));
+    };
+    const rings = out.map(r => {
+      const P = r.pts, top = P.slice(0, iLE), bot = P.slice(iLE + 1).reverse();
+      const Q = side(top, sgSide > 0 ? 1 : 0, r.z).concat([P[iLE]], side(bot, sgSide < 0 ? -1 : 0, r.z).reverse());
+      Q.psTip = P.psTip;
+      return Object.assign({}, r, { pts: Q });
+    });
+    return Object.assign({}, W, { rings, tipStart: shift(W.tipStart), fadeStart: shift(W.fadeStart), psIdx: null, screws: holes.map(h => ({ x: h.x, z: h.z, r: Rh })) });
   }
   /* Trennfläche vor der Nase / hinter der Endleiste, Höhe an der Stelle x (Sehnenrichtung):
    *   yF(LE, x, P): vor der Nase (x < LE.x), yR(tp, x, P): hinter der Endleiste (x > tp.x). P = Punktliste des Rings
@@ -2418,10 +2642,12 @@
     if (state.cfg.formWlTipPLE == null && state.cfg.formWlTipP != null && +state.cfg.formWlTipP !== 2) { state.cfg.formWlTipPLE = state.cfg.formWlTipPTE = +state.cfg.formWlTipP; state.cfg.formWlTipRef = 50; state.cfg.formWlTipMode = 'custom'; }
     // Altstand: eine gemeinsame Rundung formTipP -> getrennte Exponenten Nase/Endleiste.
     if (state.cfg.formTipPLE == null && state.cfg.formTipP != null) { state.cfg.formTipPLE = state.cfg.formTipPTE = +state.cfg.formTipP || 2; state.cfg.formTipPreset = 'custom'; }
+    // Glatter Grundriss (.pc2): die Kurve schließt die Spitze selbst ab -> kein zusätzlicher Randbogen dahinter.
+    const planOn = C('formPlan') !== 'trap' && (() => { const p = planCheck(); return !!(p && !p.err); })();
     return {
       mode: C('formSmooth'), ctrl: Math.max(4, Math.round(C('formCtrl'))), lambda: Math.max(0, +C('formLambda')),
-      pts: Math.max(40, Math.round(C('formPts'))), ringMm: Math.max(0.5, +C('formRingMm')), loft: C('formLoft') === 'spline' ? 'spline' : 'linear', loftAng: Math.max(0.1, +C('formLoftAng') || 2), aufmass: +C('formAufmass') || 0, teThk: Math.max(0, +C('formTeThk') || 0), teEdge: ['blend', 'flush'].includes(C('formTeEdge')) ? C('formTeEdge') : 'out',
-      tipMode: C('formTipMode'), tipLen: Math.max(0, +C('formTipLen')), tipPLE: +C('formTipPLE') || 2, tipPTE: +C('formTipPTE') || 2,
+      pts: Math.max(40, Math.round(C('formPts'))), ringMm: Math.max(0.5, +C('formRingMm')), loft: C('formLoft') === 'spline' ? 'spline' : 'linear', plan: C('formPlan') === 'trap' ? 'trap' : 'smooth', loftAng: Math.max(0.1, +C('formLoftAng') || 2), aufmass: +C('formAufmass') || 0, teThk: Math.max(0, +C('formTeThk') || 0), teEdge: ['blend', 'flush'].includes(C('formTeEdge')) ? C('formTeEdge') : 'out',
+      tipMode: planOn && C('formTipMode') === 'round' ? 'flat' : C('formTipMode'), tipLen: Math.max(0, +C('formTipLen')), tipPLE: +C('formTipPLE') || 2, tipPTE: +C('formTipPTE') || 2,
       tipRef: +C('formTipRef') || 0, tipRise: +C('formTipRise') || 0, tipTwist: +C('formTipTwist') || 0, tipThk: +C('formTipThk') || 100,
       wl: { step: Math.max(0, +C('formWlStep') || 0), stepAt: Math.max(0, +C('formWlStepAt') || 0), flatWing: C('formWlFlatWing') !== false, teWing: C('formWlTeWing') !== false, teSweep: Math.min(60, Math.max(-30, +C('formWlTeSweep') || 0)), teSweepH: Math.min(60, Math.max(-30, +C('formWlTeSweepH') || 0)), flatLen: Math.max(0, +C('formWlFlatLen') || 0), flatSweep: Math.min(70, Math.max(-30, +C('formWlFlatSweep') || 0)), len: +C('formWlLen') || 0, R: Math.max(0, +C('formWlR')), cant: Math.min(85, Math.max(-30, +C('formWlCant') || 0)),
         cRoot: Math.max(5, +C('formWlCRoot') || 0), cTip: Math.max(2, +C('formWlCTip') || 0), sweep: Math.min(70, Math.max(-30, +C('formWlSweep') || 0)),
@@ -2451,8 +2677,25 @@
       pin: { on: !!C('formPin'), n: pinCount(), shape: C('formPinShape') === 'rect' ? 'rect' : 'circle', d: Math.max(0.5, +C('formPinD') || 0),
         a: Math.max(0.5, +C('formPinA') || 0), b: Math.max(0.5, +C('formPinB') || 0), depth: Math.max(0.5, +C('formPinDepth') || 0), depthTip: Math.max(0.5, +(C('formPinDepthTip') != null ? C('formPinDepthTip') : C('formPinDepth')) || 0), pts: pinPts() },
       stk: { on: !!C('formStk'), pts: stkPts() },
-      stkT: { on: !!C('formStkT'), pts: stkPts('formStkT') }
+      stkT: { on: !!C('formStkT'), pts: stkPts('formStkT') },
+      scr: { on: !!C('formScrOn'), pos: C('formScrPos') === 'sides' ? 'sides' : 'center', dz: Math.max(0, +C('formScrDz') || 0), side: C('formScrSide') === 'bot' ? 'bot' : 'top',
+        xs: scrXs(), head: C('formScrHead') === 'zyl' ? 'zyl' : 'senk', dk: Math.max(1, +C('formScrDk') || 0), d: Math.max(0.5, +C('formScrD') || 0),
+        ang: Math.max(20, Math.min(170, +C('formScrAng') || 90)), tz: Math.max(0, +C('formScrTz') || 0), hk: Math.max(0.2, +C('formScrHk') || 0), ts: Math.max(0, +C('formScrTs') || 0) }
     };
+  }
+  // Schraublöcher: Lage je Loch in % der Wurzelsehne (Liste auf die Anzahl gekürzt / mit Vorgaben aufgefüllt)
+  const SCR_X_DEF = [25, 75, 50, 90];
+  function scrCount() { return Math.max(1, Math.min(4, Math.round(+C('formScrN') || 1))); }
+  function scrXs() {
+    const a = Array.isArray(C('formScrXs')) ? C('formScrXs') : [], n = scrCount(), out = [];
+    for (let i = 0; i < n; i++) { const v = +a[i]; out.push(isFinite(v) && a[i] != null ? Math.max(2, Math.min(98, v)) : SCR_X_DEF[i]); }
+    return out;
+  }
+  // Gewinde-Vorgaben: Kopfdurchmesser Senk-/Zylinderkopf (DIN 7991 / DIN 912), Durchgangsbohrung mittel, Kopfhöhe Zylinderkopf
+  const SCR_PRESETS = { 'M2': { senk: 3.8, zyl: 3.8, d: 2.4, hk: 2 }, 'M2.5': { senk: 4.7, zyl: 4.5, d: 2.9, hk: 2.5 }, 'M3': { senk: 6, zyl: 5.5, d: 3.4, hk: 3 }, 'M4': { senk: 8, zyl: 7, d: 4.5, hk: 4 }, 'M5': { senk: 10, zyl: 8.5, d: 5.5, hk: 5 } };
+  function scrApplyPreset() {
+    const p = SCR_PRESETS[C('formScrPre')]; if (!p) return;
+    S('formScrDk', C('formScrHead') === 'zyl' ? p.zyl : p.senk); S('formScrD', p.d); S('formScrHk', p.hk);
   }
   function partMode() { const p = C('formPart'); return p === 'wing' || p === 'tip' ? p : 'all'; }
   function pinCount() { return Math.max(1, Math.min(20, Math.round(+C('formPinN') || 1))); }
@@ -2548,14 +2791,17 @@
     // Winglets nur beim Urmodell oder als eigenes Formteil (sonst hinterschnitten -> flach)
     if ((o.tipMode === 'winglet' || o.tipMode === 'wldraw') && o.target !== 'ur' && o.part !== 'tip') o = Object.assign({}, o, { tipMode: 'flat' });
     if (o.part === 'tip') o = Object.assign({}, o, { mirror: false });
-    const W = wingRings(o);
-    if (!W) return null;
+    const W0 = wingRings(o);
+    if (!W0) return null;
+    // Schraublöcher (Senkungen) auf Ringebene: fürs Positiv hier, für die Formhälften erst NACH partingReparam
+    // (die Umparametrisierung würde die Ecken der Senkung verschleifen)
+    const W = screwRings(W0, o);
     const Wt = tiltRings(W);   // Anzeige (Drahtgitter-Rippen) wie das Urmodell: senkrecht zur Nasenleiste
     const m = { W: Wt, Wfull: W, opt: o, ur: null, top: null, bot: null };
     try {
-      let Wp = partW(W, o);
+      let Wp = partW(W0, o);
       if (!Wp) { m.err = T('Kein Randbogen / Winglet vorhanden (Abschluss „flach“ oder Länge 0) – für das Bauteil „nur Randbogen / Winglet“ gibt es nichts zu bauen.'); return m; }
-      Wp = partingReparam(Wp);   // Trennlinie an der Silhouette (senkrecht zur Mittellinie), kein Hinterschnitt am Randbogen
+      Wp = screwRings(partingReparam(Wp), o);   // Trennlinie an der Silhouette (senkrecht zur Mittellinie), kein Hinterschnitt am Randbogen
       m.Wp = Wp;   // Ringe, aus denen Form / Trennplatte gebaut werden (Vorschau der Trennfläche)
       const fit = negFit(Wp, o);   // Formhöhe aus dem Negativdesign (Ober-/Unterkante wie der Negativblock)
       if (fit) { m.fit = fit; if (!fit.err) { o = Object.assign({}, o, { fit }); m.opt = o; } }
@@ -2572,6 +2818,9 @@
       else if (o.target === 'split') { m.top = bendMesh(buildSplit(Wp, o, 'top'), Wp); m.bot = bendMesh(buildSplit(Wp, o, 'bot'), Wp); }
       else m.ur = positive();
       if (o.pin.on && o.tipMode !== 'flat' && o.part === 'all') { const P = buildUrParts(W, oPos); if (P.tip) m.parts = P; }
+      // Lage der Schraublöcher an die Netze (Vorschau: eigene Glättungsgruppe, siehe glMesh)
+      if (W.screws) for (const k of ['ur', 'top', 'bot']) { const q = m[k]; if (q) { q.screws = W.screws; if (q.wing) q.wing.screws = W.screws; } }
+      if (W.screws && m.parts && m.parts.wing) m.parts.wing.screws = W.screws;
     } catch (e) { console.error(e); m.err = e.message; }
     return m;
   }
@@ -2861,6 +3110,7 @@
     const out = []; let rest = mesh; out.pins = 0; out.skipped = 0;
     planes.forEach((z, i) => { const r = splitMeshZ(rest, z, typeof pin === 'function' ? pin(i, body) : pin); out.push(r.lo); rest = r.hi; out.pins += r.pins || 0; out.skipped += r.skipped || 0; });
     out.push(rest);
+    if (mesh.screws) for (const q of out) q.screws = mesh.screws;   // Vorschau der Stücke: Glättungsgruppe der Schraublöcher
     return out;
   }
   // Mehrere STL-Dateien in einen im Explorer gewählten Ordner schreiben (sonst nacheinander als Download).
@@ -3142,19 +3392,22 @@
     let b = glBufs.get(mesh); if (b) { b.used = true; return b; }
     const v = mesh.v, tg = mesh.t, n = Math.floor(v.length / 9), out = new Float32Array(n * 3 * 7);
     const fn = new Float32Array(n * 3), key = new Array(n * 3), map = new Map();
+    const ar = new Float32Array(n), grp = new Uint8Array(n), scr = mesh.screws && mesh.screws.length ? mesh.screws : null;
     const kOf = (x, y, z) => (Math.round(x * 1e3)) + ',' + (Math.round(y * 1e3)) + ',' + (Math.round(z * 1e3));
     for (let i = 0; i < n; i++) {
       const o = i * 9, ux = v[o + 3] - v[o], uy = v[o + 4] - v[o + 1], uz = v[o + 5] - v[o + 2], vx = v[o + 6] - v[o], vy = v[o + 7] - v[o + 1], vz = v[o + 8] - v[o + 2];
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const L = Math.hypot(nx, ny, nz) || 1;
-      fn[i * 3] = nx / L; fn[i * 3 + 1] = ny / L; fn[i * 3 + 2] = nz / L;
+      fn[i * 3] = nx / L; fn[i * 3 + 1] = ny / L; fn[i * 3 + 2] = nz / L; ar[i] = L;
+      // Schraublöcher: Dreiecke in der Senkung bilden eine eigene Glättungsgruppe (Lochrand bleibt eine scharfe Kante)
+      if (scr) { const cx = (v[o] + v[o + 3] + v[o + 6]) / 3, cz = Math.abs(v[o + 2] + v[o + 5] + v[o + 8]) / 3; for (const h of scr) if (Math.hypot(cx - h.x, cz - h.z) < h.r) { grp[i] = 1; break; } }
       for (let c = 0; c < 3; c++) { const k = kOf(v[o + c * 3], v[o + c * 3 + 1], v[o + c * 3 + 2]); key[i * 3 + c] = k; let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(i); }
     }
-    const COS = Math.cos(40 * Math.PI / 180);
+    const COS0 = Math.cos(40 * Math.PI / 180), COS1 = Math.cos(25 * Math.PI / 180);
     for (let i = 0; i < n; i++) {
-      const o = i * 9, tag = tg && tg[i] != null ? tg[i] : 0, fx = fn[i * 3], fy = fn[i * 3 + 1], fz = fn[i * 3 + 2];
+      const o = i * 9, tag = tg && tg[i] != null ? tg[i] : 0, fx = fn[i * 3], fy = fn[i * 3 + 1], fz = fn[i * 3 + 2], COS = grp[i] ? COS1 : COS0;
       for (let c = 0; c < 3; c++) {
         let sx = 0, sy = 0, sz = 0;
-        for (const j of map.get(key[i * 3 + c])) { const gx = fn[j * 3], gy = fn[j * 3 + 1], gz = fn[j * 3 + 2]; if (gx * fx + gy * fy + gz * fz >= COS) { sx += gx; sy += gy; sz += gz; } }
+        for (const j of map.get(key[i * 3 + c])) { const gx = fn[j * 3], gy = fn[j * 3 + 1], gz = fn[j * 3 + 2]; if (grp[j] === grp[i] && gx * fx + gy * fy + gz * fz >= COS) { const w = ar[j]; sx += gx * w; sy += gy * w; sz += gz * w; } }   // flächengewichtet: Splitter-Dreiecke verfälschen die Normale nicht
         const L = Math.hypot(sx, sy, sz) || 1, q = (i * 3 + c) * 7;
         out[q] = v[o + c * 3]; out[q + 1] = v[o + c * 3 + 1]; out[q + 2] = v[o + c * 3 + 2];
         out[q + 3] = sx / L; out[q + 4] = sy / L; out[q + 5] = sz / L; out[q + 6] = tag;
@@ -3488,7 +3741,8 @@
       : halves ? [['h:both', 'beide Hälften'], ['h:top', 'nur obere Form'], ['h:bot', 'nur untere Form']] : [];
     items.push(['ps', 'Trennfläche']);
     items.push(['wire', 'Drahtgitter']);
-    const bw = 104, bh = 18, x = W - 12 - bw; let y = gizmo.cy + gizmo.r + 10;
+    // Mit gemeinsamem Ansichtswürfel (viewcube.js: 104 px hoch, 4 px vom oberen Rand) darunter beginnen.
+    const bw = 104, bh = 18, x = W - 8 - bw; let y = window.ViewCube ? 4 + 104 + 8 : gizmo.cy + gizmo.r + 10;
     const fg = col('--txt', '#dde'), line = col('--line', '#556');
     ctx.save(); ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
     for (const [k, t] of items) {
@@ -5113,9 +5367,16 @@
     const g = grp('Formenbau: Bauteil', true, 'form', { alwaysOpen: true });
     const e = grp('STL/STEP-Export', true, 'form', { key: 'STL-Export' });   // Achsen, Nullpunkt, Lage, Export-Knöpfe (Key stabil halten)
     const v = grp('Ansicht', true, 'form');             // Vorschau-Optionen, Farben, Drahtgitter
-    const exportRows = []; let exportHint = null; let nGrp = null, psGrp = null;
+    const exportRows = []; let exportHint = null; let nGrp = null, psGrp = null, scrGrp = null;
     hint(g.body, 'Leitet aus dem Tragflächendesign (Außenkontur, ohne Beplankungsabzug) ein Urmodell (Positiv) oder die beiden Negativform-Hälften als STL für 3D-Druck und CNC-Fräsen ab. Alle Rippen werden vorher als Bezier-/B-Spline-Kurve geglättet.');
     selectRow(g.body, 'Ziel', [['ur', 'Urmodell (Positiv)'], ['split', 'Urmodell geteilt (abformbar, oben + unten)'], ['neg', 'Negativform (oben + unten)']], () => C('formTarget'), v => { S('formTarget', v); rb(); });
+    const pl = planCheck();
+    if (pl) {
+      selectRow(g.body, 'Grundriss (Planform)', [['smooth', 'glatt wie im Planform Creator'], ['trap', 'Trapeze (wie Heißdraht)']], () => C('formPlan') === 'trap' ? 'trap' : 'smooth', v => { S('formPlan', v); rb(); },
+        'Die Tragfläche stammt aus einem Planform-Creator-Import (.pc2). Für den Heißdraht ist sie in Trapeze zerlegt; der Formenbau kann stattdessen den glatten (z. B. elliptischen) Grundriss verwenden. Profile, Schränkung und V-Form kommen weiter aus den Rippen des Tragflächendesigns, nur Nasen- und Endleiste folgen der Kurve.');
+      if (pl.err) { const hw = hint(g.body, pl.err); if (hw && hw.style) hw.style.color = 'var(--warn,#e6b450)'; }
+      else hint(g.body, T('Grundriss-Quelle: ') + pl.name + ' (' + (pl.st.length - 1) + ' ' + T('Trapeze') + ')');
+    }
     const part = partMode(), tipIsWl = C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw';
     selectRow(g.body, 'Bauteil', [['all', 'Tragfläche mit Randbogen / Winglet'], ['wing', 'nur Tragfläche (bis zur letzten Rippe)'], ['tip', 'nur Randbogen / Winglet (eigene Form)']], () => part, v => { S('formPart', v); rb(); },
       'Tragfläche mit Randbogen / Winglet: ein Teil wie bisher. Nur Tragfläche: bis zur letzten Rippe, dort eben (der Randbogen bzw. das Winglet wird separat gebaut). Nur Randbogen / Winglet: eigenes Formteil ab der letzten Rippe — als Urmodell, geteiltes Urmodell oder Negativform. Die Trennfläche liegt in der Sehnenfläche: in Verlängerung von Nase und Endleiste und durch die Mitte des Randbogens bzw. der Winglet-Spitze. Beim Winglet folgt sie der Biegung des Übergangs (Platte, Flansch und Rückseite werden mitgebogen, Passlöcher stehen senkrecht auf der Trennfläche); entformt wird schräg zwischen „nach oben“ und „nach außen“.');
@@ -5226,14 +5487,17 @@
     hint(s.body, 'Eigenes Fenster: Rohpunkte, geglättete Kurve, Kontrollpolygon und eine eingefrorene Referenz überlagert, mit Zoom auf Nase/Endleiste, Abweichungskurve und Tabelle aller Stationen. Parameter dort live änderbar.');
 
     const t = grp('Randbogen / Wingtip', true, 'form');
-    const tipOpts = [['round', 'Randbogen (parametrisch)'], ['flat', 'flach (ebener Deckel)']];
+    // Glatter Grundriss (.pc2): die Kurve läuft selbst zur Spitze zu -> kein parametrischer Randbogen dahinter.
+    const planTip = C('formPlan') !== 'trap' && !!(pl && !pl.err);
+    const tipOpts = planTip ? [['flat', 'Spitze aus dem Grundriss (flacher Deckel)']] : [['round', 'Randbogen (parametrisch)'], ['flat', 'flach (ebener Deckel)']];
+    if (planTip) hint(t.body, 'Die Tragfläche verwendet den glatten Grundriss aus dem Planform Creator — dessen Kurve bildet die Spitze bereits. Ein parametrischer Randbogen wird deshalb nicht angehängt (Grundriss auf „Trapeze“ stellen, um ihn zu nutzen).');
     const wlOk = C('formTarget') === 'ur' || partMode() === 'tip';   // Winglet: Urmodell oder eigenes Formteil
     if (wlOk) { tipOpts.push(['winglet', 'Winglet (mit Übergangsbogen)']); tipOpts.push(['wldraw', 'Winglet aus Zeichnung (Dreitafel)']); }
     else if (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') hint(t.body, 'Winglets gibt es bei Formhälften der ganzen Tragfläche nicht (hinterschnitten) — hier wird der flache Abschluss verwendet. Winglet-Formen: Bauteil „nur Randbogen / Winglet“ wählen (Ziel Urmodell geteilt oder Negativform).');
-    selectRow(t.body, 'Form', tipOpts, () => wlOk ? C('formTipMode') : ((C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') ? 'flat' : C('formTipMode')), v => { S('formTipMode', v); if (v !== 'wldraw' && C('formView') === 'wl') S('formView', '3d'); rb(); },
+    selectRow(t.body, 'Form', tipOpts, () => (planTip && C('formTipMode') === 'round') ? 'flat' : wlOk ? C('formTipMode') : ((C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') ? 'flat' : C('formTipMode')), v => { S('formTipMode', v); if (v !== 'wldraw' && C('formView') === 'wl') S('formView', '3d'); rb(); },
       'Verschließt das Außenende der Tragfläche. Randbogen: Nasen- und Endleistenlinie laufen als Superellipsen zum Bezugspunkt (Vorlagen nach echten Segelflugzeugen); flach: ebener Abschluss an der letzten Rippe; Winglet: Fläche biegt tangential in ein senkrecht/schräg stehendes Winglet mit eigenen Profilen.');
     const lastChord = () => { const st = stationsAbs(); if (!st.length) return 100; const e = ribExtent(st[st.length - 1].pts); return e.c || 100; };
-    if (C('formTipMode') === 'round') {
+    if (C('formTipMode') === 'round' && !planTip) {
       selectRow(t.body, 'Vorlage', [['custom', '— eigene Werte —'], ['ellipse', 'Ellipse (klassisch, LS4 / ASW 19)'], ['sichel', 'Sichel (Discus / ASW 27 / Ventus)'], ['raked', 'gerade gepfeilt, Spitze an der Endleiste'], ['hoch', 'hochgezogen, dünner auslaufend (DG / LS)']],
         () => C('formTipPreset') || 'custom', v => {
           S('formTipPreset', v); const P = TIP_PRESETS[v];
@@ -5607,6 +5871,43 @@
       halfRow(v.body);
     }
 
+    // Schraublöcher am Stoß (Höhenleitwerk / von oben verschraubte Tragfläche): Senkung für den Schraubenkopf
+    if (pm !== 'tip') {
+      const sc = scrGrp = grp('Schraubbefestigung am Stoß', C('formScrOn'), 'form');
+      hint(sc.body, 'Für ein Höhenleitwerk oder eine von oben verschraubte Tragfläche: Senkungen für die Schraubenköpfe genau am Stoß der linken und rechten Fläche (halbes Loch je Hälfte, bei „beide Hälften" ein ganzes) oder je eine links und rechts davon. Im Urmodell (auch geteilt) sind es Vertiefungen, in der Negativform die passenden Erhöhungen — der laminierte Flügel bekommt so die fertige Senkung. Die Schraubenachse steht senkrecht (Dickenrichtung). Nicht im STEP-Export enthalten.');
+      boolRow(sc.body, 'Schraublöcher', () => C('formScrOn'), v => { S('formScrOn', v); rb(); });
+      if (C('formScrOn')) {
+        selectRow(sc.body, 'Lage zum Stoß', [['center', 'genau am Stoß (Lochmitte auf der Wurzelrippe)'], ['sides', 'links und rechts vom Stoß']], () => C('formScrPos') === 'sides' ? 'sides' : 'center', v => { S('formScrPos', v); rb(); },
+          'Genau am Stoß: die Lochmitte liegt auf der Wurzelrippe — jede Hälfte enthält ein halbes Loch, gespiegelt („beide Hälften") wird es ganz. Links und rechts: je Hälfte ein ganzes Loch im eingestellten Abstand von der Wurzel (beide Hälften spiegelbildlich).');
+        if (C('formScrPos') === 'sides')
+          numRow(sc.body, 'Abstand vom Stoß (mm)', () => C('formScrDz'), v => { S('formScrDz', v); rr(); }, { step: 1, min: 0, norender: true,
+            hint: 'Lochmitte ab Wurzelrippe in Spannweitenrichtung; muss samt Kopfdurchmesser in die Fläche passen.' });
+        selectRow(sc.body, 'Seite', [['top', 'Oberseite (von oben verschraubt)'], ['bot', 'Unterseite (von unten verschraubt)']], () => C('formScrSide') === 'bot' ? 'bot' : 'top', v => { S('formScrSide', v); rr(); });
+        numRow(sc.body, 'Anzahl in Sehnenrichtung', () => scrCount(), v => { S('formScrN', v); rb(); }, { int: true, min: 1, max: 4, norender: true,
+          hint: 'Löcher hintereinander in Flugrichtung, z. B. 2 = vorn und hinten. Lage je Loch in % der Wurzelsehne ab der Nase.' });
+        scrXs().forEach((x, i) => numRow(sc.body, T('Loch') + ' ' + (i + 1) + ': ' + T('Lage (% der Sehne)'), () => x, v => { const a = scrXs(); a[i] = v; S('formScrXs', a); rr(); }, { step: 5, min: 2, max: 98, norender: true }));
+        subhead(sc.body, 'Schraube');
+        selectRow(sc.body, 'Schraubenkopf', [['senk', 'Senkkopf (DIN 7991 / ISO 10642)'], ['zyl', 'Zylinderkopf (DIN 912 / ISO 4762)']], () => C('formScrHead') === 'zyl' ? 'zyl' : 'senk', v => { S('formScrHead', v); scrApplyPreset(); rb(); },
+          'Senkkopf: kegelige Senkung vom Kopfdurchmesser bis zum Schaft (Senkwinkel), der Kopf schließt bündig ab. Zylinderkopf: zylindrische Senkung mit Kopfdurchmesser und Kopfhöhe, der Kopf sitzt versenkt in der Fläche.');
+        selectRow(sc.body, 'Gewinde-Vorgabe', [['', 'eigene Maße']].concat(Object.keys(SCR_PRESETS).map(k => [k, k])), () => (SCR_PRESETS[C('formScrPre')] ? C('formScrPre') : ''), v => { S('formScrPre', v); scrApplyPreset(); rb(); },
+          'Setzt Kopfdurchmesser, Bohrung (Durchgangsloch mittel) und Kopfhöhe nach Norm; die Werte lassen sich danach frei ändern.');
+        const own = () => { S('formScrPre', ''); };
+        numRow(sc.body, 'Kopfdurchmesser (mm)', () => C('formScrDk'), v => { S('formScrDk', v); own(); rb(); }, { step: 0.5, min: 1, norender: true });
+        numRow(sc.body, 'Bohrung / Schaft (mm)', () => C('formScrD'), v => { S('formScrD', v); own(); rb(); }, { step: 0.1, min: 0.5, norender: true,
+          hint: 'Durchmesser der Durchgangsbohrung unter dem Kopf. Sie wird nur als kurze Markierung angelegt (siehe Tiefe der Schaftbohrung) und später durchgebohrt.' });
+        if (C('formScrHead') === 'zyl')
+          numRow(sc.body, 'Kopfhöhe / Senktiefe (mm)', () => C('formScrHk'), v => { S('formScrHk', v); own(); rb(); }, { step: 0.5, min: 0.2, norender: true,
+            hint: 'Tiefe der zylindrischen Senkung ab Oberfläche. Etwas mehr als die Kopfhöhe, wenn der Kopf ganz unter der Fläche liegen soll.' });
+        else {
+          numRow(sc.body, 'Senkwinkel (°)', () => C('formScrAng'), v => { S('formScrAng', v); rr(); }, { step: 1, min: 20, max: 170, norender: true,
+            hint: '90° für metrische Senkschrauben (DIN 7991 / ISO 10642), 82° für zöllige.' });
+          numRow(sc.body, 'zusätzlich versenkt (mm)', () => C('formScrTz'), v => { S('formScrTz', v); rr(); }, { step: 0.5, min: 0, norender: true,
+            hint: '0 = der Kopf schließt bündig mit der Oberfläche ab. Größer: zylindrische Senkung mit Kopfdurchmesser vor dem Kegel, der Kopf liegt um dieses Maß unter der Fläche (z. B. für Spachtel oder Lack).' });
+        }
+        numRow(sc.body, 'Tiefe der Schaftbohrung (mm)', () => C('formScrTs'), v => { S('formScrTs', v); rr(); }, { step: 0.5, min: 0, norender: true,
+          hint: 'Sackloch mit Bohrungsdurchmesser unter dem Kopf als Markierung für das spätere Durchbohren. 0 = keine (Senkung endet am Schaftdurchmesser).' });
+      }
+    }
     // Segmentierung (Druckstücke): Teilung entlang der Spannweite beim Export
     const sg = grp('Segmentierung (Druckstücke)', C('formSegOn'), 'form');
     hint(sg.body, 'Teilt Urmodell bzw. Formhälften beim STL-Export entlang der Spannweite in Stücke, die auf den 3D-Drucker passen. Jedes Stück wird an den Trennstellen eben verschlossen (Passlöcher im Flansch bleiben erhalten) und als eigene Datei „…_teil01.stl“, „…_teil02.stl“ … in einen im Explorer gewählten Ordner geschrieben; Stück 1 liegt an der Wurzel. Die 3D-Vorschau zeigt die Trennebenen hellblau.');
@@ -5710,6 +6011,7 @@
     if (pinGrp) side.appendChild(pinGrp.g);
     if (psGrp) side.appendChild(psGrp.g);
     if (nGrp) side.appendChild(nGrp.g);
+    if (scrGrp) side.appendChild(scrGrp.g);
     side.appendChild(s.g);
     side.appendChild(v.g);
     side.appendChild(sg.g);
@@ -5722,5 +6024,5 @@
   Object.assign(App, { formSidebar });
   window.Formenbau = { show, refresh, resize, draw, build, exportUr, exportTop, exportBot, exportWingOnly, exportTipOnly, exportUrStep, exportMoldStep, formStepText, moldStepText, openCmp, closeCmp,
     _dbgModel: () => model,   // Test-Hook (STEP-Validierung gegen echte Ringe)
-    _test: { fitBSpline, smoothRib, teThickRing, earClip, splitMeshZ, splitMeshAll, pinSpots, segPlanes, segOpts, segPinAt, segPinPts, segPinSetPts, segPinClick, segPinEditStart, segPinEditStop, segPinEdit: () => segPinEdit, segNoseAt, holeSpots, segLengths, capPins, mergeHoles, wingRings, buildUrParts, tipSpine, partW, bendMesh, buildWith, moldRings, splitRings, partingReparam, partingSheet, partingSection, holeSpots, loftHoles, zipper, buildMold, buildSplit, opts, cutTri, chainSegs, sectionLoops, stationsAbs, exportTransform, toBinarySTL, railCurve, wingletDrawRings, wlXf: () => wlXf, wlHit, wlSel: () => wlSel, urmodellRingStack, stepClean, meas: () => meas, measHit, measThick, measCalc, circle3, measClick, view: () => ({ W, H, cam, center, radius }) } };
+    _test: { planOf, planRings, planCheck, fitBSpline, smoothRib, teThickRing, earClip, splitMeshZ, splitMeshAll, pinSpots, segPlanes, segOpts, segPinAt, segPinPts, segPinSetPts, segPinClick, segPinEditStart, segPinEditStop, segPinEdit: () => segPinEdit, segNoseAt, holeSpots, segLengths, capPins, mergeHoles, wingRings, buildUrParts, tipSpine, partW, bendMesh, buildWith, moldRings, splitRings, partingReparam, partingSheet, partingSection, holeSpots, loftHoles, zipper, buildMold, buildSplit, opts, cutTri, chainSegs, sectionLoops, stationsAbs, exportTransform, toBinarySTL, railCurve, wingletDrawRings, wlXf: () => wlXf, wlHit, wlSel: () => wlSel, urmodellRingStack, stepClean, meas: () => meas, measHit, measThick, measCalc, circle3, measClick, view: () => ({ W, H, cam, center, radius }) } };
 })();

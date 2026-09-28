@@ -695,7 +695,9 @@
     const [xL, yL, uL, vL] = getAxisLetters();
     const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const rex = l => new RegExp('(?:^|\\s)' + esc(l) + '(-?\\d*\\.?\\d+)', 'i');
-    const axes = [[rex(xL), H, xL], [rex(uL), H, uL], [rex(yL), V, yL], [rex(vL), V, vL]];
+    // 4. Wert = erlaubte Untergrenze horiz./vert. (≤ 0, Menü „Maschinengrenzen & Warnungen")
+    const lo = k => -Math.abs(+lim[k] || 0);
+    const axes = [[rex(xL), H, xL, lo('negH')], [rex(uL), H, uL, lo('negH')], [rex(yL), V, yL, lo('negV')], [rex(vL), V, vL, lo('negV')]];
     const rF = /(?:^|\s)F(\d*\.?\d+)/i;
     // G93 (Inverse Time): F ist dort der Kehrwert der Blockdauer, KEINE
     // Geschwindigkeit — ein Vergleich mit dem Max.-Vorschub waere sinnlos.
@@ -705,10 +707,10 @@
       const code = gcodeLines[i].split(';')[0];
       if (/\bG93\b/.test(code)) invTime = true;
       if (/\bG94\b/.test(code)) invTime = false;
-      for (const [re, limit, name] of axes) {
+      for (const [re, limit, name, min] of axes) {
         const m = re.exec(code); if (!m) continue;
         const val = parseFloat(m[1]);
-        if (wNeg && val < -0.001) return { line: i + 1, axis: name, val, limit, kind: 'neg' };
+        if (wNeg && val < min - 0.001) return { line: i + 1, axis: name, val, limit: min, kind: 'neg' };
         if (limit > 0 && val > limit + 0.001) return { line: i + 1, axis: name, val, limit, kind: 'max' };
       }
       if (Fmax > 0 && !invTime) {
@@ -1359,7 +1361,8 @@
           msg = T('Vorschub überschritten: F = ') + viol.val.toFixed(0) + T(' mm/min in Zeile ') + viol.line + ' '
             + T('(max ') + viol.limit + T(' mm/min). Schnitt nicht gestartet.');
         } else {
-          const range = viol.limit > 0 ? (T('erlaubt 0 … ') + viol.limit + ' mm') : T('nicht unter 0 mm (Maschinennullpunkt)');
+          const range = (viol.kind === 'neg' && viol.limit < 0) ? (T('erlaubt bis ') + viol.limit + ' mm')
+            : viol.limit > 0 ?(T('erlaubt 0 … ') + viol.limit + ' mm') : T('nicht unter 0 mm (Maschinennullpunkt)');
           msg = (viol.kind === 'neg'
             ? T('Fahrweg negativ: Achse ') + viol.axis + ' = ' + viol.val.toFixed(1) + ' mm'
             : T('Fahrweg überschritten: Achse ') + viol.axis + ' = ' + viol.val.toFixed(1) + ' mm')
