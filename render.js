@@ -156,10 +156,47 @@
       };
       const root = core(c.root.pts, sf && sf.root), tip = core(c.tip.pts, sf && sf.tip);
       if (root.length > 2 && tip.length === root.length)
-        list.push({ k, root, tip, z0: App.segZ[k].z0, z1: App.segZ[k].z1, label: 'S' + (k + 1) + ' · ' + Math.round(sg.span || 0) + ' mm' });
+        list.push({ k, root, tip, z0: App.segZ[k].z0, z1: App.segZ[k].z1, holes: wingSeg3DHoles(k, c, xoff), label: 'S' + (k + 1) + ' · ' + Math.round(sg.span || 0) + ' mm' });
       xoff += sg.sweep || 0;
     });
     return { list, active: state.activeSeg };
+  }
+  // Geschlossene Kontur nach Bogenlänge auf N Punkte bringen (Start = erster Punkt).
+  function seg3dLoopN(a, N) {
+    const n = a.length, L = [0];
+    for (let i = 0; i < n; i++) { const p = a[i], q = a[(i + 1) % n]; L.push(L[i] + Math.hypot(q.x - p.x, q.y - p.y)); }
+    const out = []; let j = 0;
+    for (let m = 0; m < N; m++) {
+      const s = L[n] * m / N;
+      while (j < n - 1 && L[j + 1] < s) j++;
+      const p = a[j], q = a[(j + 1) % n], t = (s - L[j]) / ((L[j + 1] - L[j]) || 1);
+      out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+    }
+    return out;
+  }
+  /* Holmausschnitte des Segments k für die 3D-Ansicht: je Ausschnitt die Kontur an
+   * Wurzel/Außen (gleich lang) und die Anfahrt. Taschen (Gurt ohne Steg) entfallen —
+   * sie sind Teil der Profilkontur, kein Loch im Kern. */
+  function wingSeg3DHoles(k, c, xoff) {
+    const holes = [];
+    const sh = a => a.map(p => ({ x: p.x + xoff, y: p.y }));
+    (state.spars || []).forEach(sp => {
+      if (sp.shape === 'pocket' || sp.shape === 'pocketWeb') return;
+      try {
+        const [ra, rb] = sparRange(sp); if (k < ra || k > rb) return;
+        const yco = sparYc(sp);
+        const gr = sparOnProfile(sp, c.root.pts, null, sparFromLE(sp, k, 'root'), yco, 'root', App.sparCoreOf(c.root.pts, k, 'root'));
+        const gt = sparOnProfile(sp, c.tip.pts, null, sparFromLE(sp, k, 'tip'), yco, 'tip', App.sparCoreOf(c.tip.pts, k, 'tip'));
+        if (!gr || !gt) return;
+        const pr_ = sparPolys(gr), pt_ = sparPolys(gt);
+        for (let q = 0; q < Math.min(pr_.length, pt_.length); q++) {
+          let r = pr_[q], t = pt_[q];
+          if (r.length !== t.length) { r = seg3dLoopN(r, 48); t = seg3dLoopN(t, 48); }
+          holes.push({ root: sh(r), tip: sh(t), leadR: !q && gr.lead ? sh(gr.lead) : null, leadT: !q && gt.lead ? sh(gt.lead) : null });
+        }
+      } catch (e) { /* Holm ohne gültige Geometrie: auslassen */ }
+    });
+    return holes;
   }
   function seg3dSourceData() {
     if (seg3d.source === 'wing') return wingSeg3DList();
@@ -200,8 +237,8 @@
     segs.forEach(S => {
       const n = S.root.length, active = S.k === activeK;
       const cr = S.root.map(p => cam(wp(p, S.z0))), ct = S.tip.map(p => cam(wp(p, S.z1)));
-      const addFace = (pts, c, wpts) => {
-        const a = pts[0], b = pts[1], q = pts[2];
+      const addFace = (pts, c, wpts, holes, nrm) => {
+        const a = (nrm || pts)[0], b = (nrm || pts)[1], q = (nrm || pts)[2];
         const ux = b.x - a.x, uy = b.y - a.y, uz = b.d - a.d, vx = q.x - a.x, vy = q.y - a.y, vz = q.d - a.d;
         let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
         const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
@@ -210,25 +247,38 @@
         let depth = 0; pts.forEach(p => depth += p.d); depth /= pts.length;
         // Welt-Schwerpunkt der Fläche (für die Trefferprüfung / Drehpunkt per Doppelklick).
         let wx = 0, wy = 0, wz = 0; wpts.forEach(p => { wx += p.x; wy += p.y; wz += p.z; });
-        faces.push({ pts, depth, lit, c, wc: { x: wx / wpts.length, y: wy / wpts.length, z: wz / wpts.length } });
+        faces.push({ pts, depth, lit, c, holes, wc: { x: wx / wpts.length, y: wy / wpts.length, z: wz / wpts.length } });
       };
+      const H = S.holes || [];
       const wr = S.root.map(p => wp(p, S.z0)), wt = S.tip.map(p => wp(p, S.z1));
       for (let i = 0; i < n - 1; i++) addFace([cr[i], cr[i + 1], ct[i + 1], ct[i]], active ? 'a' : (S.k % 2 ? 'b' : 'c'), [wr[i], wr[i + 1], wt[i + 1], wt[i]]);
       // Schließkante (letzter -> erster Punkt), falls die Kontur offen übergeben wurde.
       const closeGap = Math.hypot(S.root[n - 1].x - S.root[0].x, S.root[n - 1].y - S.root[0].y);
       if (closeGap > 1e-6) addFace([cr[n - 1], cr[0], ct[0], ct[n - 1]], active ? 'a' : (S.k % 2 ? 'b' : 'c'), [wr[n - 1], wr[0], wt[0], wt[n - 1]]);
-      const capOf = (arr, z) => {   // Deckel (Fächer um den Schwerpunkt)
+      const capOf = (arr, z, end) => {   // Deckel (Fächer um den Schwerpunkt)
         let gx = 0, gy = 0; arr.forEach(p => { gx += p.x; gy += p.y; }); gx /= arr.length; gy /= arr.length;
         const gw = { x: gx, y: gy, z }, g = cam(gw), ww = arr.map(p => wp(p, z)), cc = ww.map(cam);
+        if (H.length) {
+          // Mit Holmausschnitten: Deckel als EINE Fläche mit Löchern (gerade/ungerade-Füllung).
+          addFace(cc, 'cap', ww, H.map(h => h[end].map(p => cam(wp(p, z)))), [g, cc[0], cc[Math.floor(arr.length / 3)]]);
+          return;
+        }
         for (let i = 0; i < arr.length; i++) addFace([g, cc[i], cc[(i + 1) % arr.length]], 'cap', [gw, ww[i], ww[(i + 1) % arr.length]]);
       };
-      capOf(S.root, S.z0); capOf(S.tip, S.z1);
+      capOf(S.root, S.z0, 'root'); capOf(S.tip, S.z1, 'tip');
+      // Wände der Holmausschnitte (Tunnel durch das Segment).
+      H.forEach(h => {
+        const m = h.root.length, hr = h.root.map(p => wp(p, S.z0)), ht = h.tip.map(p => wp(p, S.z1));
+        const hcr = hr.map(cam), hct = ht.map(cam);
+        for (let i = 0; i < m; i++) { const j = (i + 1) % m; addFace([hcr[i], hcr[j], hct[j], hct[i]], 'h', [hr[i], hr[j], ht[j], ht[i]]); }
+      });
     });
     faces.sort((a, b) => b.depth - a.depth);
     const col = (c, lit) => {
       const l = 30 + 48 * lit;
       if (c === 'a') return 'hsl(210,85%,' + Math.round(38 + 34 * lit) + '%)';
       if (c === 'cap') return 'hsl(210,8%,' + Math.round(l - 2) + '%)';
+      if (c === 'h') return 'hsl(30,35%,' + Math.round(18 + 30 * lit) + '%)';
       return 'hsl(210,' + (c === 'b' ? 10 : 6) + '%,' + Math.round(l) + '%)';
     };
     ctx.lineJoin = 'round';
@@ -238,7 +288,11 @@
       ctx.beginPath();
       sp.forEach((s, i) => { if (i) ctx.lineTo(s.x, s.y); else ctx.moveTo(s.x, s.y); });
       ctx.closePath();
-      ctx.fillStyle = col(F.c, F.lit); ctx.fill();
+      (F.holes || []).forEach(hh => {
+        hh.forEach((c, i) => { const s = proj(c); if (i) ctx.lineTo(s.x, s.y); else ctx.moveTo(s.x, s.y); });
+        ctx.closePath();
+      });
+      ctx.fillStyle = col(F.c, F.lit); ctx.fill(F.holes ? 'evenodd' : 'nonzero');
       ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 0.6; ctx.stroke();
       pick.push({ sp, wc: F.wc });
     });
@@ -259,6 +313,19 @@
       const act = S.k === activeK;
       drawLoop(S.root, S.z0, act ? (App.PAL.profInner || '#4aa3ff') : 'rgba(160,176,196,.55)', act ? 2 : 0.8);
       drawLoop(S.tip, S.z1, act ? (App.PAL.profOuter || '#ffb454') : 'rgba(160,176,196,.55)', act ? 2 : 0.8);
+      // Holmausschnitte: Kontur an beiden Rippen, Anfahrt gestrichelt.
+      (S.holes || []).forEach(h => {
+        const sc = App.PAL.spar || '#ffb454';
+        drawLoop(h.root, S.z0, sc, act ? 1.6 : 1); drawLoop(h.tip, S.z1, sc, act ? 1.6 : 1);
+        ctx.setLineDash([4, 3]);
+        [[h.leadR, S.z0], [h.leadT, S.z1]].forEach(q => {
+          if (!q[0]) return;
+          const a = proj(cam(wp(q[0][0], q[1]))), b = proj(cam(wp(q[0][1], q[1])));
+          ctx.strokeStyle = App.PAL.sparLead || sc; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        });
+        ctx.setLineDash([]);
+      });
     });
     ctx.font = '11px system-ui'; ctx.textAlign = 'center';
     segs.forEach(S => {
@@ -648,6 +715,7 @@
       else if (tab === 'dxf') { if (App.renderDxf) App.renderDxf(); }
       else if (tab === 'model') { if (window.Model3D) Model3D.draw(); }
       else if (tab === 'schrift') { if (window.Schrift) Schrift.draw(); }
+      else if (tab === 'ausschnitt') { if (window.Ausschnitt) Ausschnitt.draw(); }
       else { applyView(); draw(); }
     } catch (e) { render(); }
   }

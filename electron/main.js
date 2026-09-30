@@ -70,6 +70,24 @@ function labelFor(p) {
   return { name: name, isNew: !fs.existsSync(p) };
 }
 
+// Sprache des Startfensters: steht in der Einstellungsdatei (prefs['hotwire-lang']).
+// Das Fenster erscheint vor der App, deshalb aus der zuletzt gewaehlten Datei lesen.
+function settingsLangOf(p) {
+  try {
+    const v = (JSON.parse(fs.readFileSync(p, 'utf-8')).prefs || {})['hotwire-lang'];
+    return (v === 'de' || v === 'en') ? v : null;
+  } catch (e) { return null; }
+}
+
+function detectLang(data) {
+  const cands = [data.last, data.defaultPath].concat(data.entries.map(function (e) { return e.path; }));
+  for (let i = 0; i < cands.length; i++) {
+    const v = cands[i] && settingsLangOf(cands[i]);
+    if (v) return v;
+  }
+  return 'de';
+}
+
 function listSettingsFiles() {
   const folder = exeDir();
   const defaultPath = path.join(folder, CFG.SETTINGS_NAME);
@@ -108,6 +126,8 @@ function rememberChoice(p) {
 function chooseSettingsFile() {
   return new Promise(function (resolve) {
     const data = listSettingsFiles();
+    data.lang = detectLang(data);
+    const en = data.lang === 'en';
     // Der Dialog erscheint IMMER - wie in launcher.py. Auch wenn erst eine
     // Einstellungsdatei existiert, ist er der einzige Weg zu "Neue Maschine...".
     const win = new BrowserWindow({
@@ -133,9 +153,9 @@ function chooseSettingsFile() {
     ipcMain.handle('chooser:list', function () { return data; });
     ipcMain.handle('chooser:browse', async function () {
       const r = await dialog.showOpenDialog(win, {
-        title: 'Einstellungsdatei waehlen',
+        title: en ? 'Choose settings file' : 'Einstellungsdatei waehlen',
         defaultPath: data.folder,
-        filters: [{ name: 'JSON-Einstellungen', extensions: ['json'] }],
+        filters: [{ name: en ? 'JSON settings' : 'JSON-Einstellungen', extensions: ['json'] }],
         properties: ['openFile'],
       });
       return (r.canceled || !r.filePaths.length) ? null : r.filePaths[0];

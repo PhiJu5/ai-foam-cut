@@ -155,7 +155,7 @@
     formScrDk: 6,              // Kopfdurchmesser (mm)
     formScrD: 3.4,             // Schaft-/Bohrungsdurchmesser (mm)
     formScrAng: 90,            // Senkkopf: Senkwinkel (°)
-    formScrTz: 0,              // Senkkopf: zusätzlich versenkt (zylindrisch mit Kopfdurchmesser, mm)
+    formScrTz: 0,              // Senkkopf: Höhenlage des Kegelstumpfs (mm, + = tiefer; Kegel läuft bis zur Oberfläche durch)
     formScrHk: 3,              // Zylinderkopf: Kopfhöhe = Senktiefe (mm)
     formScrTs: 2,              // Schaftbohrung unter dem Kopf: Tiefe (mm, 0 = keine)
     formPin: false,            // Passbohrungen an der Trennebene Tragfläche / Randbogen bzw. Winglet (getrennter Export)
@@ -1767,7 +1767,7 @@
    * damit leIndex weiter stimmt; auf der anderen Seite und außerhalb des Lochs fallen sie in einem Punkt zusammen.
    * Tiefenprofil d(r) um die Lochachse (r = Abstand von der Achse), senkrecht von der Oberfläche abgetragen (die
    * Krümmung der Fläche über den Kopfdurchmesser ist vernachlässigbar):
-   *   Senkkopf:     Zylinder Ø Kopf (Zusatzversenkung tz) -> Kegel (Senkwinkel) bis Ø Schaft -> Schaftbohrung (ts)
+   *   Senkkopf:     Kegel (Senkwinkel) von der Oberfläche durchgehend bis Ø Schaft (Höhenlage tz) -> Schaftbohrung (ts)
    *   Zylinderkopf: Zylinder Ø Kopf (Kopfhöhe hk) -> Schaftbohrung (ts)
    * Je Ring werden die Schnittpunkte des Profils exakt gesetzt (Lochrand, Stufen), Originalpunkte im Loch abgesenkt. */
   function screwRings(W, opt) {
@@ -1777,27 +1777,73 @@
     const M = R[0].pts.length, iLE = leIndex(M);
     if (M < 8 || iLE < 2 || R.some(r => r.pts.length !== M || r.pts.some(p => p.z != null))) return W;
     const Rh = Math.max(0.5, sc.dk / 2), rs = Math.min(Math.max(0.2, sc.d / 2), Rh - 0.05);
-    const senk = sc.head === 'senk';
-    const hc = senk ? (Rh - rs) / Math.tan(Math.max(10, Math.min(85, sc.ang / 2)) * Math.PI / 180) : 0;
-    const tz = senk ? sc.tz : sc.hk;   // zylindrischer Teil mit Kopfdurchmesser: Zusatzversenkung bzw. Kopfhöhe
-    // Tiefenprofil: Stützstellen (r, d) von der Achse nach außen; gleiches r = senkrechte Stufe
-    const NC = 4, prof = [[0, tz + hc + sc.ts], [rs, tz + hc + sc.ts], [rs, tz + hc]];
-    for (let j = 1; j <= NC; j++) { const r = rs + (Rh - rs) * j / (NC + 1); prof.push([r, tz + hc * (Rh - r) / (Rh - rs)]); }
-    prof.push([Rh, tz], [Rh, 0]);
-    const K = prof.length;
-    const dep = r => {
-      if (r >= Rh) return 0;
-      for (let k = 0; k + 1 < K; k++) { const a = prof[k], b = prof[k + 1]; if (r >= a[0] && r <= b[0]) return b[0] - a[0] > 1e-12 ? a[1] + (b[1] - a[1]) * (r - a[0]) / (b[0] - a[0]) : Math.min(a[1], b[1]); }
-      return 0;
+    const senk = sc.head === 'senk', sg = sc.side === 'bot' ? -1 : 1, act = sg > 0 ? 'top' : 'bot';
+    const kc = senk ? 1 / Math.tan(Math.max(10, Math.min(85, sc.ang / 2)) * Math.PI / 180) : 0;   // Kegelsteigung dy/dr
+    const hc = kc * (Rh - rs);
+    // Höhenlage: Senkkopf = Lage des Kopfdurchmessers unter der Oberfläche in der Lochachse (auch negativ), Zylinderkopf = Kopfhöhe
+    const tz = senk ? Math.max(sc.tz, 0.05 - hc) : sc.hk, deep = tz + hc + sc.ts;
+    // Tiefe der Werkzeugfläche unter der Bezugshöhe; der Kegel läuft über den Kopfdurchmesser hinaus weiter (bis zur Oberfläche)
+    const depT = r => r <= rs ? deep : senk ? tz + kc * (Rh - r) : tz;
+    const Rb = senk ? Math.min(3 * Rh + 5, Rh + (Math.max(0, tz) + 3) / Math.max(kc, 0.05) + 1) : Rh;   // größter möglicher Lochradius
+    const NC = 6, K = NC + 5;   // Punkte je Lochhälfte: Achse, Schaft unten/oben, NC Kegelpunkte, Rand unten/oben
+    const sides = P => ({ top: P.slice(0, iLE), bot: P.slice(iLE + 1).reverse() });   // beide in x fallend (Endleiste -> Nase)
+    const yOn = (O, x) => {   // Höhe der (unveränderten) Kontur an der Stelle x
+      for (let i = 0; i + 1 < O.length; i++) { const a = O[i], b = O[i + 1]; if ((a.x - x) * (b.x - x) <= 0) { const d = b.x - a.x; return Math.abs(d) < 1e-12 ? a.y : a.y + (b.y - a.y) * (x - a.x) / d; } }
+      return Math.abs(O[0].x - x) < Math.abs(O[O.length - 1].x - x) ? O[0].y : O[O.length - 1].y;
+    };
+    const ts = W.tipStart == null ? R.length - 1 : Math.max(0, Math.min(R.length - 1, W.tipStart));
+    const zMin = R[0].z, zMax = R[ts].z;
+    const ringAt = z => {   // Ring auf der Regelfläche an beliebiger Stelle z (innerhalb der Tragfläche)
+      z = Math.max(zMin, Math.min(zMax, z));
+      for (let q = 0; q + 1 <= ts; q++) if (R[q].z <= z && z <= R[q + 1].z && R[q + 1].z - R[q].z > 1e-9) return lerpRing(R[q].pts, R[q + 1].pts, (z - R[q].z) / (R[q + 1].z - R[q].z));
+      return R[z <= zMin ? 0 : ts].pts;
     };
     // Lochmitten: x aus % der Wurzelsehne (ab Nase), z am Stoß (Wurzel) oder im Abstand dz davon
     const P0 = R[0].pts, LE0 = P0[iLE], TE0 = teMid(P0), zH = R[0].z + (sc.pos === 'sides' ? sc.dz : 0);
-    const holes = sc.xs.map(pct => ({ x: LE0.x + (TE0.x - LE0.x) * Math.max(0.02, Math.min(0.98, pct / 100)), z: zH }));
+    const hs = sc.xs.map(pct => ({ x: LE0.x + (TE0.x - LE0.x) * Math.max(0.02, Math.min(0.98, pct / 100)), z: zH })).sort((a, b) => b.x - a.x);
+    /* Lochbreite [uA, uB] (u = x − Lochmitte) im Ring mit Abstand a von der Lochachse; null = Ring liegt außerhalb.
+     * Zylinderkopf: Kreis mit Kopfdurchmesser. Senkkopf: dort, wo der (durchlaufende) Kegel unter der Oberfläche liegt —
+     * der Lochrand ist die Schnittlinie Kegel / Oberfläche, es entsteht keine Wand und keine Kante. */
+    const span = (h, O, a) => {
+      if (!senk) { if (a >= Rh) return null; const w = Math.sqrt(Rh * Rh - a * a); return [-w, w]; }
+      if (a >= Rb) return null;
+      const f = u => sg * (yOn(O, h.x + u) - (h.y0 - sg * depT(Math.hypot(u, a))));
+      const n = Math.max(40, Math.ceil(2 * Rb / 0.1)); let best = -1, fb = 1e-9;
+      const uAt = i => -Rb + 2 * Rb * i / n;
+      for (let i = 0; i <= n; i++) { const v = f(uAt(i)); if (v > fb) { fb = v; best = i; } }
+      if (best < 0) return null;
+      const root = (ui, uo) => { for (let q = 0; q < 40; q++) { const m = (ui + uo) / 2; if (f(m) > 0) ui = m; else uo = m; } return (ui + uo) / 2; };
+      let ia = best, ib = best; while (ia > 0 && f(uAt(ia - 1)) > 0) ia--; while (ib < n && f(uAt(ib + 1)) > 0) ib++;
+      return [ia > 0 ? root(uAt(ia), uAt(ia - 1)) : -Rb, ib < n ? root(uAt(ib), uAt(ib + 1)) : Rb];
+    };
+    for (const h of hs) {
+      const Oc = sides(ringAt(h.z))[act];
+      if (senk) h.y0 = yOn(Oc, h.x);   // Bezugshöhe: Oberfläche in der Lochachse
+      else {   // Zylinderkopf: tiefster Punkt des Lochrands (Unterseite: höchster) -> Wandhöhe überall >= 0
+        h.y0 = sg * Infinity;
+        for (let q = -24; q <= 24; q++) { const a = Rh * Math.sin(Math.PI / 2 * q / 24), O = sides(ringAt(h.z + a))[act], w = Math.sqrt(Math.max(0, Rh * Rh - a * a)); for (const x of [h.x + w, h.x - w]) { const y = yOn(O, x); h.y0 = sg > 0 ? Math.min(h.y0, y) : Math.max(h.y0, y); } }
+      }
+      // Ausdehnung des Lochs in Spannweitenrichtung (Senkkopf: Bisektion auf der Regelfläche)
+      const ext = dir => {
+        if (!senk) return Rh;
+        const inH = a => !!span(h, sides(ringAt(h.z + dir * a))[act], a);
+        if (!inH(0)) return 0;
+        let lo = 0, hi = Rb; if (inH(hi)) return hi;
+        for (let q = 0; q < 40; q++) { const m = (lo + hi) / 2; if (inH(m)) lo = m; else hi = m; }
+        return hi;
+      };
+      h.zP = ext(1); h.zM = ext(-1);
+      const cnt = O => { let c = 0; while (c < O.length && O[c].x > h.x) c++; return c; };
+      const S = sides(ringAt(h.z)); h.cTop = cnt(S.top); h.cBot = cnt(S.bot);
+    }
     // Zusätzliche Ringe über die Lochbreite (Regelfläche zwischen den Nachbarringen), nur bis zur letzten Rippe
-    const ts = W.tipStart == null ? R.length - 1 : Math.max(0, Math.min(R.length - 1, W.tipStart));
-    const zMin = R[0].z, zMax = R[ts].z, NZ = 8, out = R.slice(), added = [];
-    for (let k = -NZ; k <= NZ; k++) {
-      const z = zH + Rh * k / NZ;
+    const NZ = 12, out = R.slice(), added = [], zList = [];
+    for (const h of hs) for (let k = -NZ; k <= NZ; k++) {
+      const s = Math.sin(Math.PI / 2 * k / NZ);   // gleichmäßig im Umfangswinkel -> runder Lochrand
+      zList.push(h.z + (k < 0 ? h.zM : h.zP) * s);
+      if (k) zList.push(h.z + rs * s);   // ebenso für den Schaftkreis (Stufe)
+    }
+    for (const z of zList) {
       if (z < zMin - 1e-9 || z > zMax + 1e-9 || out.some(r => Math.abs(r.z - z) < 1e-6)) continue;
       let i = -1; for (let q = 0; q + 1 < out.length; q++) if (out[q].z <= z && z <= out[q + 1].z && out[q + 1].z - out[q].z > 1e-9) { i = q; break; }
       if (i < 0) continue;
@@ -1805,42 +1851,66 @@
       out.splice(i + 1, 0, { pts: lerpRing(out[i].pts, out[i + 1].pts, t), z }); added.push(z);
     }
     const shift = k => k == null ? k : k + added.filter(z => z < R[k].z).length;
-    const sgSide = sc.side === 'bot' ? -1 : 1;
-    // Eine Profilseite (Punkte in x fallend, Endleiste -> Nase): Lochquerschnitt einsetzen (sg = ±1) bzw. nur Füllpunkte (sg = 0)
-    const side = (O, sg, z) => {
+    /* Feste Indexlage je Loch (aus dem Ring in Lochmitte): der Block der 2·K Lochpunkte sitzt in ALLEN Ringen an
+     * derselben Stelle der Punktfolge (vor dem Originalpunkt c). Originalpunkte, die in einem Ring innerhalb des
+     * Lochs lägen, rücken auf den Lochrand (fallen dort zusammen) — so verbindet der Loft immer gleiche Flächen
+     * miteinander (saubere Kegel-/Zylinderflächen, keine schräg über die Stufen laufenden Dreiecke).
+     * Alle Tiefen zählen ABSOLUT ab der Bezugshöhe h.y0: Kegel, Senkungsgrund und Schaftbohrung sind exakte Dreh- bzw.
+     * ebene Flächen um die senkrechte Lochachse, wie beim Abziehen eines Zylinder-/Kegelstumpf-Körpers. */
+    const side = (O, on, z, ck) => {
       let xMax = -Infinity, xMin = Infinity; for (const p of O) { if (p.x > xMax) xMax = p.x; if (p.x < xMin) xMin = p.x; }
-      const sAt = x => {   // Höhe der (unveränderten) Kontur an der Stelle x
-        for (let i = 0; i + 1 < O.length; i++) { const a = O[i], b = O[i + 1]; if ((a.x - x) * (b.x - x) <= 0) { const d = b.x - a.x; return Math.abs(d) < 1e-12 ? a.y : a.y + (b.y - a.y) * (x - a.x) / d; } }
-        return Math.abs(O[0].x - x) < Math.abs(O[O.length - 1].x - x) ? O[0].y : O[O.length - 1].y;
-      };
-      let L = O.map(p => ({ x: p.x, y: p.y }));
-      for (const h of holes) {
-        const a = Math.abs(z - h.z), inside = sg !== 0 && a < Rh, w = inside ? Math.sqrt(Rh * Rh - a * a) : 0;
-        const samp = (k, dir) => {
-          const r0 = prof[k][0], r = Math.max(r0, a), d = inside ? (r0 >= a ? prof[k][1] : dep(a)) : 0;
-          const x = Math.max(xMin, Math.min(xMax, h.x + dir * Math.sqrt(Math.max(0, r * r - a * a))));
-          return { x, y: sAt(x) - sg * d, ins: true };
-        };
-        const B = [];
-        for (let k = K - 1; k >= 0; k--) B.push(samp(k, 1));
-        for (let k = 0; k < K; k++) B.push(samp(k, -1));
-        if (inside) for (const p of L) { if (p.ins) continue; const u = p.x - h.x; if (Math.abs(u) < w) p.y -= sg * dep(Math.sqrt(u * u + a * a)); }
-        // in x-Reihenfolge einsortieren (Fenster ab dem ersten Punkt hinter dem Lochrand)
-        let i = 0; while (i < L.length && L[i].x >= B[0].x) i++;
-        const N = L.slice(0, i); let j = 0;
-        while (j < B.length) { if (i < L.length && L[i].x >= B[j].x) N.push(L[i++]); else N.push(B[j++]); }
-        while (i < L.length) N.push(L[i++]);
-        L = N;
+      const sp = hs.map(h => on ? span(h, O, Math.abs(z - h.z)) : null);
+      const L = [];
+      for (let i = 0; i <= O.length; i++) {
+        hs.forEach((h, q) => {
+          if (h[ck] !== i) return;
+          const a = Math.abs(z - h.z), I = sp[q];
+          if (!I) {   // außerhalb des Lochs: Block fällt in einem Punkt zwischen den beiden Nachbarn zusammen
+            const lo = i < O.length ? O[i].x : xMin, hi = i > 0 ? O[i - 1].x : xMax, x = Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), h.x));
+            const y = yOn(O, x); for (let k = 0; k < 2 * K; k++) L.push({ x, y });
+            return;
+          }
+          const uc = Math.max(I[0], Math.min(I[1], 0)), us = a < rs ? Math.sqrt(rs * rs - a * a) : 0;
+          const half = dir => {   // von der Lochmitte nach außen: K Punkte
+            const uE = dir > 0 ? I[1] : -I[0], u0 = Math.max(dir * uc, Math.min(us, uE)), H = [];
+            const pt = (u, d, surf) => { const x = Math.max(xMin, Math.min(xMax, h.x + dir * u)), ys = yOn(O, x); if (surf) return { x, y: ys }; const yt = h.y0 - sg * d; return { x, y: sg * (ys - yt) < 0 ? ys : yt }; };
+            const cone = u => senk ? tz + kc * (Rh - Math.hypot(u, a)) : tz;
+            H.push(pt(dir * uc, a < rs ? deep : cone(uc)));          // Achse (bzw. Mitte des Schnitts)
+            H.push(pt(u0, a < rs ? deep : cone(u0)));                // Schaftbohrung: Grund außen
+            H.push(pt(u0, cone(u0)));                                // Schaftbohrung: Oberkante = Beginn Kegel / Senkungsgrund
+            for (let j = 1; j <= NC; j++) { const u = u0 + (uE - u0) * j / (NC + 1); H.push(pt(u, cone(u))); }   // Schnitt = Hyperbel -> gleichmäßig in u
+            H.push(senk ? pt(uE, 0, true) : pt(uE, tz));             // Rand unten (Zylinderkopf: Fuß der Wand)
+            H.push(pt(uE, 0, true));                                 // Lochrand auf der Oberfläche
+            return H;
+          };
+          L.push(...half(1).reverse(), ...half(-1));
+        });
+        if (i === O.length) break;
+        let x = O[i].x, moved = false;
+        hs.forEach((h, q) => {
+          const I = sp[q]; if (!I) return;
+          if (i < h[ck]) { if (x < h.x + I[1]) { x = Math.min(xMax, h.x + I[1]); moved = true; } }
+          else if (x > h.x + I[0]) { x = Math.max(xMin, h.x + I[0]); moved = true; }
+        });
+        L.push(moved ? { x, y: yOn(O, x) } : { x: O[i].x, y: O[i].y });
       }
-      return L.map(p => ({ x: p.x, y: p.y }));
+      return L;
     };
     const rings = out.map(r => {
-      const P = r.pts, top = P.slice(0, iLE), bot = P.slice(iLE + 1).reverse();
-      const Q = side(top, sgSide > 0 ? 1 : 0, r.z).concat([P[iLE]], side(bot, sgSide < 0 ? -1 : 0, r.z).reverse());
+      const P = r.pts, S = sides(P);
+      const Q = side(S.top, sg > 0, r.z, 'cTop').concat([P[iLE]], side(S.bot, sg < 0, r.z, 'cBot').reverse());
       Q.psTip = P.psTip;
       return Object.assign({}, r, { pts: Q });
     });
-    return Object.assign({}, W, { rings, tipStart: shift(W.tipStart), fadeStart: shift(W.fadeStart), psIdx: null, screws: holes.map(h => ({ x: h.x, z: h.z, r: Rh })) });
+    // Vorschau (glMesh): Dreiecke der Senkung = eigene Glättungsgruppe -> Lochrand bleibt eine scharfe Kante
+    const screws = hs.map(h => ({ x: h.x, z: h.z, r: Rb, y0: h.y0, inside: (cx, cy, cz) => {
+      const r = Math.hypot(cx - h.x, Math.abs(cz) - h.z); if (r > Rb) return false;
+      if (sg * (h.y0 - cy) > deep + 0.01) return false;   // andere Profilseite
+      if (r <= rs + 1e-3 && sg * (h.y0 - cy) > 0.01) return true;
+      if (!senk) return r < Rh && sg * (h.y0 - cy) > -1e-6;
+      return Math.abs(cy - (h.y0 - sg * depT(r))) < 0.06;
+    } }));
+    return Object.assign({}, W, { rings, tipStart: shift(W.tipStart), fadeStart: shift(W.fadeStart), psIdx: null, screws });
   }
   /* Trennfläche vor der Nase / hinter der Endleiste, Höhe an der Stelle x (Sehnenrichtung):
    *   yF(LE, x, P): vor der Nase (x < LE.x), yR(tp, x, P): hinter der Endleiste (x > tp.x). P = Punktliste des Rings
@@ -2680,7 +2750,7 @@
       stkT: { on: !!C('formStkT'), pts: stkPts('formStkT') },
       scr: { on: !!C('formScrOn'), pos: C('formScrPos') === 'sides' ? 'sides' : 'center', dz: Math.max(0, +C('formScrDz') || 0), side: C('formScrSide') === 'bot' ? 'bot' : 'top',
         xs: scrXs(), head: C('formScrHead') === 'zyl' ? 'zyl' : 'senk', dk: Math.max(1, +C('formScrDk') || 0), d: Math.max(0.5, +C('formScrD') || 0),
-        ang: Math.max(20, Math.min(170, +C('formScrAng') || 90)), tz: Math.max(0, +C('formScrTz') || 0), hk: Math.max(0.2, +C('formScrHk') || 0), ts: Math.max(0, +C('formScrTs') || 0) }
+        ang: Math.max(20, Math.min(170, +C('formScrAng') || 90)), tz: Math.max(-20, Math.min(20, +C('formScrTz') || 0)), hk: Math.max(0.2, +C('formScrHk') || 0), ts: Math.max(0, +C('formScrTs') || 0) }
     };
   }
   // Schraublöcher: Lage je Loch in % der Wurzelsehne (Liste auf die Anzahl gekürzt / mit Vorgaben aufgefüllt)
@@ -3399,7 +3469,7 @@
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const L = Math.hypot(nx, ny, nz) || 1;
       fn[i * 3] = nx / L; fn[i * 3 + 1] = ny / L; fn[i * 3 + 2] = nz / L; ar[i] = L;
       // Schraublöcher: Dreiecke in der Senkung bilden eine eigene Glättungsgruppe (Lochrand bleibt eine scharfe Kante)
-      if (scr) { const cx = (v[o] + v[o + 3] + v[o + 6]) / 3, cz = Math.abs(v[o + 2] + v[o + 5] + v[o + 8]) / 3; for (const h of scr) if (Math.hypot(cx - h.x, cz - h.z) < h.r) { grp[i] = 1; break; } }
+      if (scr) { const cx = (v[o] + v[o + 3] + v[o + 6]) / 3, cy = (v[o + 1] + v[o + 4] + v[o + 7]) / 3, cz = (v[o + 2] + v[o + 5] + v[o + 8]) / 3; for (const h of scr) if (h.inside(cx, cy, cz)) { grp[i] = 1; break; } }
       for (let c = 0; c < 3; c++) { const k = kOf(v[o + c * 3], v[o + c * 3 + 1], v[o + c * 3 + 2]); key[i * 3 + c] = k; let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(i); }
     }
     const COS0 = Math.cos(40 * Math.PI / 180), COS1 = Math.cos(25 * Math.PI / 180);
@@ -5901,8 +5971,8 @@
         else {
           numRow(sc.body, 'Senkwinkel (°)', () => C('formScrAng'), v => { S('formScrAng', v); rr(); }, { step: 1, min: 20, max: 170, norender: true,
             hint: '90° für metrische Senkschrauben (DIN 7991 / ISO 10642), 82° für zöllige.' });
-          numRow(sc.body, 'zusätzlich versenkt (mm)', () => C('formScrTz'), v => { S('formScrTz', v); rr(); }, { step: 0.5, min: 0, norender: true,
-            hint: '0 = der Kopf schließt bündig mit der Oberfläche ab. Größer: zylindrische Senkung mit Kopfdurchmesser vor dem Kegel, der Kopf liegt um dieses Maß unter der Fläche (z. B. für Spachtel oder Lack).' });
+          numRow(sc.body, 'Höhenlage des Kegels (mm)', () => C('formScrTz'), v => { S('formScrTz', v); rr(); }, { step: 0.25, norender: true,
+            hint: 'Lage des Kegelstumpfs in der Höhe: 0 = der Kopfdurchmesser liegt auf Höhe der Oberfläche in der Lochachse (Kopf bündig). Positiv = der Kegel sitzt tiefer (Kopf versenkt), negativ = höher. Der Kegel läuft immer bis zur Oberfläche durch — es entsteht keine senkrechte Wand und keine Kante; bei tieferer Lage wird die Senkung an der Oberfläche entsprechend größer.' });
         }
         numRow(sc.body, 'Tiefe der Schaftbohrung (mm)', () => C('formScrTs'), v => { S('formScrTs', v); rr(); }, { step: 0.5, min: 0, norender: true,
           hint: 'Sackloch mit Bohrungsdurchmesser unter dem Kopf als Markierung für das spätere Durchbohren. 0 = keine (Senkung endet am Schaftdurchmesser).' });

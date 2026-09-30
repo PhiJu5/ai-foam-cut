@@ -66,11 +66,16 @@
       else if (name === 'model' && window.Model3D) Model3D.show();
       else if (name === 'form' && window.Formenbau) Formenbau.show();
       else if (name === 'rumpf' && window.Rumpf) Rumpf.show();
+      else if (name === 'rpro' && window.RumpfPro) RumpfPro.show();
+      else if (name === 'rprob' && window.RproSpanten) RproSpanten.show();
       else if (name === 'fraese' && window.Fraese) Fraese.show();
       else if (name === 'schrift' && window.Schrift) Schrift.show();
+      else if (name === 'ausschnitt' && window.Ausschnitt) Ausschnitt.show();
       else if (name === 'aero' && window.Aero) Aero.show();
       else if (name === 'ausl' && window.Auslegung) Auslegung.show();
       else if (name === 'foildb' && window.FoilDB) FoilDB.show();
+    else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
+      else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
     });
   }
   // Den gerade sichtbaren Reiter vollständig neu zeichnen (mit den aktuellen
@@ -91,11 +96,15 @@
     else if (name === 'model' && window.Model3D) Model3D.show();
     else if (name === 'form' && window.Formenbau) Formenbau.show();
     else if (name === 'rumpf' && window.Rumpf) Rumpf.show();
+    else if (name === 'rpro' && window.RumpfPro) RumpfPro.show();
+    else if (name === 'rprob' && window.RproSpanten) RproSpanten.show();
     else if (name === 'fraese' && window.Fraese) Fraese.show();
     else if (name === 'schrift' && window.Schrift) Schrift.show();
+    else if (name === 'ausschnitt' && window.Ausschnitt) Ausschnitt.show();
     else if (name === 'aero' && window.Aero) Aero.show();
     else if (name === 'ausl' && window.Auslegung) Auslegung.show();
     else if (name === 'foildb' && window.FoilDB) FoilDB.show();
+    else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
     else if (name === 'cut' && App.renderBlock) App.renderBlock();
   }
   function wireUp() {
@@ -113,6 +122,7 @@
       else if (state.cfg.gcodeSource === 'model') nm = (window.Model3D ? Model3D.baseName() : 'modell') + '_seg' + ((mgCfg().seg || 0) + 1) + '.gcode';
       else if (state.cfg.gcodeSource === 'plate') nm = (window.Model3D ? Model3D.baseName() : 'modell') + '_platte.gcode';
       else if (state.cfg.gcodeSource === 'schrift' && window.Schrift) nm = Schrift.fileBase() + '.gcode';
+      else if (state.cfg.gcodeSource === 'ausschnitt' && window.Ausschnitt) nm = Ausschnitt.fileBase() + '.gcode';
       else nm = (wt || 'tragflaeche') + '_seg' + (activeIdx() + 1) + '.gcode';
       // Vor dem Speichern Achsnamen abfragen (links/rechts, horizontal/vertikal).
       App.exportGcodeAxes(nm, () => (state.lastGcode && state.lastGcode.text) || '');
@@ -229,11 +239,12 @@
       if (!hasGcode) return;
       if (!src) {   // Kürzel: Quelle aus dem aktuellen Reiter ableiten
         const t = state.activeTab;
-        src = t === 'neg' ? 'neg' : t === 'dxf' ? 'dxf' : t === 'model' ? (state.cfg.gcodeSource === 'plate' ? 'plate' : 'model') : t === 'core' ? 'core' : t === 'schrift' ? 'schrift' : null;
+        src = t === 'neg' ? 'neg' : t === 'dxf' ? 'dxf' : t === 'model' ? (state.cfg.gcodeSource === 'plate' ? 'plate' : 'model') : t === 'core' ? 'core' : t === 'schrift' ? 'schrift' : t === 'ausschnitt' ? 'ausschnitt' : null;
       }
       const ok = src === 'core' || src === 'neg' || (src === 'dxf' && App.dxfGcode)
         || ((src === 'model' || src === 'plate') && window.Model3D && Model3D.hasModel())
-        || (src === 'schrift' && window.Schrift);
+        || (src === 'schrift' && window.Schrift)
+        || (src === 'ausschnitt' && window.Ausschnitt);
       if (src === 'model' && !ok) { App.toast(T('Kein 3D-Modell geladen — zuerst eine STL-Datei laden.')); return; }
       if (ok) { state.cfg.gcodeSource = src; if (src !== 'model') state.cfg.gcodeSourceLast = src; }
       switchView('gcode');
@@ -378,7 +389,7 @@
       sel.onchange = () => { state.cfg.ribShow = sel.value; document.querySelectorAll('select[data-show]').forEach(s => s.value = sel.value); render(); };
     });
     window.addEventListener('resize', render);
-    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Rumpf && state.activeTab === 'rumpf') Rumpf.resize(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); if (window.Aero && state.activeTab === 'aero') Aero.resize(); });
+    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Rumpf && state.activeTab === 'rumpf') Rumpf.resize(); if (window.RumpfPro && state.activeTab === 'rpro') RumpfPro.resize(); if (window.RproSpanten && state.activeTab === 'rprob') RproSpanten.show(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); if (window.Ausschnitt && state.activeTab === 'ausschnitt') Ausschnitt.resize(); if (window.Aero && state.activeTab === 'aero') Aero.resize(); });
   }
 
   // Beim Start: gespeicherte Maschinen-/Werkstoff-Einstellungen laden.

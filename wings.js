@@ -510,7 +510,7 @@
     const L = wingList();
     const grp = App.grp, hint = App.hint;
     // --- Folge-Reiter: nur Auswahl ---
-    const s = grp('Tragfläche', true, 'wing core neg rib form dxfexport rumpf fraese', { key: 'wingsSelect', alwaysOpen: true });
+    const s = grp('Tragfläche', true, 'wing core neg rib form dxfexport rumpf rpro fraese', { key: 'wingsSelect', alwaysOpen: true });
     {
       const row = document.createElement('div'); row.className = 'row full';
       row.appendChild(wingSelectEl()); s.body.appendChild(row);

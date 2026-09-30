@@ -165,8 +165,10 @@
   // Vorlage für ein Segment-Snapshot (Daten des Rippenpaars k..k+1).
   function dxfNewSeg(src) {
     const s = { sync: [], start: 0, dir: 1, density: 240, densMode: 'total', perMM: 1,
-      span: 300, kerf: true, safeLead: true, pathEdit: null,
-      block: { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10, zf: null, zr: null, zt: null, zb: null } };
+      span: 300, kerf: true, safeLead: true, approach: 'rear', approachDist: 10, pathEdit: null,
+      // outOn: eigene Blockgeometrie für AUSSEN ist Standard (neue Segmente); Altstände
+      // ohne das Feld bleiben beim geraden Block (dxfLoadActive: !!b.outOn).
+      block: { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10, zf: null, zr: null, zt: null, zb: null, outOn: true, out: null } };
     if (src) { Object.keys(src).forEach(k => { if (k !== 'block') s[k] = src[k]; }); if (src.block) Object.assign(s.block, src.block); }
     if (s.block.out) s.block.out = Object.assign({}, s.block.out);   // AUSSEN-Blockgeometrie nicht teilen
     return s;
@@ -208,9 +210,11 @@
       if (d.outerName) d.ribs.push({ layer: d.outerName, off: d.outerOff || { x: 0, y: 0 } });
       d.segs = [dxfNewSeg({ sync: d.sync || [], start: d.start, dir: d.dir, density: d.density,
         densMode: d.densMode, perMM: d.perMM, span: d.span, kerf: d.kerf, safeLead: d.safeLead,
+        approach: d.approach || 'rear', approachDist: d.approachDist != null ? d.approachDist : 10,
         pathEdit: d.pathEdit,
         block: { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin,
-                 zf: d.blockZF != null ? d.blockZF : null, zr: d.blockZR != null ? d.blockZR : null, zt: d.blockZT != null ? d.blockZT : null, zb: d.blockZB != null ? d.blockZB : null } })];
+                 zf: d.blockZF != null ? d.blockZF : null, zr: d.blockZR != null ? d.blockZR : null, zt: d.blockZT != null ? d.blockZT : null, zb: d.blockZB != null ? d.blockZB : null,
+                 outOn: !!d.blockOutOn, out: d.blockOut || null } })];
       d.activeSeg = 0; d.ribModel = 2;
     }
     if (d.ribModel !== 2) dxfMigratePairs();
@@ -241,7 +245,7 @@
   // Flachfelder (aktives Segment) in den Snapshot zurückschreiben.
   function dxfStashActive() {
     const d = state.dxf; const s = d.segs && d.segs[d.activeSeg]; if (!s) return;
-    ['start', 'dir', 'density', 'densMode', 'perMM', 'span', 'kerf', 'safeLead', 'pathEdit'].forEach(k => s[k] = d[k]);
+    ['start', 'dir', 'density', 'densMode', 'perMM', 'span', 'kerf', 'safeLead', 'approach', 'approachDist', 'pathEdit'].forEach(k => s[k] = d[k]);
     s.sync = d.sync;
     s.block = { lenX: d.blockLenX || 0, heightY: d.blockHeightY || 0, ovF: d.blockOvF, ovR: d.blockOvR, margin: d.blockMargin,
                 zf: d.blockZF != null ? d.blockZF : null, zr: d.blockZR != null ? d.blockZR : null, zt: d.blockZT != null ? d.blockZT : null, zb: d.blockZB != null ? d.blockZB : null,
@@ -254,7 +258,7 @@
     d.innerName = ri ? ri.layer : null; d.outerName = ro ? ro.layer : null;
     d.innerOff = ri ? ri.off : { x: 0, y: 0 }; d.outerOff = ro ? ro.off : { x: 0, y: 0 };
     if (!s) return;
-    ['start', 'dir', 'density', 'densMode', 'perMM', 'span', 'kerf', 'safeLead', 'pathEdit'].forEach(k2 => d[k2] = s[k2]);
+    ['start', 'dir', 'density', 'densMode', 'perMM', 'span', 'kerf', 'safeLead', 'approach', 'approachDist', 'pathEdit'].forEach(k2 => d[k2] = s[k2]);
     d.sync = s.sync || (s.sync = []);
     const b = s.block || (s.block = { lenX: 0, heightY: 0, ovF: 20, ovR: 20, margin: 10 });
     d.blockLenX = b.lenX || 0; d.blockHeightY = b.heightY || 0;
@@ -321,6 +325,13 @@
     const d = state.dxf;
     return !!(d.innerName && d.outerName && d.innerName === d.outerName
       && d.inner && d.outer && d.inner.length === d.outer.length && d.inner.length > 2);
+  }
+  // Anfahrweg des aktiven Segments: 'rear' (waagrecht von hinten, Standard) | 'top' | 'front' | 'bottom'.
+  function dxfApproachDir(d) { d = d || state.dxf; return ['top', 'front', 'bottom'].indexOf(d.approach) >= 0 ? d.approach : 'rear'; }
+  // Gleicher Querschnitt mit selbst gewähltem Startpunkt: EIN Paar {i, i}.
+  function dxfStartPicked() {
+    const d = state.dxf;
+    return dxfSameSection() && d.sync.length === 1 && d.sync[0].i === d.sync[0].j && !d.pathEdit;
   }
   function dxfSyncedRaw() {
     const d = state.dxf;
@@ -666,7 +677,7 @@
     const sy = App.grp('Synchronpunkte', true, 'dxf');
     // Gleicher Querschnitt (INNEN = AUSSEN): Synchronpunkte sind nicht nötig —
     // die Bahn und der G-Code entstehen direkt. Deutlich sichtbare Meldung.
-    if (dxfSameSection() && !d.sync.length) {
+    if (dxfSameSection() && (!d.sync.length || dxfStartPicked())) {
       const note = document.createElement('div');
       note.style.cssText = 'margin:0 0 8px;padding:8px 10px;border-radius:6px;'
         + 'background:rgba(87,211,140,.14);border:1px solid var(--accent);color:var(--txt);font-size:12px;line-height:1.4';
@@ -674,6 +685,31 @@
         + T('Synchronpunkte entfallen — die Schnittbahn wird direkt erzeugt, der G-Code kann sofort erstellt werden.');
       sy.body.appendChild(note);
     }
+    // Gleicher Querschnitt: statt Synchronpaaren nur den Startpunkt wählen (ein Klick
+    // auf die Kontur -> Paar {i, i}). „Automatisch" löscht ihn wieder (sichere Anfahrt).
+    const startOnly = dxfSameSection() && (!d.sync.length || dxfStartPicked());
+    if (startOnly) {
+      App.subhead(sy.body, 'Startpunkt');
+      const srow = document.createElement('div'); srow.style.cssText = 'display:flex;gap:6px';
+      const bsp = document.createElement('button');
+      bsp.textContent = d.syncMode ? T('■ Startpunkt wählen: AN') : T('▶ Startpunkt wählen');
+      bsp.className = d.syncMode ? '' : 'primary'; bsp.style.flex = '1 1 0';
+      if (d.syncMode) { bsp.style.background = 'var(--accent)'; bsp.style.color = '#04121f'; bsp.style.borderColor = 'var(--accent)'; }
+      bsp.onclick = () => { d.syncMode = !d.syncMode; if (d.syncMode) { d.edit.on = false; d.pEdit.on = false; d.pEdit.drag = null; } else { d.syncHover = null; } d.pick = null; App.buildSidebar(); renderDxf(); };
+      srow.appendChild(bsp);
+      if (dxfStartPicked()) {
+        const bau = document.createElement('button'); bau.textContent = T('Automatisch'); bau.style.flex = '0 0 auto';
+        bau.title = T('Gewählten Startpunkt verwerfen — der Schnitt beginnt wieder automatisch (siehe „Anfahrt/Ausfahrt sicher").');
+        bau.onclick = () => { dxfPushUndo(); d.sync = []; d.start = 0; d.pick = null; d.syncMode = false; d.syncHover = null; App.buildSidebar(); renderDxf(); App.render(); };
+        srow.appendChild(bau);
+      }
+      sy.body.appendChild(srow);
+      App.hint(sy.body, dxfStartPicked()
+        ? T('Startpunkt: Punkt ') + d.sync[0].i + T(' (selbst gewählt). Hier beginnt und endet der Umlauf; die Anfahrt kommt aus der eingestellten Richtung (Gruppe „Schnitt").')
+        : (d.syncMode ? 'Wahlmodus AKTIV: einen Punkt der Kontur anklicken — dort beginnt der Schnitt.'
+          : 'Automatisch: Beginn am Punkt, der der Anfahrrichtung am nächsten liegt (bei „Anfahrt/Ausfahrt sicher"), sonst am ersten Punkt der Kontur. „Startpunkt wählen" legt ihn selbst fest.'));
+    }
+    if (!startOnly) {
     // Setzmodus starten/stoppen — im aktiven Modus setzt der Klick Synchronpunkte.
     const bsm = document.createElement('button');
     bsm.textContent = d.syncMode ? T('■ Synchronpunkte setzen: AN') : T('▶ Synchronpunkte setzen starten');
@@ -749,6 +785,7 @@
       bc.onclick = () => { dxfPushUndo(); d.sync = []; d.start = 0; d.pick = null; App.buildSidebar(); renderDxf(); App.render(); };
       sy.body.appendChild(bc);
     }
+    }   // !startOnly
     // Punktverteilung der synchronen Bahn (alles rund um Punkte gehört hierher).
     App.subhead(sy.body, 'Punktverteilung der Bahn');
     App.selectRow(sy.body, 'Verteilung', [['total', 'Punkte gesamt'], ['permm', 'Punktdichte (Pkt/mm)']],
@@ -778,11 +815,26 @@
       'Zeichnet die tatsächliche Draht-Bahn (INNEN/AUSSEN synchronisiert, inkl. Abbrand-Versatz) '
       + 'zusätzlich zu den Profilen.');
     if (d.showSpur && App.kerfTrueRow) App.kerfTrueRow(op.body, 'dxf');
+    App.selectRow(op.body, 'Anfahrt von', [['rear', 'hinten (waagrecht)'], ['top', 'oben (senkrecht)'],
+       ['front', 'vorne (waagrecht)'], ['bottom', 'unten (senkrecht)']],
+      () => dxfApproachDir(d), v => { d.approach = v; App.buildSidebar(); renderDxf(); App.render(); },
+      'Richtung, aus der der Draht an den ersten Konturpunkt fährt (und nach dem Umlauf auf demselben Weg '
+      + 'wieder hinaus). „Hinten": waagrecht vom Maschinennullpunkt wie bisher. „Oben": über den Block, senkrecht '
+      + 'von oben auf den ersten Punkt. „Vorne": über den Block nach vorne, waagrecht von vorne. „Unten": unter dem '
+      + 'Block hindurch, senkrecht von unten (braucht Platz unter dem Block — „Abstand unten zum Nullpunkt").');
+    if (dxfApproachDir(d) !== 'rear')
+      App.numRow(op.body, 'Anfahrt-Abstand zur Blockfläche (mm)', () => (d.approachDist != null ? d.approachDist : 10),
+        v => { d.approachDist = Math.max(0, v); renderDxf(); App.render(); },
+        { step: 1, min: 0, norender: true,
+          hint: 'Abstand des Anfahrpunkts vor der gewählten Blockfläche (oben: über der Blockoberkante, vorne: vor der '
+            + 'Blockvorderkante, unten: unter der Blockunterkante). Bis dahin fährt der Draht in Luft, ab dort mit '
+            + 'Schnittvorschub auf den ersten Konturpunkt. Von unten höchstens bis zum Maschinennullpunkt (Y0).' });
     App.boolRow(op.body, 'Anfahrt/Ausfahrt sicher', () => d.safeLead,
       v => { d.safeLead = v; App.render(); },
-      'Beginnt den Schnitt automatisch am HINTERSTEN Punkt (größtes X), damit die waagrechte '
-      + 'An- und Abfahrt vom Maschinennullpunkt das Werkstück nicht kreuzt. Ändert nur die '
-      + 'Anfahrt, nicht die Form.');
+      'Beginnt den Schnitt automatisch am Punkt, der der Anfahrrichtung am nächsten liegt (von hinten: hinterster, '
+      + 'von oben: oberster, von vorne: vorderster, von unten: unterster Punkt), damit die An- und Abfahrt das '
+      + 'Werkstück nicht kreuzt. Ändert nur die Anfahrt, nicht die Form. Ein selbst gewählter Startpunkt '
+      + '(gleicher Querschnitt) hat Vorrang.');
     App.selectRow(op.body, 'Blockzuschnitt',
       [['none', 'Ohne Blockschnitt'], ['before', 'Blockschnitt vor Formschnitt'],
        ['after', 'Blockschnitt nach Formschnitt'], ['only', 'Nur Blockschnitt']],
@@ -1661,9 +1713,14 @@
     // Kontur NICHT kreuzt, beginnt der Schnitt am HINTERSTEN Punkt (max X) — dort
     // trifft die Anfahrt die Kontur zuerst. Reine zyklische Verschiebung der
     // geschlossenen Bahn -> die geschnittene Form bleibt identisch.
-    if (d.safeLead && rootPath.length > 2) {
+    // Anfahrt von oben/vorne/unten: entsprechend am obersten/vordersten/untersten Punkt.
+    // Bei gleichem Querschnitt mit selbst gewähltem Startpunkt (dxfStartPicked) bleibt
+    // dieser — dann entscheidet der Anwender.
+    const apDir = dxfApproachDir(d);
+    if (d.safeLead && rootPath.length > 2 && !dxfStartPicked()) {
+      const key = apDir === 'top' ? (p => p.y) : apDir === 'front' ? (p => -p.x) : apDir === 'bottom' ? (p => -p.y) : (p => p.x);
       let r = 0, best = -1e9;
-      for (let i = 0; i < rootPath.length; i++) { const s = rootPath[i].x + tipPath[i].x; if (s > best) { best = s; r = i; } }
+      for (let i = 0; i < rootPath.length; i++) { const s = key(rootPath[i]) + key(tipPath[i]); if (s > best + 1e-9) { best = s; r = i; } }
       if (r > 0) {
         // Der Schließpunkt (letzter = erster Punkt) darf beim Drehen nicht in die
         // Mitte wandern: dort entstünde ein Nulllängen-Segment (Abbrand-Ausreißer,
@@ -1718,8 +1775,20 @@
     const blockCut = { front: face(blockIn.minx - hk, blockOut.minx - hk), rear: face(blockIn.maxx + hk, blockOut.maxx + hk) };
     // Hintere Blockfläche ohne Abbrand: in Turmkoordinaten (face) und am Werkstück (in/out).
     const rearFace = Object.assign(face(blockIn.maxx, blockOut.maxx), { in: blockIn.maxx, out: blockOut.maxx });
+    // Anfahrpunkt außerhalb des Blocks (nicht „von hinten"): um approachDist vor die
+    // gewählte Blockfläche, auf Linie mit dem ersten Konturpunkt — je Profilebene aus
+    // dem eigenen Block (INNEN/AUSSEN), dann wie die Kontur auf die Türme verlängert.
+    // Von unten nie unter den Maschinennullpunkt (Y0).
+    let approach = null;
+    if (apDir !== 'rear') {
+      const dist = Math.max(0, +d.approachDist || 0);
+      const lead = (p, bx) => apDir === 'top' ? { x: p.x, y: bx.maxy + dist }
+        : apDir === 'front' ? { x: bx.minx - dist, y: p.y } : { x: p.x, y: Math.max(origin.y, bx.miny - dist) };
+      const ai = lead(rootPath[0], blockIn), ao = lead(tipPath[0], blockOut);
+      approach = { dir: apDir, in: ai, out: ao, l: { x: pr(ai.x, ao.x, 0), y: pr(ai.y, ao.y, 0) }, r: { x: pr(ai.x, ao.x, mw), y: pr(ai.y, ao.y, mw) } };
+    }
     return { left, right, rootPath, tipPath, zRoot, zTip, origin, maxy, miny, block, blockIn, blockOut, blockSep: BB.sep,
-             blockCut, blockKerf, rearFace };
+             blockCut, blockKerf, rearFace, approach };
   }
   // dxfGcode() (G-Code aus INNEN/AUSSEN) liegt in gcodegen.js (Funktion „G-Code-Erzeugung", abwählbar).
   // 3D-Szene für die Simulation: ein Block, der beide Formen umschließt.
@@ -2680,6 +2749,15 @@
     if (!d.inner || !d.outer || !App.dxfDraw) return;
     const cv = document.getElementById('cDxf'); const r = cv.getBoundingClientRect();
     const px = ev.clientX - r.left, py = ev.clientY - r.top;
+    // Gleicher Querschnitt: ein Klick = Startpunkt (Paar {i, i}), Wahlmodus endet.
+    if (dxfSameSection() && (!d.sync.length || dxfStartPicked())) {
+      const s = dxfSyncSnap(d.inner, px, py, 24); if (!s) return;
+      App.dxfPushUndo();
+      const i = (s.i != null) ? s.i : dxfSyncInsert('inner', s);
+      d.sync = [{ i, j: i }]; d.start = 0; d.pick = null; d.syncMode = false; d.syncHover = null;
+      if (d.segs && d.segs[d.activeSeg]) d.segs[d.activeSeg].sync = d.sync;
+      App.buildSidebar(); renderDxf(); App.render(); return;
+    }
     if (!d.pick || d.pick.stage !== 1) {
       const s = dxfSyncSnap(d.inner, px, py, 24); if (!s) return;
       App.dxfPushUndo();                                 // ein Undo pro Paar (vor allen Änderungen)

@@ -95,6 +95,21 @@
       ]
     },
     {
+      "id": "ausschnitt",
+      "name": "Tragflächenausschnitt (Profil aus einem Block schneiden)",
+      "description": "Reiter „Tragflächenausschnitt“: Wurzelprofil einer Tragfläche oder eigenes Profil (.dat/Profildatenbank) als Ausschnitt (z. B. Flächenaufnahme im Rumpfblock) oder als Profilstück aus einem Block schneiden; Profiltiefe/Maßstab, Einstellwinkel, Spiel, Abbrand, Blockmaße und Lage; Anfahrt von oben/unten/vorne/hinten, Startpunkt per Klick frei wählbar, Schnittrichtung wählbar. G-Code-Text kommt aus der Funktion „G-Code-Erzeugung“ (ausschnitt_gcode.js); ohne sie zeigt der G-Code-Reiter die Bahnvorschau.",
+      "files": [
+        "ausschnitt.js"
+      ],
+      "tabs": [
+        "ausschnitt"
+      ],
+      "default": true,
+      "views": [
+        "ausschnittView"
+      ]
+    },
+    {
       "id": "gmfc",
       "name": "GMFC-Export/-Import (.cnc-Projekt)",
       "description": "Menü „Speichern → Tragfläche als GMFC-Projekt (.cnc)…“: exportiert alle Segmente mit Profilen, Sehnen, Pfeilung, V-Form, Rändern und Beplankung als GMFC-Projektdatei; fehlende Werte (Grundhöhe der Sehne, Schaumtyp, Endleisten-Verlängerung) werden in einem Eingabefenster abgefragt. Dazu „Laden → GMFC-Projekt (.cnc) in DXF-Formen…“: GMFC-Projekte mit importierten, synchronisierten Querschnitten und mehreren Segmenten als Rippenkette in den Reiter „DXF-Formen“ übernehmen (braucht das Feature dxfshapes).",
@@ -168,7 +183,8 @@
         "blockprep.js",
         "model3d_gcode.js",
         "gcodegen.js",
-        "schrift_gcode.js"
+        "schrift_gcode.js",
+        "ausschnitt_gcode.js"
       ],
       "tabs": [],
       "default": true,

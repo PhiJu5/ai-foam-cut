@@ -882,6 +882,24 @@
       Sim3D.load(text, buildNegScene());
       return;
     }
+    // Quelle „Tragflächenausschnitt" (ausschnitt.js + ausschnitt_gcode.js): Profil aus dem Block.
+    if (state.cfg.gcodeSource === 'ausschnitt') {
+      const r = App.ausschnittGcode ? App.ausschnittGcode() : null;
+      const info = document.getElementById('gInfo');
+      if (!r) {
+        text = ''; state.lastGcode = { text, cutLengthFoam: 0, estMinutes: 0, lines: 0 };
+        setGcode(text, new Set());
+        if (info) info.textContent = T('Kein Profil — im Reiter „Tragflächenausschnitt" ein Profil wählen.');
+        Sim3D.load(text, App.buildAusschnittScene ? App.buildAusschnittScene() : null);
+        return;
+      }
+      text = applyFeedMode(applyPreheat(r.text)); cutLen = r.cutLengthFoam || 0; mins = r.estMinutes || 0; lines = text.split('\n').length;
+      state.lastGcode = { text, cutLengthFoam: cutLen, estMinutes: mins, lines };
+      setGcode(text, feedJumpLines(text));
+      if (info) info.textContent = `${lines}${T(' Zeilen · Tragflächenausschnitt · Schnittlänge ')}${cutLen.toFixed(0)}${T(' mm · ~')}${mins.toFixed(1)}${T(' min')}`;
+      Sim3D.load(text, r.scene);
+      return;
+    }
     // Quelle „Schriften" (schrift.js + schrift_gcode.js): Buchstaben als Prismen.
     if (state.cfg.gcodeSource === 'schrift') {
       const r = App.schriftGcode ? App.schriftGcode() : null;
@@ -998,7 +1016,9 @@
     const P = App.dxfProjection();
     if (!P) return { text: '; ' + T('DXF-Formen: mindestens 1 Synchronpaar nötig.') + '\nM2 ; ' + T('Ende'), lines: 2, cutLengthFoam: 0, estMinutes: 0 };
     // Sicherheitshöhe über der Blockoberkante (Rohblock inkl. Rand), nicht nur über der Form.
-    const safeY = (Math.max(P.maxy, P.block ? P.block.maxy : P.maxy) - P.origin.y) + (state.material.safeH || 10);
+    let safeY = (Math.max(P.maxy, P.block ? P.block.maxy : P.maxy) - P.origin.y) + (state.material.safeH || 10);
+    // Anfahrt von oben: der Anfahrpunkt darf über der Sicherheitshöhe liegen -> diese mit anheben.
+    if (P.approach) safeY = Math.max(safeY, P.approach.l.y - P.origin.y, P.approach.r.y - P.origin.y);
     // Blockzuschnitt = Schnittreihenfolge des Reiters „G-Code" (dieselbe Einstellung wie
     // im Reiter „DXF-Formen" → Schnitt): vorne/hinten senkrecht auf Y0. „Während" braucht
     // eine Profilnase -> bei DXF-Formen wie „vor".
@@ -1014,6 +1034,7 @@
       // Blockzugabe hinten -> ab dort mit Schnittvorschub (nicht in Luft-Tempo).
       // l/r = Turmkoordinaten, in/out = am INNEN-/AUSSEN-Profil (verjüngter Block: verschieden).
       leadFace: P.rearFace || (P.block ? { l: P.block.maxx, r: P.block.maxx } : null),      meltDwell: +state.material.meltDwell || 0,
+      approach: P.approach,   // Anfahrweg oben/vorne/unten (null = waagrecht von hinten)
       tipSpeed: true,   // Kommentar je Konturzeile: Werkstück innen UND außen
       header: (state.cfg.header ? state.cfg.header + '\n' : '') + '; --- DXF-Form (INNEN/AUSSEN) ---',
       footer: state.cfg.footer

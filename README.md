@@ -28,6 +28,8 @@ schnell drehenden Werkzeugen. **Betrieb ausschließlich auf eigene Verantwortung
 - **CAD-Bearbeitung**: eigener 2D-Editor mit AutoCAD-artiger Befehlszeile
 - **3D-Modell**: STL/OBJ und Flugsimulator-Modelle (X-Plane, FlightGear, glTF) zerlegen
 - **Schriften**: Linienschriften und TTF/OTF als Schnittbahn
+- **Tragflächenausschnitt**: Profil als Ausschnitt aus einem Block oder als Profilstück schneiden
+  (Anfahrt oben/unten/vorne/hinten, Startpunkt per Klick)
 - **Datenaustausch**: XFLR5 (`.xfl`), FLZ_vortex (`.flz`), PC2, GMFC (`.cnc`), DXF, STL, STEP
 - **Maschinensteuerung**: G-Code-Erzeugung, Wegvorschau, GRBL-Anbindung, Drahtheizungskalibrierung
 
@@ -74,7 +76,7 @@ lassen sich als Profil speichern und wieder laden.
 Ohne Fenster geht es auch:
 
 ```
-python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.6
+python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.7
 python build_tool_electron.py --cli --target linux
 ```
 

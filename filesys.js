@@ -1702,8 +1702,11 @@
     if (window.Model3D && Model3D.reset) { try { Model3D.reset(); } catch (e) {} }
     // Reiter „Schriften" (optional): Text, Schrift und Einstellungen zurücksetzen.
     if (window.Schrift && Schrift.reset) { try { Schrift.reset(); } catch (e) {} }
+    if (window.Ausschnitt && Ausschnitt.reset) { try { Ausschnitt.reset(); } catch (e) {} }
     // Reiter „Auslegung": Altprojekte ohne cfg.ausl starten mit den Vorgaben.
     if (window.Auslegung && Auslegung.reset) { try { Auslegung.reset(); } catch (e) {} }
+    // Reiter „Profiloptimierung": Ausgangsprofil, Ziele und Ergebnisse zurücksetzen.
+    if (window.Profiloptimierung && window.Profiloptimierung.reset) { try { window.Profiloptimierung.reset(); } catch (e) {} }
     // Generierter G-Code, aktive Auswahl, Projekt-Notizen, Projektname.
     state.lastGcode = null; state.gcodeEdited = false;
     state.activeSeg = 0; state.activeSpar = null;
@@ -1795,6 +1798,7 @@
     // Kern-Stege: Altprojekte ohne diese Keys starten mit den Defaults (kein Rest vom Vorprojekt).
     // Reiter „Schriften": Altprojekte ohne sc*-Werte starten mit den Vorgaben.
     if (window.Schrift && Schrift.reset) { try { Schrift.reset(); } catch (e) {} }
+    if (window.Ausschnitt && Ausschnitt.reset) { try { Ausschnitt.reset(); } catch (e) {} }
     ['negStegeOn', 'negStegeList', 'negStegeGap', 'negStegeOnly'].forEach(k => {
       const v = PROJECT_DEFAULTS.cfg[k]; state.cfg[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
     });

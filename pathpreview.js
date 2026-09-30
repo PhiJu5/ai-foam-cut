@@ -340,6 +340,7 @@
       if (s === 'model') return previewModel();
       if (s === 'plate') return previewPlate();
       if (s === 'schrift') return window.Schrift ? Schrift.previewMoves() : null;
+      if (s === 'ausschnitt') return window.Ausschnitt ? Ausschnitt.previewMoves() : null;
       return previewCore();
     } catch (e) { return null; }
   }

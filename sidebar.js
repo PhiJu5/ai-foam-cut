@@ -1815,6 +1815,8 @@
     if (window.Model3D && Model3D.hasModel()) { srcOpts.push(['model', '3D-Modell (Segment)']); srcOpts.push(['plate', '3D-Modell Platte (mehrere)']); }
     if (window.Schrift) srcOpts.push(['schrift', 'Schriften']);
     if (!window.Schrift && state.cfg.gcodeSource === 'schrift') state.cfg.gcodeSource = 'core';
+    if (window.Ausschnitt) srcOpts.push(['ausschnitt', 'Tragflächenausschnitt']);
+    if (!window.Ausschnitt && state.cfg.gcodeSource === 'ausschnitt') state.cfg.gcodeSource = 'core';
     selectRow(pv.body, 'G-Code-Quelle', srcOpts,
       () => state.cfg.gcodeSource,
       v => { state.cfg.gcodeSource = v; if (v !== 'model') state.cfg.gcodeSourceLast = v; buildSidebar(); render(); },
@@ -1857,6 +1859,8 @@
         'Wählt das DXF-Formen-Segment, dessen Schnitt erzeugt wird (gleiche Auswahl wie im Reiter „DXF-Formen").');
     } else if (state.cfg.gcodeSource === 'schrift') {
       hint(pv.body, 'Text, Schriftart, Verbindung und Block stellt der Reiter „Schriften" ein.');
+    } else if (state.cfg.gcodeSource === 'ausschnitt') {
+      hint(pv.body, 'Profil, Block, Anfahrt, Startpunkt und Schnittrichtung stellt der Reiter „Tragflächenausschnitt" ein.');
     } else {
       pv.body.appendChild(segmentSelectRow());
     }
@@ -2010,11 +2014,18 @@
     // --- Reiter „Rumpf" (rumpf, optionales Feature) ---------------------
     if (App.rumpfSidebar) App.rumpfSidebar(side);
 
+    // --- Reiter „Rumpf-Pro" (rpro) und „Rumpf-Pro Spanten" (rprob), optionale Features ---
+    if (App.rproSidebar) App.rproSidebar(side);
+    if (App.rprobSidebar) App.rprobSidebar(side);
+
     // --- Reiter „Fräse" (fraese, optionales Feature) --------------------
     if (App.fraeseSidebar) App.fraeseSidebar(side);
 
     // --- Reiter „Schriften" (schrift, optionales Feature) -----------------
     if (App.schriftSidebar) App.schriftSidebar(side);
+
+    // --- Reiter „Tragflächenausschnitt" (ausschnitt, optionales Feature) ---
+    if (App.ausschnittSidebar) App.ausschnittSidebar(side);
 
     // --- Reiter „Aerodynamik" (aero, optionales Feature) ------------------
     if (App.aeroSidebar) App.aeroSidebar(side);
@@ -2024,6 +2035,9 @@
 
     // --- Reiter „Profildatenbank" (foildb, optionales Feature) ------------
     if (App.foildbSidebar) App.foildbSidebar(side);
+
+    // --- Reiter „Profiloptimierung" (popt, optionales Feature) ------------
+    if (App.poptSidebar) App.poptSidebar(side);
 
     // --- Reiter „DXF-Formen" (dxf) ------------------------------------
     // Abwählbare Funktionen: nur aufbauen, wenn das Modul im Build steckt.
@@ -2295,6 +2309,8 @@
     // Aufheizphase ist zum Reiter „Projektübersicht" gewandert (materialabhängig).
 
     const sb = grp('Tragfläche, Schnitt und Block', true, 'gcode');
+    if (state.cfg.gcodeSource === 'ausschnitt')
+      warn(sb.body, 'Quelle „Tragflächenausschnitt": Hier gelten Vorschub und Geschwindigkeit außerhalb Block. Anfahrt, Startpunkt und Schnittrichtung stellt der Reiter „Tragflächenausschnitt" ein.');
     if (state.cfg.gcodeSource === 'schrift')
       warn(sb.body, 'Quelle „Schriften": Hier gelten Vorschub, Geschwindigkeit außerhalb Block und die Profil-Schnittrichtung (Oberseite/Unterseite zuerst). Schnittrichtung, Tragflächenseite und Blockschnitt betreffen nur Tragflächen.');
     // Ganz oben, groß und deutlich: Schnittrichtung (von hinten / von vorne), darunter
@@ -2444,7 +2460,7 @@
       'Spannweiten-Lage des Blocks im Portal. „Mittig zwischen den Portalen": der Block '
       + 'wird automatisch zentriert (gleicher Abstand zu beiden Portalen). „Abstand angeben": '
       + 'freier Abstand der Wurzelebene zum Portal auf der Wurzelseite.');
-    const blSchrift = state.cfg.gcodeSource === 'schrift';   // Reiter „Schriften": Block links unten, X nach rechts
+    const blSchrift = state.cfg.gcodeSource === 'schrift' || state.cfg.gcodeSource === 'ausschnitt';   // Reiter „Schriften": Block links unten, X nach rechts
     if (!state.cfg.blockZCenter)
     numRow(bl.body,
       blSchrift ? 'Abstand Block ↔ linkes Portal (mm)'

@@ -27,7 +27,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Welche Maschine / Einstellungsdatei soll geladen werden?</h1>
+  <h1 id="head">Welche Maschine / Einstellungsdatei soll geladen werden?</h1>
   <ul id="list" tabindex="0"></ul>
   <div id="newRow">
     <input id="newName" type="text" placeholder="Name der neuen Maschine" maxlength="60">
@@ -41,7 +41,7 @@
 </div>
 <script>
 (function () {
-  var data = null, sel = 0;
+  var data = null, sel = 0, en = false;
   var listEl = document.getElementById('list');
 
   function render() {
@@ -54,7 +54,7 @@
         li.appendChild(document.createTextNode(m[1]));
         var s = document.createElement('span');
         s.className = 'neu';
-        s.textContent = m[2];
+        s.textContent = en ? m[2].replace('(neu)', '(new)') : m[2];
         li.appendChild(s);
       } else {
         li.textContent = e.label;
@@ -111,6 +111,16 @@
 
   window.chooser.list().then(function (d) {
     data = d;
+    en = d.lang === 'en';
+    if (en) {
+      document.documentElement.lang = 'en';
+      document.getElementById('head').textContent = 'Which machine / settings file should be loaded?';
+      newName.placeholder = 'Name of the new machine';
+      document.getElementById('newOk').textContent = 'Create';
+      document.getElementById('load').textContent = 'Load';
+      document.getElementById('new').textContent = 'New machine...';
+      document.getElementById('browse').textContent = 'Browse...';
+    }
     data.entries.forEach(function (e, i) { if (e.path === d.last) sel = i; });
     render();
     listEl.focus();

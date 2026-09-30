@@ -304,6 +304,39 @@
         em(`G1 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} F${airF.toFixed(0)} ; vertikal auf Null (außerhalb Block)`);
     }
 
+    /* Anfahrweg von oben/vorne/unten (opt.approach, nur DXF-Formen): Anfahrpunkt AP.l/AP.r
+     * (Turmkoordinaten wie L/R) liegt um den eingestellten Abstand außerhalb der gewählten
+     * Blockfläche, auf Linie mit dem ersten Konturpunkt. In Luft dorthin (oben/vorne über
+     * die Sicherheitshöhe, unten unter dem Block), mit Schnittvorschub geradlinig auf den
+     * ersten Punkt, Kontur, auf demselben Weg zurück zum Anfahrpunkt, in Luft auf Null.
+     * atSafe: Draht steht schon auf Sicherheitshöhe (nach den Blockschnitten). */
+    const AP = opt.approach && ['top', 'front', 'bottom'].indexOf(opt.approach.dir) >= 0 ? opt.approach : null;
+    function emitProfileApproach(atSafe) {
+      const A = AP.l, B = AP.r, fa = airF, fc = capF(feed);
+      const mvA = (lx, ly, rx, ry, F, cm) => em(`G1 ${ax.x}${lx} ${ax.y}${ly} ${ax.u}${rx} ${ax.v}${ry} F${F.toFixed(0)} ; ${T(cm)}`);
+      if (AP.dir === 'bottom') {
+        if (atSafe) mvA(f(0), f(safeY), f(0), f(safeY), fa, 'über den Block zurück zum Null-X (außerhalb Block)');
+        mvA(f(0), fy(A.y), f(0), fy(B.y), fa, 'am Null-X auf Anfahrhöhe unter dem Block');
+        mvA(fx(A.x), fy(A.y), fx(B.x), fy(B.y), fa, 'unter dem Block zum Anfahrpunkt (außerhalb Block)');
+      } else {
+        if (!atSafe) goSafeAtOrigin();
+        mvA(fx(A.x), f(safeY), fx(B.x), f(safeY), fa, AP.dir === 'top' ? 'über den Block bis über den ersten Punkt' : 'über den Block nach vorne vor die Blockvorderkante');
+        mvA(fx(A.x), fy(A.y), fx(B.x), fy(B.y), fa, AP.dir === 'top' ? 'senkrecht runter zum Anfahrpunkt über dem Block' : 'vor dem Block runter auf Anfahrhöhe');
+      }
+      mvA(fx(L[0].x), fy(L[0].y), fx(R[0].x), fy(R[0].y), fc, 'Anfahrt zum ersten Konturpunkt (Schnittvorschub)');
+      emitContour();
+      if (last < N - 1)   // Schließzug zum ersten Punkt (sonst endet die Kontur davor)
+        mvA(fx(L[0].x), fy(L[0].y), fx(R[0].x), fy(R[0].y), fc, 'Kontur schließen (erster Punkt)');
+      mvA(fx(A.x), fy(A.y), fx(B.x), fy(B.y), fc, 'Abfahrt auf demselben Weg zum Anfahrpunkt (Schnittvorschub)');
+      if (AP.dir === 'bottom') {
+        mvA(f(0), fy(A.y), f(0), fy(B.y), fa, 'unter dem Block zurück zum Null-X (außerhalb Block)');
+      } else {
+        mvA(fx(A.x), f(safeY), fx(B.x), f(safeY), fa, 'senkrecht hoch auf Sicherheitshöhe (außerhalb Block)');
+        mvA(f(0), f(safeY), f(0), f(safeY), fa, 'über den Block zurück zum Null-X');
+      }
+      mvA(f(0), f(0), f(0), f(0), fa, 'zurück auf den Nullpunkt');
+    }
+
     // Hintere Blockfläche (opt.leadFace, Profilkoordinaten wie L/R; nur DXF-Formen): liegt
     // der Konturpunkt HINTER ihr (im Block), läuft die waagrechte An-/Abfahrt ab der
     // Blockfläche durch Material und bekommt den Schnittvorschub. Das gilt auch, wenn die
@@ -561,6 +594,15 @@
       emitBlockRear();
       emitBlockFront();
       emitReturnFromSafe();
+    } else if (AP && (mode === 'before' || mode === 'wrap')) {
+      // Anfahrt oben/vorne/unten: erst beide Blockschnitte, dann von der Sicherheitshöhe zur Form.
+      goSafeAtOrigin();
+      emitBlockFront();
+      emitBlockRear();
+      emitProfileApproach(true);
+    } else if (AP) {   // 'none' | 'after'
+      emitProfileApproach(false);
+      if (mode === 'after') { goSafeAtOrigin(); emitBlockRear(); emitBlockFront(); emitReturnFromSafe(); }
     } else if (mode === 'before') {
       // Vor dem Profil: erst vorne über den Block, dann hinten.
       goSafeAtOrigin();

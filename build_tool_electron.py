@@ -834,6 +834,12 @@ def run_cli(argv):
         cfg["devtools"] = False
     cfg["version"] = (a.version or cfg.get("version") or bt.next_version()).lstrip("vV")
     cfg["name"] = a.name or ("%s v%s" % (BASENAME, cfg["version"]))
+    # Umgeleitete Ausgabe laeuft unter Windows in cp1252; electron-builder
+    # schreibt Zeichen wie "⨯", die dort fehlen -> ersetzen statt abbrechen.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except Exception:
+        pass
     out = run_build(cfg, lambda m: print(m, flush=True))
     print("\n=> " + out)
 

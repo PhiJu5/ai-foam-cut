@@ -10,6 +10,72 @@ HTML_NAME = "AI Foam Cut.html"
 SETTINGS_NAME = "hotwing-settings.json"   # Standard-Dateiname (gleich wie manueller Export in der App)
 LAST_CHOICE_FILE = ".hotwing-last-settings.txt"   # merkt sich die zuletzt gewaehlte Datei (nur Vorauswahl)
 
+# --- Sprache der Startfenster ---
+# Die Sprache wird in der App umgestellt und landet in der Einstellungsdatei
+# (prefs["hotwire-lang"]). Die Startfenster erscheinen VOR der App und lesen
+# sie deshalb aus der zuletzt gewaehlten Einstellungsdatei.
+LANG = "de"
+EN = {
+    "Welche Maschine / Einstellungsdatei soll geladen werden?":
+        "Which machine / settings file should be loaded?",
+    "Neue Maschine": "New machine",
+    "Name der neuen Maschine / Einstellungsdatei:": "Name of the new machine / settings file:",
+    "Einstellungsdatei waehlen": "Choose settings file",
+    "JSON-Einstellungen": "JSON settings",
+    "Laden": "Load",
+    "Neue Maschine...": "New machine...",
+    "Durchsuchen...": "Browse...",
+    "  (neu)": "  (new)",
+    "Diese Testversion von AI Foam Cut ist am %s abgelaufen.\n"
+    "Bitte eine neue Version anfordern.":
+        "This test version of AI Foam Cut expired on %s.\n"
+        "Please request a new version.",
+    "AI Foam Cut - Testversion abgelaufen": "AI Foam Cut - test version expired",
+    "Diese Testversion ist gueltig bis %s.\n\n": "This test version is valid until %s.\n\n",
+    "AI Foam Cut laeuft jetzt im Browser.\n\n": "AI Foam Cut is now running in the browser.\n\n",
+    "Aktive Einstellungsdatei:\n%s\n\n"
+    "Zum Beenden auf OK klicken (schliesst den lokalen Server).":
+        "Active settings file:\n%s\n\n"
+        "Click OK to quit (closes the local server).",
+    "\n\nHINWEIS: Es laeuft bereits eine andere AI-Foam-Cut-Instanz "
+    "(evtl. eine aeltere Version). Bitte diese ueber ihr Fenster mit OK "
+    "beenden, sonst fehlen dort neue Funktionen und die Liste "
+    "'Zuletzt geladen' ist in dieser Instanz leer.\n":
+        "\n\nNOTE: Another AI Foam Cut instance is already running "
+        "(possibly an older version). Please close it with OK in its window, "
+        "otherwise new functions are missing there and the list "
+        "'Recently loaded' is empty in this instance.\n",
+}
+
+def T(s):
+    return EN.get(s, s) if LANG == "en" else s
+
+def lang_of(path):
+    """Sprache aus einer Einstellungsdatei, None wenn nicht lesbar/nicht gesetzt."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            v = (json.load(f).get("prefs") or {}).get("hotwire-lang")
+        return v if v in ("de", "en") else None
+    except Exception:
+        return None
+
+def detect_lang(folder):
+    """Zuletzt gewaehlte Einstellungsdatei, sonst Standarddatei, sonst die erste
+    Einstellungsdatei mit gesetzter Sprache; ohne Treffer Deutsch."""
+    cands = []
+    try:
+        with open(os.path.join(folder, LAST_CHOICE_FILE), "r", encoding="utf-8") as f:
+            cands.append(f.read().strip())
+    except Exception:
+        pass
+    cands.append(os.path.join(folder, SETTINGS_NAME))
+    cands += sorted(glob.glob(os.path.join(folder, "hotwing-settings*.json")))
+    for p in cands:
+        v = lang_of(p)
+        if v:
+            return v
+    return "de"
+
 def base_dir():
     # Verzeichnis der gebundelten App-Dateien (PyInstaller onefile -> temp-Ordner _MEIPASS)
     return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -68,9 +134,9 @@ def check_expiry():
     today = datetime.date.today()
     if today > EXPIRY:
         msgbox(
-            "Diese Testversion von AI Foam Cut ist am %s abgelaufen.\n"
-            "Bitte eine neue Version anfordern." % EXPIRY.strftime("%d.%m.%Y"),
-            "AI Foam Cut - Testversion abgelaufen",
+            T("Diese Testversion von AI Foam Cut ist am %s abgelaufen.\n"
+              "Bitte eine neue Version anfordern.") % EXPIRY.strftime("%d.%m.%Y"),
+            T("AI Foam Cut - Testversion abgelaufen"),
         )
         sys.exit(0)
 
@@ -85,7 +151,7 @@ def _label_for(path):
         if name.lower().endswith(".json"):
             name = name[:-5]
     if not os.path.isfile(path):
-        name += "  (neu)"
+        name += T("  (neu)")
     return name
 
 def choose_settings_file(folder):
@@ -122,7 +188,7 @@ def choose_settings_file(folder):
     root.attributes("-topmost", True)
     root.resizable(False, False)
 
-    tk.Label(root, text="Welche Maschine / Einstellungsdatei soll geladen werden?",
+    tk.Label(root, text=T("Welche Maschine / Einstellungsdatei soll geladen werden?"),
              padx=12, pady=10).pack()
 
     lb = tk.Listbox(root, width=46, height=8, exportselection=False)
@@ -140,7 +206,7 @@ def choose_settings_file(folder):
 
     def do_new():
         name = simpledialog.askstring(
-            "Neue Maschine", "Name der neuen Maschine / Einstellungsdatei:", parent=root)
+            T("Neue Maschine"), T("Name der neuen Maschine / Einstellungsdatei:"), parent=root)
         if name:
             safe = "".join(c for c in name.strip() if c.isalnum() or c in (" ", "-", "_")).strip()
             if safe:
@@ -155,8 +221,8 @@ def choose_settings_file(folder):
 
     def do_browse():
         p = filedialog.askopenfilename(
-            parent=root, title="Einstellungsdatei waehlen",
-            filetypes=[("JSON-Einstellungen", "*.json")], initialdir=folder)
+            parent=root, title=T("Einstellungsdatei waehlen"),
+            filetypes=[(T("JSON-Einstellungen"), "*.json")], initialdir=folder)
         if p:
             result["path"] = p
             root.destroy()
@@ -167,9 +233,9 @@ def choose_settings_file(folder):
 
     btns = tk.Frame(root)
     btns.pack(pady=10)
-    tk.Button(btns, text="Laden", width=12, command=do_load).grid(row=0, column=0, padx=4)
-    tk.Button(btns, text="Neue Maschine...", width=15, command=do_new).grid(row=0, column=1, padx=4)
-    tk.Button(btns, text="Durchsuchen...", width=13, command=do_browse).grid(row=0, column=2, padx=4)
+    tk.Button(btns, text=T("Laden"), width=12, command=do_load).grid(row=0, column=0, padx=4)
+    tk.Button(btns, text=T("Neue Maschine..."), width=15, command=do_new).grid(row=0, column=1, padx=4)
+    tk.Button(btns, text=T("Durchsuchen..."), width=13, command=do_browse).grid(row=0, column=2, padx=4)
 
     lb.bind("<Double-Button-1>", lambda e: do_load())
     root.protocol("WM_DELETE_WINDOW", do_cancel)
@@ -185,11 +251,15 @@ def choose_settings_file(folder):
     return chosen
 
 def main():
+    global LANG
+    LANG = detect_lang(exe_dir())
     check_expiry()
     root = base_dir()
     os.chdir(root)
 
     settings_file = choose_settings_file(exe_dir())
+    # Ab hier gilt die Sprache der gewaehlten Maschine (Schlussmeldung).
+    LANG = lang_of(settings_file) or LANG
     # Profildatenbank (foildb.js): eine Datei fuer alle Einstellungsdateien/Maschinen.
     foildb_file = os.path.join(exe_dir(), "hotwing-profile.json")
 
@@ -246,7 +316,7 @@ def main():
             path = urllib.parse.unquote(urllib.parse.urlparse(self.path).path)
             if path == "/__machine__":
                 # Name der beim Start gewaehlten Maschine (Kopfzeile der App).
-                name = _label_for(settings_file).replace("  (neu)", "")
+                name = _label_for(settings_file).replace(T("  (neu)"), "")
                 self._send_json_bytes(json.dumps({"name": name}).encode("utf-8"))
                 return
             if path == "/__settings__":
@@ -318,10 +388,10 @@ def main():
     except OSError:
         # Port belegt (andere Instanz laeuft schon) -> Fallback auf freien Port.
         httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        port_hint = ("\n\nHINWEIS: Es laeuft bereits eine andere AI-Foam-Cut-Instanz "
-                     "(evtl. eine aeltere Version). Bitte diese ueber ihr Fenster mit OK "
-                     "beenden, sonst fehlen dort neue Funktionen und die Liste "
-                     "'Zuletzt geladen' ist in dieser Instanz leer.\n")
+        port_hint = T("\n\nHINWEIS: Es laeuft bereits eine andere AI-Foam-Cut-Instanz "
+                      "(evtl. eine aeltere Version). Bitte diese ueber ihr Fenster mit OK "
+                      "beenden, sonst fehlen dort neue Funktionen und die Liste "
+                      "'Zuletzt geladen' ist in dieser Instanz leer.\n")
     port = httpd.server_address[1]
     # Eindeutiger Zeitstempel in der URL erzwingt beim Start eine frische Seite,
     # falls der Browser noch eine alte Version (z.B. ohne sweeprot.js/Rotation)
@@ -333,10 +403,15 @@ def main():
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     open_browser(url)
 
+    # Ohne Ablaufdatum (EXPIRY = None) kein Hinweis auf die Gueltigkeit -
+    # vorher stuerzte hier jede Ausgabe ohne Ablaufdatum ab.
+    gueltig = (T("Diese Testversion ist gueltig bis %s.\n\n") % EXPIRY.strftime("%d.%m.%Y")
+               if EXPIRY is not None else "")
     msgbox(
-        "AI Foam Cut laeuft jetzt im Browser.\n\n"
-        "Aktive Einstellungsdatei:\n%s\n\n"
-        "Zum Beenden auf OK klicken (schliesst den lokalen Server)."
+        T("AI Foam Cut laeuft jetzt im Browser.\n\n")
+        + gueltig +
+        T("Aktive Einstellungsdatei:\n%s\n\n"
+          "Zum Beenden auf OK klicken (schliesst den lokalen Server).")
         % (settings_file,) + port_hint,
         "AI Foam Cut",
     )

@@ -577,6 +577,7 @@
       }
       if (s === 'plate') return T('3D-Modell Platte');
       if (s === 'schrift' && window.Schrift) return Schrift.label();
+      if (s === 'ausschnitt' && window.Ausschnitt) return Ausschnitt.label();
       if (s === 'dxf') {
         const d = state.dxf; const n = App.dxfSegCount ? App.dxfSegCount() : 1;
         return T('DXF-Form') + ' · ' + T('Segment ') + ((d && d.activeSeg || 0) + 1) + ' / ' + n;
@@ -598,6 +599,7 @@
     try {
       if (s === 'dxf' && App.buildDxfScene) return App.buildDxfScene();
       if (s === 'schrift' && App.buildSchriftScene) return App.buildSchriftScene();
+      if (s === 'ausschnitt' && App.buildAusschnittScene) return App.buildAusschnittScene();
       if (s === 'neg') return buildNegScene();
       if (s === 'model' && window.Model3D && Model3D.hasModel() && Model3D.buildSegmentPaths && App.buildModelScene) {
         const c = App.mgCfg(); const r = Model3D.ensureSegments() ? Model3D.buildSegmentPaths(c.seg, App.mgOpt()) : null;

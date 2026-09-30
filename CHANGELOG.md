@@ -4,6 +4,60 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.7] — 2026-09-30
+### Neuer Reiter „Tragflächenausschnitt" (2026-09-30)
+- Eigenes Modul (Menü „Tragflächen", Funktion `ausschnitt`): ein Profil als **Ausschnitt aus einem Block** schneiden
+  (z. B. Flächenaufnahme im Rumpfblock) oder als **Profilstück** stehen lassen.
+- **Profil:** Wurzelprofil einer Tragfläche (Profiltiefe der Wurzelrippe, Maßstab in %, bei mehreren Tragflächen
+  wählbar) oder **eigenes Profil** (.dat laden, aus der Profildatenbank wählen oder das Wurzelprofil als Kopie
+  übernehmen; Profiltiefe frei). Dazu Einstellwinkel (Drehpunkt Endleiste — sie bleibt stehen, die Nase
+  wandert; im Bild markiert) und Nasenrichtung (Standard links).
+- **Block & Lage:** Profil standardmäßig mit Abstand Nase ↔ Blockvorderseite und Nasenhöhe (oder mittig);
+  Blockbreite/-höhe automatisch (Abstand + Profil + Rand) oder fest, Blockdicke. Abbrand aus der Werkstoff-Kalibrierung oder manuell; beim
+  Ausschnitt läuft der Draht innerhalb der Kontur, beim Profilstück außerhalb. „Spiel" vergrößert den Ausschnitt.
+- **Anfahrt von oben, unten, vorne (Nasenseite) oder hinten (Endleistenseite):** in Luft zum Anfahrpunkt vor der
+  Blockfläche, senkrecht zur Fläche hinein, Umlauf, auf demselben Weg hinaus.
+- **Startpunkt als Befehl „▶ Startpunkt wählen"** (Seitenleiste und Knopfleiste): danach ein Klick auf die
+  Profilkontur (grüner Kreis zeigt den Punkt), der Befehl endet mit dem Klick oder mit Esc; sonst automatisch der der Anfahrfläche
+  nächstgelegene Punkt. Warnung, wenn der Anfahrweg durch ein stehen bleibendes Profilstück schneiden würde.
+- **Schnittrichtung** im oder gegen den Uhrzeigersinn, mit Richtungspfeilen auf der Schnittbahn.
+- **Maße in der Ansicht** (Schalter „Maße"): Nullpunkt → Block, Blockvorderseite → Nase, Nullpunkt → Nase und die
+  Nasenhöhe (bzw. Blockhöhe über Y0) — immer an der tatsächlichen, gedrehten Nase.
+- Eigene G-Code-Quelle „Tragflächenausschnitt" (G-Code, Simulation, Bahnvorschau, Reiter „Schneiden");
+  Blocklage X/Y und Vorschub kommen wie gewohnt aus dem Reiter „G-Code". Deutsch/Englisch.
+
+### DXF-Formen: Anfahrweg einstellbar, Startpunkt wählbar (2026-09-30)
+- **Anfahrt von hinten / oben / vorne / unten** (Gruppe „Schnitt"): von oben fährt der Draht über den Block und
+  senkrecht auf den ersten Punkt, von vorne über den Block vor die Blockvorderkante und waagrecht hinein, von unten
+  unter dem Block hindurch und senkrecht hinein. Hinten bleibt die bisherige waagrechte Anfahrt vom Nullpunkt.
+  Der Draht verlässt die Form nach dem Umlauf auf demselben Weg.
+- **Anfahrt-Abstand zur Blockfläche (mm):** bis zu diesem Punkt fährt der Draht in Luft, ab dort mit Schnittvorschub.
+  Liegt der Anfahrpunkt oben über der Sicherheitshöhe, wird diese mit angehoben. Von unten höchstens bis Y0.
+- Funktioniert ohne Blockschnitt sowie mit Blockschnitt vor oder nach dem Formschnitt.
+- „Anfahrt/Ausfahrt sicher" beginnt jetzt am Punkt in Anfahrrichtung (oberster, vorderster, unterster bzw. hinterster).
+- **Startpunkt wählen** bei gleichem Querschnitt (INNEN = AUSSEN, keine Synchronpunkte nötig): ein Klick auf die
+  Kontur legt den Startpunkt fest; „Automatisch" verwirft ihn wieder. Ein gewählter Startpunkt hat Vorrang vor
+  „Anfahrt/Ausfahrt sicher". Die Einstellungen gelten je Segment.
+
+### Startfenster „Maschine wählen“ in der eingestellten Sprache (2026-09-29)
+- Das Fenster beim Programmstart (Maschine laden / **„Neue Maschine...“** / „Durchsuchen...“) erscheint auf Englisch,
+  wenn die Sprache in den Einstellungen auf Englisch steht — in der Browser-Variante (Windows, Linux, Mac) und in der
+  Electron-Variante. Ebenso der Dateidialog, der Zusatz „(neu)“ und die Meldungen des Starters
+  („läuft jetzt im Browser“, Ablaufhinweis).
+- Die Sprache wird aus der zuletzt gewählten Einstellungsdatei gelesen (ersatzweise Standarddatei, dann jede andere
+  Einstellungsdatei im Programmordner). Ohne Einstellungsdatei — also beim allerersten Start — bleibt es Deutsch.
+
+### DXF-Formen: „Eigene Blockgeometrie für AUSSEN“ ist Standard (2026-09-29)
+- Neue Projekte und neu angelegte Segmente starten mit eingeschalteter eigener Blockgeometrie am AUSSEN-Profil
+  (verjüngter Block). Die AUSSEN-Werte sind mit denen des INNEN-Profils vorbelegt.
+- Gespeicherte Projekte bleiben unverändert; der Schalter lässt sich je Segment weiterhin abschalten (gerader Block).
+
+### 3D-Ansicht der Tragfläche zeigt die Holmausschnitte (2026-09-29)
+- Im Fenster **„3D-Ansicht — geschnittene Segmente der Tragfläche“** erscheinen die Holmausschnitte jetzt als
+  durchgehende Öffnungen: Loch in den Stirnflächen, Wände durch das Segment, Kontur in Holmfarbe an beiden Rippen,
+  Anfahrt gestrichelt. Gilt für alle Lochformen (Rechteck, Rund/Oval, Trapez, Doppel-T, Scharnierausschnitt), auch
+  gespiegelt und bei „beide Seiten“. Taschen (Gurt ohne Steg) werden in 3D noch nicht dargestellt.
+
 ## [1.6] — 2026-09-28
 ### DXF-Formen: eigene Blockgeometrie für das AUSSEN-Profil (2026-09-28)
 - Neuer Schalter **„Eigene Blockgeometrie für AUSSEN"** in der Blockgeometrie je Segment: Blocklänge X, Blockhöhe Y

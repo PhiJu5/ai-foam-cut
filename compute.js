@@ -309,7 +309,7 @@
       const c = i === state.activeWing ? state.cfg : (w.cfg || {});
       ['matId', 'negMatId'].forEach(k => { if (c[k] === id) c[k] = null; });
     });
-    ['dxfMatId', 'modelMatId', 'scMatId'].forEach(k => { if (state.cfg[k] === id) state.cfg[k] = null; });
+    ['dxfMatId', 'modelMatId', 'scMatId', 'waMatId'].forEach(k => { if (state.cfg[k] === id) state.cfg[k] = null; });
     saveSettings();
   }
   // Drahtheizung ist ein EINZELWERT je Werkstoff (konstant, tempo-unabhängig).
@@ -431,11 +431,11 @@
   function matCtx() {
     if (App.matCtxOverride) return App.matCtxOverride;
     const src = state.cfg.gcodeSource;
-    return src === 'neg' ? 'neg' : src === 'dxf' ? 'dxf' : (src === 'model' || src === 'plate') ? 'model' : src === 'schrift' ? 'schrift' : 'wing';
+    return src === 'neg' ? 'neg' : src === 'dxf' ? 'dxf' : (src === 'model' || src === 'plate') ? 'model' : src === 'schrift' ? 'schrift' : src === 'ausschnitt' ? 'ausschnitt' : 'wing';
   }
   function matIdFor(ctx) {
     ctx = ctx || matCtx();
-    const v = ctx === 'neg' ? state.cfg.negMatId : ctx === 'dxf' ? state.cfg.dxfMatId : ctx === 'model' ? state.cfg.modelMatId : ctx === 'schrift' ? state.cfg.scMatId : state.cfg.matId;
+    const v = ctx === 'neg' ? state.cfg.negMatId : ctx === 'dxf' ? state.cfg.dxfMatId : ctx === 'model' ? state.cfg.modelMatId : ctx === 'schrift' ? state.cfg.scMatId : ctx === 'ausschnitt' ? state.cfg.waMatId : state.cfg.matId;
     return v != null ? v : (state.material.id || '');
   }
   function blockH(ctx) {

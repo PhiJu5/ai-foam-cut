@@ -605,6 +605,7 @@
   table.fdb-tbl th{font-weight:600;color:var(--txt)}
   table.fdb-tbl td:first-child,table.fdb-tbl th:first-child{text-align:left;color:var(--muted)}
   .fdb-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
 </style>
 </head>
 <body>
@@ -634,6 +635,7 @@
         <button data-view="wing">Tragflächendesigner</button>
         <button data-view="neg">Negativschalendesign</button>
         <button data-view="core">Kerndesign</button>
+        <button data-view="ausschnitt">Tragflächenausschnitt</button>
         <button data-view="foildb">Profildatenbank</button>
       </div>
     </div>
@@ -773,6 +775,7 @@
           <span id="gInfo" class="hint" style="align-self:center"></span>
         </div>
       </div>
+
 
 
       <div class="view" id="foildbView">
@@ -925,6 +928,26 @@
             <label class="ck"><input type="checkbox" id="m3dPlanes" checked> Schnittebenen</label>
             <label class="ck"><input type="checkbox" id="m3dWire"> Drahtgitter</label>
             <span class="hint" style="align-self:center">Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Rad-Doppelklick = Drehpunkt · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="ausschnittView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Tragflächenausschnitt — Profil, Block, Anfahrt und Schnittbahn (Ansicht von vorne)</span>
+          <div class="simlegend" id="ausInfo" style="left:10px;right:auto;top:34px;max-width:460px;z-index:3">Kein Profil.</div>
+          <canvas id="cAusschnitt" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="ausFit" title="Ansicht einpassen (auch Doppelklick in die Ansicht)">⬚ Einpassen</button>
+            <label class="ck"><input type="checkbox" id="ausShowFill" checked> Füllung</label>
+            <label class="ck"><input type="checkbox" id="ausShowCut" checked> Schnittbahn</label>
+            <label class="ck"><input type="checkbox" id="ausShowArrows" checked> Richtungspfeile</label> <label class="ck" title="Maße Nullpunkt → Block → Nase und Höhen einblenden"><input type="checkbox" id="ausShowDims" checked> Maße</label>
+            <label class="ck" title="Band in der echten Breite des Schnittspalts unter der Schnittbahn"><input type="checkbox" id="ausShowKerfTrue" data-ktrue="ausschnitt"> Abbrand in wahrer Dicke</label>
+            <button id="ausPickStart" title="Befehl: danach einen Punkt der Profilkontur anklicken — dort beginnt der Schnitt (Esc = abbrechen)">▶ Startpunkt wählen</button>
+            <button id="ausAutoStart" title="Gewählten Startpunkt verwerfen — Start wieder automatisch an der Anfahrseite">Startpunkt automatisch</button>
+            <button id="ausReverse" title="Schnittrichtung umkehren (Uhrzeigersinn / gegen den Uhrzeigersinn)">⇄ Richtung</button>
+            <button type="button" class="to-gcode primary" id="ausToGcode" data-gsrc="ausschnitt" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+            <span class="hint" style="align-self:center">Ziehen = schieben · Rad = Zoom · Doppelklick = einpassen</span>
           </div>
         </div>
       </div>
@@ -1538,7 +1561,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20260928bt"></script>
+<script src="i18n.js?v=20260930we"></script>
 <script src="safety.js?v=20260924hf"></script>
 <script src="airfoil.js?v=20260913x"></script>
 <script src="materials.js?v=20260913x"></script>
@@ -1549,7 +1572,7 @@
 <script src="pc2.js?v=20260928pw"></script>
 <script src="dxf.js?v=20260913x"></script>
 <script src="hotwire.js?v=20260918cf"></script>
-<script src="hotwire_gcode.js?v=20260928bo"></script>
+<script src="hotwire_gcode.js?v=20260930b"></script>
 <script src="sweeprot.js?v=20260913x"></script>
 <script src="earcut.js?v=20260921cu"></script>
 <script src="grbl.js?v=20260928nh"></script>
@@ -1558,41 +1581,43 @@
 <script src="simmodel.js?v=20260921b"></script>
 <script src="model3d.js?v=20260921vd"></script>
 <script src="model3d_gcode.js?v=20260919en"></script>
-<script src="core.js?v=20260928bd"></script>
+<script src="core.js?v=20260930wa"></script>
 <script src="cad.js?v=20260921sq"></script>
-<script src="gcode.js?v=20260922ni"></script>
+<script src="gcode.js?v=20260930wa"></script>
 <script src="spars.js?v=20260923np"></script>
 <script src="ribs.js?v=20260921cv"></script>
-<script src="dxfshapes.js?v=20260928bt"></script>
+<script src="dxfshapes.js?v=20260930b"></script>
 <script src="wingimport.js?v=20260928pw"></script>
-<script src="filesys.js?v=20260928nh"></script>
+<script src="filesys.js?v=20260930wa"></script>
 <script src="wingexport.js?v=20260920pc2"></script>
 <script src="gmfc.js?v=20260918a"></script>
-<script src="render.js?v=20260928pw"></script>
+<script src="render.js?v=20260930wa"></script>
 <script src="measure2d.js?v=20260918mt"></script>
-<script src="sidebar.js?v=20260928ni"></script>
-<script src="pathpreview.js?v=20260918nz"></script>
-<script src="gcodegen.js?v=20260928bo"></script>
-<script src="cutpanel.js?v=20260927dxfq"></script>
+<script src="sidebar.js?v=20260930wa"></script>
+<script src="pathpreview.js?v=20260930wa"></script>
+<script src="gcodegen.js?v=20260930wa"></script>
+<script src="cutpanel.js?v=20260930wa"></script>
 <script src="stege.js?v=20260919k5"></script>
 <script src="kernteile.js?v=20260919k3"></script>
 <script src="pc2wing.js?v=20260928rb"></script>
 <script src="stepexport.js?v=20260917p"></script>
-<script src="formenbau.js?v=20260928bp"></script>
-<script src="rumpf.js?v=20260921vc"></script>
+<script src="formenbau.js?v=20260928bu"></script>
+<script src="rumpf.js?v=20260930dm"></script>
 <script src="fraese.js?v=20260924hf"></script>
 <script src="schrift_fonts.js?v=20260918sc"></script>
 <script src="schrift.js?v=20260919en"></script>
+<script src="ausschnitt.js?v=20260930wf"></script>
 <script src="schrift_gcode.js?v=20260918sd"></script>
-<script src="foildb.js?v=20260925fd"></script>
-<script src="compute.js?v=20260927pw"></script>
-<script src="wings.js?v=20260928pw"></script>
+<script src="ausschnitt_gcode.js?v=20260930wa"></script>
+<script src="foildb.js?v=20260930dm"></script>
+<script src="compute.js?v=20260930wa"></script>
+<script src="wings.js?v=20260930rp"></script>
 <script src="overview_bg.js?v=20260914j"></script>
 <script src="overview.js?v=20260927pw"></script>
 <script src="ptedit.js?v=20260919en"></script>
 <script src="profedit.js?v=20260913x"></script>
 <script src="tabmenu.js?v=20260918b"></script>
-<script src="app.js?v=20260925fd"></script>
+<script src="app.js?v=20260930wa"></script>
 </body>
 </html>
 

@@ -519,6 +519,7 @@
         label = App.cutContextLabel ? App.cutContextLabel(eff) : eff;
         if (eff === 'dxf') { scene = App.buildDxfScene ? App.buildDxfScene() : null; }
         else if (eff === 'schrift') { scene = App.buildSchriftScene ? App.buildSchriftScene() : null; }
+        else if (eff === 'ausschnitt') { scene = App.buildAusschnittScene ? App.buildAusschnittScene() : null; }
         else if (eff === 'neg') { scene = buildNegScene(); }
         else { scene = buildScene(); }
         if (saved !== eff) { state.cfg.gcodeSource = saved; render(); }   // Zustand wiederherstellen

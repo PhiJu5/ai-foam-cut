@@ -389,12 +389,14 @@
            innerOff: { x: 0, y: 0 }, outerOff: { x: 0, y: 0 },  // Verschiebung je Kontur (mm) zum Ausrichten zweier separater DXF
            inner: null, outer: null, sync: [], start: 0, dir: 1, density: 240,
            span: 300, pick: null, kerf: true, safeLead: true,
+           approach: 'rear', approachDist: 10,   // Anfahrweg: rear|top|front|bottom + Abstand zur Blockfläche (mm)
            showBlock: true, blockMargin: 10,   // Mindestabstand des Blockrands zum Profil (rundum, mm)
            blockOvF: 20, blockOvR: 20,         // (Alt) getrennte Zugabe vorne/hinten — nicht mehr in der UI
            blockLenX: 0, blockHeightY: 0,      // feste Blockmaße X/Y (0 = automatisch aus Geometrie + Zugaben)
            blockZF: null, blockZR: null,       // Blockzugabe vor/hinter dem Querschnitt (mm, null = blockMargin)
            blockZT: null, blockZB: null,       // Blockzugabe über/unter dem Querschnitt (mm, null = blockMargin)
-           blockOutOn: false, blockOut: null,  // eigene Blockgeometrie am AUSSEN-Profil ({lenX,heightY,zf,zr,zt,zb}) -> Block verjüngt           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
+           blockOutOn: true, blockOut: null,   // eigene Blockgeometrie am AUSSEN-Profil ({lenX,heightY,zf,zr,zt,zb}) -> Block verjüngt; Standard AN
+           // Mehrere Segmente als RIPPENKETTE (wie Tragfläche): ribs = geordnete
            // Profile (je ein Layer aus dem geteilten Pool d.layers + Verschiebung),
            // jedes benachbarte Paar bildet ein Segment. segs = Snapshot je Segment
            // (Länge = ribs.length-1). Die obigen Flachfelder spiegeln activeSeg.
@@ -571,7 +573,7 @@
   // im Browser-Speicher -> gilt projektunabhängig. alpha = Deckkraft des Bands.
   const KTRUE_KEY = 'hotwing.kerfTrue';
   const KTRUE_VIEWS = [['core', 'Kerndesign'], ['neg', 'Negativdesign'], ['dxf', 'DXF-Formen'],
-    ['model', '3D-Modell'], ['schrift', 'Schriften']];
+    ['model', '3D-Modell'], ['schrift', 'Schriften'], ['ausschnitt', 'Tragflächenausschnitt']];
   const KTRUE_DEF = { on: false, alpha: 0.35 };
   const KTRUE = {};
   KTRUE_VIEWS.forEach(([v]) => KTRUE[v] = Object.assign({}, KTRUE_DEF));
