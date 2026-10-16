@@ -2796,6 +2796,8 @@
     "Die Projektdatei ist leer (0 Byte) — beim Speichern wurde nichts geschrieben (oft blockiert ein Virenscanner oder OneDrive). Bitte im Download-Ordner nach einer Kopie suchen.": "The project file is empty (0 bytes) — nothing was written when saving (often a virus scanner or OneDrive blocks it). Please look for a copy in the Downloads folder.",
     "Die Projektdatei ist beschädigt oder unvollständig (": "The project file is damaged or incomplete (",
     " Zeichen): ": " characters): ",
+    "Das passiert oft auf NAS-/Netzlaufwerken oder wenn ein Virenscanner (z. B. Avast) bzw. OneDrive das Schreiben blockiert. Bitte im nächsten Dialog den Speicherort noch einmal wählen — das Programm schreibt die Datei dann direkt.": "This often happens on NAS/network drives or when a virus scanner (e.g. Avast) or OneDrive blocks writing. Please choose the location once more in the next dialog — the program then writes the file directly.",
+    "Die Datei wird stattdessen in den Download-Ordner gespeichert.": "The file is saved to the Downloads folder instead.",
     "Unbekannter Befehl: ": "Unknown command: ",
     "Unbekannter Befehl. Eingabe: Befehl · x,y · @dx,dy · Länge<Winkel": "Unknown command. Input: command · x,y · @dx,dy · length<angle",
     "Nichts gewählt.": "Nothing selected.",

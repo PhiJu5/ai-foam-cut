@@ -877,6 +877,8 @@
     // Sperre hier abfangen, damit kein Modul am Schloss vorbeikommt. In der
     // Design-Ausgabe lässt demoSaveBlocked genau which==='svProject' durch.
     if (App.demoSaveBlocked && App.demoSaveBlocked(which)) return null;
+    // Browser-Schreibweg ist in dieser Sitzung schon gescheitert → gleich Systemdialog.
+    if (fsaWriteBroken && await nativeSaveAvail()) { await nativeSave(name, text); return null; }
     const ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
     // Startordner: zuletzt für dieses Dateiformat benutzter Ordner (Picker-id),
     // beim ersten Mal der Einstellungsordner des Typs.
@@ -906,7 +908,17 @@
       if (text && text.length && !size) throw new Error(T('Datei ist nach dem Schreiben leer (0 Byte).'));
     } catch (e) {
       if (w) { try { await w.abort(); } catch (e2) {} }
-      const err = new Error(T('Speichern fehlgeschlagen: ') + fh.name + '\n' + ((e && e.message) || e)
+      const head = T('Speichern fehlgeschlagen: ') + fh.name + '\n' + ((e && e.message) || e);
+      // Programm mit eigenem Server (exe): Systemdialog + direktes Schreiben
+      // anbieten und für den Rest der Sitzung gleich diesen Weg nehmen.
+      if (await nativeSaveAvail()) {
+        fsaWriteBroken = true;
+        alert(head + '\n\n' + T('Das passiert oft auf NAS-/Netzlaufwerken oder wenn ein Virenscanner (z. B. Avast) bzw. OneDrive das Schreiben blockiert. '
+          + 'Bitte im nächsten Dialog den Speicherort noch einmal wählen — das Programm schreibt die Datei dann direkt.'));
+        await nativeSave(name, text);
+        return null;
+      }
+      const err = new Error(head
         + '\n\n' + T('Häufige Ursache: ein Virenscanner (z. B. Avast) oder OneDrive blockiert das Schreiben. '
         + 'Die Datei wird stattdessen in den Download-Ordner gespeichert.'));
       err.name = 'WriteError';
@@ -914,6 +926,35 @@
     }
     toast('Gespeichert: ' + fh.name);
     return fh;
+  }
+  // Zweiter Schreibweg über den lokalen Server der exe (launcher.py bzw.
+  // electron/server.js, /__savefile__): Systemdialog, Datei wird direkt
+  // geschrieben — ohne die .crswap-Zwischendatei des Browsers, die auf NAS/
+  // SMB-Freigaben oft scheitert. path = dort zuvor gespeicherter Pfad
+  // (Strg+S schreibt dann ohne Dialog). Rückgabe {path, name} | null (Abbruch).
+  let nativeAvail = null, fsaWriteBroken = false;
+  async function nativeSaveAvail() {
+    if (nativeAvail === null) {
+      try { const r = await fetch('/__savefile__'); nativeAvail = r.ok && !!(await r.json()).avail; }
+      catch (e) { nativeAvail = false; }
+    }
+    return nativeAvail;
+  }
+  async function nativeSave(name, text, path) {
+    const q = '?name=' + encodeURIComponent(name) + (path ? '&path=' + encodeURIComponent(path) : '');
+    let j = { ok: false };
+    try { const r = await fetch('/__savefile__' + q, { method: 'POST', body: text }); j = await r.json(); }
+    catch (e) { j = { ok: false, error: (e && e.message) || String(e) }; }
+    if (j.ok) {
+      App.lastNativeSave = { path: j.path, name: j.name, t: Date.now() };
+      toast('Gespeichert: ' + j.path);
+      return { path: j.path, name: j.name };
+    }
+    if (j.cancel) return null;
+    const err = new Error(T('Speichern fehlgeschlagen: ') + (j.path || name) + '\n' + (j.error || '')
+      + '\n\n' + T('Die Datei wird stattdessen in den Download-Ordner gespeichert.'));
+    err.name = 'WriteError';
+    throw err;
   }
   // Kurze Statusmeldung oben in der Kopfzeile.
   let toastT = 0;
@@ -964,7 +1005,7 @@
   Object.assign(App, { buildBlockHScene, buildBlockScene, buildCalibScene, buildGuillotineScene, buildNegScene, buildScene });
   Object.assign(App, { applyDemoUi, demoMaskView, demoOn, download, downloadNamed, feedJumpLines, maskGcodeLine, negProjection, outsideFeed });
   Object.assign(App, { askAxisNames, exportGcodeAxes, remapAxisWords });
-  Object.assign(App, { blockCutY, busy, promptFileName, safeHeight, saveFilePicker, setGcode, setGcodeEditMode, shellCutGeom, sweepProj2, toast, withBusy });
+  Object.assign(App, { blockCutY, busy, promptFileName, nativeSave, nativeSaveAvail, safeHeight, saveFilePicker, setGcode, setGcodeEditMode, shellCutGeom, sweepProj2, toast, withBusy });
   Object.assign(App, { gcodeSceneRefresh, loadGcodeText, sceneForSource });
   Object.defineProperty(App, 'toastT', { get: () => toastT, set: v => { toastT = v; }, enumerable: true, configurable: true });
 })();

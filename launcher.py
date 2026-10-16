@@ -116,6 +116,56 @@ def msgbox(text, title):
         pass
 
 
+_save_lock = threading.Lock()
+
+def ask_save_path(name):
+    """Systemeigener Speichern-Dialog (tkinter = Windows-Standarddialog).
+    Leerer String = abgebrochen."""
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    ext = os.path.splitext(name)[1]
+    types = [(ext.upper().lstrip(".") + " (*" + ext + ")", "*" + ext)] if ext else []
+    try:
+        return filedialog.asksaveasfilename(parent=root, initialfile=name,
+                                            defaultextension=ext,
+                                            filetypes=types + [("*.*", "*.*")]) or ""
+    finally:
+        root.destroy()
+
+_saved_paths = set()   # in dieser Sitzung im Dialog gewaehlte Pfade (Strg+S ohne Dialog)
+
+def native_save(name, data, again=None):
+    """Rueckfall fuer den Datei-Export (/__savefile__): der Browser schreibt ueber
+    eine .crswap-Zwischendatei und benennt sie danach um - auf NAS/SMB-Freigaben
+    scheitert das oft. Hier waehlt der Nutzer den Ort im Systemdialog und Python
+    schreibt die Datei direkt. again = schon einmal gewaehlter Pfad (nur solche
+    aus _saved_paths, sonst koennte die Seite beliebige Dateien schreiben)."""
+    name = os.path.basename(name or "datei.txt")
+    with _save_lock:   # immer nur ein Dialog
+        path = os.path.normpath(again) if again else ""
+        if path and path not in _saved_paths:
+            path = ""
+        if not path:
+            try:
+                path = ask_save_path(name)
+            except Exception as e:
+                return {"ok": False, "error": "Dialog: %s" % e}
+            if not path:
+                return {"ok": False, "cancel": True}
+            path = os.path.normpath(path)
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+            if len(data) and os.path.getsize(path) != len(data):
+                return {"ok": False, "error": "Groesse stimmt nicht", "path": path}
+            _saved_paths.add(path)
+            return {"ok": True, "path": path, "name": os.path.basename(path)}
+        except Exception as e:
+            return {"ok": False, "error": str(e), "path": path}
+
 def open_browser(url):
     """Browser oeffnen. Unter Linux setzt PyInstaller LD_LIBRARY_PATH auf die
     eigenen Bibliotheken - ein Browser, der das erbt, stuerzt ab oder startet
@@ -330,6 +380,9 @@ def main():
                 else:
                     self._send_json_bytes(b"", status=404)
                 return
+            if path == "/__savefile__":
+                self._send_json_bytes(b'{"avail":true}')   # zweiter Schreibweg vorhanden
+                return
             if path == "/__foildb__":
                 try:
                     with open(foildb_file, "rb") as f:
@@ -350,6 +403,18 @@ def main():
                     self._send_json_bytes(b'{"ok":true}')
                 except Exception:
                     self._send_json_bytes(b'{"ok":false}', status=500)
+                return
+            if path == "/__savefile__":
+                length = int(self.headers.get("Content-Length", "0"))
+                data = self.rfile.read(length)
+                # Nur aus der eigenen Seite (fremde Webseiten duerfen keinen Dialog oeffnen).
+                origin = (self.headers.get("Origin") or "").split("://")[-1].rstrip("/")
+                if origin and origin != self.headers.get("Host", ""):
+                    self._send_json_bytes(b'{"ok":false}', status=403)
+                    return
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                r = native_save(q.get("name", [""])[0], data, q.get("path", [None])[0])
+                self._send_json_bytes(json.dumps(r).encode("utf-8"))
                 return
             if path == "/__foildb__":
                 try:

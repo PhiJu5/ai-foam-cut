@@ -4,6 +4,11 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.92] — 2026-10-16
+### Speichern auf NAS-/Netzlaufwerken
+- Der Browser-Dateizugriff schreibt über eine Zwischendatei (`.crswap`) neben dem Ziel und benennt sie danach um — auf NAS/SMB-Freigaben scheitert das oft. Scheitert das Schreiben, öffnet das Programm jetzt seinen **eigenen Windows-Speichern-Dialog** (lokaler Server der exe bzw. des Programmfensters) und schreibt die Datei direkt; für den Rest der Sitzung geht jedes Speichern gleich diesen Weg.
+- **Strg+S** schreibt danach ohne Dialog wieder in dieselbe Datei. Direktes Schreiben ist nur an Pfade erlaubt, die in dieser Sitzung im Dialog gewählt wurden; Anfragen fremder Webseiten werden abgewiesen.
+
 ## [1.91] — 2026-10-16
 ### Behoben: leere Projektdatei nach dem Speichern („Unexpected end of JSON input“) (2026-10-16)
 - Der Speichern-Dialog legt die Datei sofort leer an. Scheiterte danach das Schreiben (z. B. Virenscanner wie Avast blockiert die Zwischendatei, OneDrive-Sperre), wich das Programm still auf einen Download aus — am gewählten Ort blieb eine **0-Byte-Datei**, die sich nicht mehr laden ließ.

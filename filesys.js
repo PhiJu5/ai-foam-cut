@@ -1729,7 +1729,9 @@
   // wurde. Strg+S (saveProject({ quick: true })) schreibt ohne Dialog direkt dorthin;
   // ohne Datei (neues Projekt, Download-Fallback) kommt einmal der Speichern-Dialog.
   let projFileHandle = null;
-  function setProjFileHandle(h) { projFileHandle = (h && h.createWritable) ? h : null; }
+  // Gleiches für den Systemdialog-Weg (App.nativeSave, z. B. NAS): Pfad statt Handle.
+  let projNativePath = null;
+  function setProjFileHandle(h) { projFileHandle = (h && h.createWritable) ? h : null; projNativePath = null; }
   async function saveProject(opts) {
     const quick = !!(opts && opts.quick);
     const enc = p => ({ name: p.name, pts: p.map(q => [+q.x.toFixed(6), +q.y.toFixed(6)]) });
@@ -1790,8 +1792,16 @@
         }
       } catch (e) { /* Datei weg/gesperrt → Dialog */ }
     }
+    if (quick && projNativePath && App.nativeSave && !App.demoSaveBlocked('svProject')) {
+      try { const r = await App.nativeSave(projFileBase() + '.json', text, projNativePath); if (r) { recordRecent(null, r.name); return; } }
+      catch (e) { /* Pfad nicht mehr beschreibbar → Dialog */ }
+    }
+    const t0 = Date.now();
     const fh = await exportViaPicker(projFileBase() + '.json', text, 'application/json', 'svProject');
     if (fh) { setProjFileHandle(fh); recordRecent(fh); }
+    else if (App.lastNativeSave && App.lastNativeSave.t >= t0) {   // über den Systemdialog gespeichert
+      setProjFileHandle(null); projNativePath = App.lastNativeSave.path; recordRecent(null, App.lastNativeSave.name);
+    }
   }
   function decProf(o) { const p = o.pts.map(a => ({ x: a[0], y: a[1] })); p.name = o.name || 'Profil'; return p; }
   function loadProject(txt) {

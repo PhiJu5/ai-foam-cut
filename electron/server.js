@@ -51,6 +51,36 @@ function sendText(res, text) {
   res.end(buf);
 }
 
+/** Systemeigener Speichern-Dialog + direktes Schreiben (/__savefile__). */
+// again = schon einmal gewaehlter Pfad: nur solche aus savedPaths (sonst koennte
+// die Seite beliebige Dateien schreiben) - fuer Strg+S ohne Dialog.
+let saveBusy = Promise.resolve();
+const savedPaths = new Set();
+function nativeSave(name, data, again) {
+  const run = async () => {
+    let file = again ? path.normalize(String(again)) : '';
+    if (file && !savedPaths.has(file)) file = '';
+    if (!file) {
+      const { dialog, BrowserWindow } = require('electron');
+      const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0] || null;
+      const ext = path.extname(name).replace(/^\./, '');
+      const opts = { defaultPath: name, filters: (ext ? [{ name: ext.toUpperCase(), extensions: [ext] }] : []).concat([{ name: '*', extensions: ['*'] }]) };
+      const r = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+      if (r.canceled || !r.filePath) return { ok: false, cancel: true };
+      file = path.normalize(r.filePath);
+    }
+    try {
+      fs.writeFileSync(file, data);
+      if (data.length && fs.statSync(file).size !== data.length) return { ok: false, error: 'size mismatch', path: file };
+      savedPaths.add(file);
+      return { ok: true, path: file, name: path.basename(file) };
+    } catch (e) { return { ok: false, error: String(e && e.message || e), path: file }; }
+  };
+  const p = saveBusy.then(run, run);   // immer nur ein Dialog
+  saveBusy = p.catch(() => {});
+  return p;
+}
+
 function sendJson(res, data, status) {
   const buf = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf-8');
   res.statusCode = status || 200;
@@ -101,6 +131,27 @@ function createServer(rootDir, getState) {
         return;
       }
       res.statusCode = 405; res.end(); return;
+    }
+
+    // Rueckfall fuer den Datei-Export: der Browser-Dateizugriff schreibt ueber
+    // eine .crswap-Zwischendatei und benennt sie danach um - auf NAS/SMB-
+    // Freigaben scheitert das oft. Hier waehlt der Nutzer den Ort im System-
+    // dialog, Node schreibt die Datei direkt (wie launcher.py native_save).
+    if (pathname === '/__savefile__') {
+      if (req.method === 'GET') { sendJson(res, '{"avail":true}'); return; }   // zweiter Schreibweg vorhanden
+      if (req.method !== 'POST') { res.statusCode = 405; res.end(); return; }
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        // Nur aus der eigenen Seite (fremde Webseiten duerfen keinen Dialog oeffnen).
+        const o = req.headers.origin;
+        if (o && o.replace(/^https?:\/\//, '').replace(/\/$/, '') !== String(req.headers.host || '')) { sendJson(res, '{"ok":false}', 403); return; }
+        const q = url.parse(req.url, true).query;
+        nativeSave(path.basename(String(q.name || 'datei.txt')), Buffer.concat(chunks), q.path)
+          .then(r => sendJson(res, JSON.stringify(r)), e => sendJson(res, JSON.stringify({ ok: false, error: String(e && e.message || e) })));
+      });
+      req.on('error', () => sendJson(res, '{"ok":false}', 500));
+      return;
     }
 
     // Profildatenbank (foildb.js): eine Datei neben der Einstellungsdatei,
