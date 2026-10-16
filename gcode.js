@@ -864,7 +864,10 @@
       // Ohne festen Ordner: einmalige Erinnerung, einen anzulegen.
       if (App.dirReminder && App.dirReminder(which)) return;
       try { await saveFilePicker(name, text, mime, which); return; }
-      catch (e) { if (e && e.name === 'AbortError') return; }   // Abbruch: nichts tun
+      catch (e) {
+        if (e && e.name === 'AbortError') return;   // Abbruch: nichts tun
+        if (e && e.name === 'WriteError') alert(e.message);   // Schreiben gescheitert: sagen, dann Download
+      }
     }
     // 3) Ohne File System Access API: normaler Download als letzter Ausweg.
     App.anchorDownload(name, text, mime);
@@ -892,7 +895,23 @@
       fh = await window.showSaveFilePicker(base);   // ohne Typ-Filter
     }
     if (App.markDirUsed) App.markDirUsed(which, ext);
-    const w = await fh.createWritable(); await w.write(text); await w.close();
+    // Der Dialog hat die Datei bereits LEER angelegt. Scheitert das Schreiben
+    // (Virenscanner blockiert die .crswap-Zwischendatei, OneDrive-Sperre …),
+    // bliebe sie mit 0 Byte liegen — beim Laden käme nur „Unexpected end of
+    // JSON input". Darum Fehler laut melden und das Ergebnis nachprüfen.
+    let w = null;
+    try {
+      w = await fh.createWritable(); await w.write(text); await w.close(); w = null;
+      const size = (await fh.getFile()).size;
+      if (text && text.length && !size) throw new Error(T('Datei ist nach dem Schreiben leer (0 Byte).'));
+    } catch (e) {
+      if (w) { try { await w.abort(); } catch (e2) {} }
+      const err = new Error(T('Speichern fehlgeschlagen: ') + fh.name + '\n' + ((e && e.message) || e)
+        + '\n\n' + T('Häufige Ursache: ein Virenscanner (z. B. Avast) oder OneDrive blockiert das Schreiben. '
+        + 'Die Datei wird stattdessen in den Download-Ordner gespeichert.'));
+      err.name = 'WriteError';
+      throw err;
+    }
     toast('Gespeichert: ' + fh.name);
     return fh;
   }

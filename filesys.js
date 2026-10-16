@@ -696,7 +696,10 @@
     if (FS_SUPPORTED && window.showSaveFilePicker) {
       if (dirReminder(which)) return null;                 // erst Ordner einrichten
       try { return await saveFilePicker(name, text, mime, which || 'save'); }
-      catch (e) { if (e && e.name === 'AbortError') return null; }   // Abbruch: nichts tun
+      catch (e) {
+        if (e && e.name === 'AbortError') return null;   // Abbruch: nichts tun
+        if (e && e.name === 'WriteError') alert(e.message);   // Schreiben gescheitert: sagen, dann Download
+      }
     }
     anchorDownload(name, text, mime, which); return null;
   }
@@ -1792,7 +1795,16 @@
   }
   function decProf(o) { const p = o.pts.map(a => ({ x: a[0], y: a[1] })); p.name = o.name || 'Profil'; return p; }
   function loadProject(txt) {
-    const d = JSON.parse(txt);
+    // Leere/abgeschnittene Datei verständlich melden statt „Unexpected end of JSON input".
+    if (!txt || !String(txt).trim())
+      throw new Error(T('Die Projektdatei ist leer (0 Byte) — beim Speichern wurde nichts geschrieben '
+        + '(oft blockiert ein Virenscanner oder OneDrive). Bitte im Download-Ordner nach einer Kopie suchen.'));
+    let d;
+    try { d = JSON.parse(txt); }
+    catch (e) {
+      throw new Error(T('Die Projektdatei ist beschädigt oder unvollständig (') + String(txt).length
+        + T(' Zeichen): ') + e.message);
+    }
     setProjFileHandle(null);   // Aufrufer mit Datei-Handle setzen es danach neu
     // Maschinendaten (MACHINE_KEYS) NIE aus dem Projekt übernehmen — sie
     // gehören zu den Einstellungen und würden sonst überschrieben. Ältere

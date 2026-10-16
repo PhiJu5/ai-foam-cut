@@ -4,7 +4,12 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
-## [Unveröffentlicht]
+## [1.91] — 2026-10-16
+### Behoben: leere Projektdatei nach dem Speichern („Unexpected end of JSON input“) (2026-10-16)
+- Der Speichern-Dialog legt die Datei sofort leer an. Scheiterte danach das Schreiben (z. B. Virenscanner wie Avast blockiert die Zwischendatei, OneDrive-Sperre), wich das Programm still auf einen Download aus — am gewählten Ort blieb eine **0-Byte-Datei**, die sich nicht mehr laden ließ.
+- Jetzt wird nach dem Schreiben die Dateigröße geprüft; ein Fehler wird **gemeldet** (mit Ursache) und die Datei zusätzlich in den Download-Ordner gespeichert. Gilt für alle Exporte über den Speichern-Dialog.
+- Beim Laden einer leeren oder abgeschnittenen Projektdatei erscheint eine verständliche Meldung statt des JSON-Fehlers.
+
 ### Windows 7: Zahlenfelder wieder per Tastatur beschreibbar (2026-10-09)
 - In der Win7-32-Bit-Ausgabe (Electron 22) nahmen Zahlenfelder der Seitenleisten (z. B. Pfeilwinkel der
   Tragfläche) keine Ziffern von der Tastatur an — nur die ▲/▼-Pfeile wirkten. Auf Windows 7/8 wird der
