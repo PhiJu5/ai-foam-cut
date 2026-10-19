@@ -221,7 +221,7 @@
         const ins = body.querySelectorAll('.tm-name'); const last = ins[ins.length - 1];
         if (last) { last.focus(); last.select(); }
       }),
-      mkBtn(T('Standard wiederherstellen'), 'Standard-Reiterleiste (Menüs „Tragflächen", „Komplexe Formen", „Spezial Module") wiederherstellen', () => {
+      mkBtn(T('Standard wiederherstellen'), 'Standard-Reiterleiste (Menüs „Aero", „Tragflächen", „Rumpf", „Komplexe Formen", „Spezial Module") wiederherstellen', () => {
         if (!confirm(T('Reiterleiste auf die Standard-Gliederung zurücksetzen?'))) return;
         layout = clone(DEFAULT); commit(); rebuild();
       }));

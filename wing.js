@@ -17,6 +17,14 @@
 (function (global) {
   'use strict';
 
+  // Rippenkontur: normiertes Profil -> N Punkte. Methode je Tragfläche (cfg.ribFit):
+  // 'cr' Catmull-Rom neu abtasten (bisher), 'bspline' Ausgleich mit Toleranz, 'interp' exakt
+  // durch die Punkte (profilfit.js). chord (mm) rechnet die Toleranz auf das normierte Profil um.
+  let RF = null;
+  function ribPts(prof, N, chord) {
+    return (RF && RF.mode !== 'cr' && global.ProfilFit) ? global.ProfilFit.ribSample(prof, N, chord, RF) : Airfoil.resample(prof, N);
+  }
+
   // normiertes Profil -> in mm platziert
   function place(normPts, opts) {
     const { chord, washoutDeg, twistRefX, leOffset, z, yOffset } = opts;
@@ -59,11 +67,11 @@
     // um verschiedene Sehnenpunkte verdreht werden. Fällt zurück auf o.twistRef.
     const rootTR = o.rootTwistRef != null ? o.rootTwistRef : o.twistRef;
     const tipTR  = o.tipTwistRef  != null ? o.tipTwistRef  : o.twistRef;
-    const root = place(Airfoil.resample(rootProf, N), {
+    const root = place(ribPts(rootProf, N, o.rootChord), {
       chord: o.rootChord, washoutDeg: o.rootTwist, twistRefX: rootTR,
       leOffset: 0, z: 0
     });
-    const tip = place(Airfoil.resample(tipProf, N), {
+    const tip = place(ribPts(tipProf, N, o.tipChord), {
       chord: o.tipChord, washoutDeg: o.tipTwist, twistRefX: tipTR,
       leOffset: o.sweep, z: o.span
     });
@@ -74,6 +82,9 @@
     // mm = ((rot(n-px)+px)*chord + leOffset, rot_y*chord + shift), flip später.
     root.pl = { chord: o.rootChord, twist: o.rootTwist, twistRef: rootTR, leOffset: 0, shift: rShift, flip: false };
     tip.pl  = { chord: o.tipChord,  twist: o.tipTwist,  twistRef: tipTR, leOffset: o.sweep, shift: tShift, flip: false };
+    // Ausgangsprofil (normiert, vor dem Neu-Abtasten): Formenbau passt seine Kurve an
+    // diese Originalpunkte an und misst die Abweichung dagegen (mit pl in mm umgerechnet).
+    root.src = rootProf; tip.src = tipProf;
     return { root, tip, span: o.span, N };
   }
 
@@ -84,7 +95,7 @@
   //   'chord'  Sehne am Twist-Bezugspunkt (liegt bei y=0) -> immer 0
   //   'hinge'  Scharnierlinie (Seite + % der Sehne ab Endleiste)
   function ribRefY(prof, N, opts, mode, hingeSide, hingePct) {
-    const pts = place(Airfoil.resample(prof, N), opts).pts;
+    const pts = place(ribPts(prof, N, opts.chord), opts).pts;
     if (mode === 'top')    { let hi = -Infinity; for (const p of pts) if (p.y > hi) hi = p.y; return hi; }
     if (mode === 'bottom') { let lo =  Infinity; for (const p of pts) if (p.y < lo) lo = p.y; return lo; }
     if (mode === 'hinge') {
@@ -109,6 +120,7 @@
 
   function build(cfg) {
     const N = cfg.points;
+    RF = cfg.ribFit || null;
     // Globaler Drehpunkt (Schränkung) nur noch als Rückfall-Wert. Der Drehpunkt
     // wird primär je Profil gesetzt: root.twistRef bzw. seg.twistRef.
     const trDef = cfg.twistRef != null ? cfg.twistRef : 0.25;
@@ -171,7 +183,7 @@
     let cumZ = 0, cumLE = 0;
     // V-Form: Höhe der Profilsehne, kumuliert über die Segmente
     let cumY = 0, cumAng = 0;
-    const st0 = place(Airfoil.resample(prevProf, N), {
+    const st0 = place(ribPts(prevProf, N, prevChord), {
       chord: prevChord, washoutDeg: 0, twistRefX: rootTR, leOffset: 0, z: 0
     });
     st0.yRise = 0; st0.dihAngle = 0;
@@ -269,7 +281,7 @@
       }));
       // absolute Station (Außenende).
       cumZ += s.span; cumLE += s.sweep;
-      const st = place(Airfoil.resample(s.profile, N), {
+      const st = place(ribPts(s.profile, N, s.chord), {
         chord: s.chord, washoutDeg: s.washout, twistRefX: trOf(s),
         leOffset: cumLE, z: cumZ
       });
@@ -291,5 +303,5 @@
     return { stations, cuts, totalSpan: cumZ, N };
   }
 
-  global.Wing = { build, place, segmentCut };
+  global.Wing = { build, place, segmentCut, ribPts };
 })(window);

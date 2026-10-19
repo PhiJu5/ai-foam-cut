@@ -496,7 +496,7 @@
       const txt = T('Demo: Die Zahlenwerte sind ausgeblendet — Schneiden ist möglich, '
         + 'Speichern und Kopieren nicht.').replace(/["\\]/g, '\\$&');
       st.textContent = selector + ':not(:empty)::before{content:"' + txt + '";display:block;'
-        + 'padding:4px 12px;color:#fbbf24;background:#1f2937;position:sticky;top:0;z-index:1}';
+        + 'padding:4px 12px;color:var(--demo-fg,#fbbf24);background:var(--demo-bg,#1f2937);position:sticky;top:0;z-index:1}';
       document.head.appendChild(st);
     }
     return true;

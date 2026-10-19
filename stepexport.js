@@ -10,6 +10,11 @@
  *   - Deckel: Wurzel- und Spitzenring als planare Fläche.
  *   V - E + F = 2M - 3M + (M+2) = 2  (Euler, geschlossene Mannigfaltigkeit).
  *
+ * ringsToStepSpline (Formenbau-Urmodell, Standard): die Querschnitte werden nicht durch die
+ * Punkte interpoliert, sondern als B-Spline mit EINEM gemeinsamen Knotenvektor angepasst
+ * (fitRingNet, Knotenvorgabe = Knoten der Profilkurven) -> Profilkurven exakt, Datei klein.
+ * Flächen: Oberseite, Unterseite (Nase = dreifacher Knoten) und ggf. Endleistenfläche.
+ *
  * Alle Spannketten nutzen EINEN gemeinsamen Knotenvektor (gemeinsame Parametrisierung
  * über die Ring-Schwerpunkte); die u=const-Isokurven der Streifenflächen sind damit
  * exakt die geteilten Kantenkurven -> der Kernel näht die Schale lückenlos.
@@ -371,14 +376,25 @@
     // nicht zu einem Solid vernäht). Bei genau EINER Ecke (scharfe Endleiste) an der gegenüberliegenden
     // Seite (Nase) teilen — dort bleibt eine feine C0-Kante; mit Endleistendicke > 0 (stumpfe Endleiste
     // = zwei Ecken) entfällt sie und das ganze Profil wird EINE glatte Fläche.
-    if (S.length === 0) S = [0, Math.round(M / 4), Math.round(M / 2), Math.round(3 * M / 4)];
-    else if (S.length === 1) S.push((S[0] + Math.round(M / 2)) % M);
-    S = Array.from(new Set(S)).sort((a, b) => a - b);
-    const arcs = [];
-    for (let k = 0; k < S.length; k++) {
-      const a = S[k], b = S[(k + 1) % S.length], idx = [a]; let i = a;
-      while (i !== b) { i = (i + 1) % M; idx.push(i); }
-      arcs.push(idx);   // [a, ..., b] inklusive beider Ecken
+    /* Kurven-Netz (opt.uspline, ringsToStepSpline): die „Ringe" sind B-Spline-Kontrollpunkte mit
+     * gemeinsamem Knotenvektor; Bögen fest = Oberseite (0..Nase), Unterseite (Nase..Ende) und — bei
+     * offener Endleiste — die Endleistenfläche (Grad 1). Keine Ecken-/Lochlogik. */
+    const US = opt && opt.uspline;
+    let arcs = [];
+    if (US) {
+      const jN = US.jNose, rng = (a, b) => { const r = []; for (let i = a; i <= b; i++) r.push(i); return r; };
+      S = US.closed ? [0, jN] : [0, jN, M - 1];
+      arcs = [rng(0, jN), rng(jN, M - 1)];
+      if (!US.closed) arcs.push([M - 1, 0]);
+    } else {
+      if (S.length === 0) S = [0, Math.round(M / 4), Math.round(M / 2), Math.round(3 * M / 4)];
+      else if (S.length === 1) S.push((S[0] + Math.round(M / 2)) % M);
+      S = Array.from(new Set(S)).sort((a, b) => a - b);
+      for (let k = 0; k < S.length; k++) {
+        const a = S[k], b = S[(k + 1) % S.length], idx = [a]; let i = a;
+        while (i !== b) { i = (i + 1) % M; idx.push(i); }
+        arcs.push(idx);   // [a, ..., b] inklusive beider Ecken
+      }
     }
 
     // Randvertices nur an Split-Indizes (verschweißt: koinzidente Ecken teilen sich einen Vertex)
@@ -388,6 +404,7 @@
       if (!vm0.has(k0)) vm0.set(k0, w.add('VERTEX_POINT(\'\',' + w.pt(p0) + ')')); vtx0[s] = vm0.get(k0);
       if (!vm1.has(k1)) vm1.set(k1, w.add('VERTEX_POINT(\'\',' + w.pt(p1) + ')')); vtx1[s] = vm1.get(k1);
     }
+    if (US && US.closed) { vtx0[M - 1] = vtx0[0]; vtx1[M - 1] = vtx1[0]; }   // scharfe Endleiste: Ende = Anfang
     // Eckspannkurven (geteilte u-Ränder zwischen Nachbarbögen): v-Kurve durch chainCo[s]; null wenn entartet
     const cornerSpan = {};
     for (const s of S) {
@@ -396,10 +413,20 @@
       cornerSpan[s] = degen ? null : w.add('EDGE_CURVE(\'\',' + vtx0[s] + ',' + vtx1[s] + ',' +
         w.add("B_SPLINE_CURVE_WITH_KNOTS(''," + p + ',(' + co2refs(co).join(',') + '),.UNSPECIFIED.,.F.,.F.,' + vmult + ',' + vknot + ',.UNSPECIFIED.)') + ',.T.)');
     }
+    if (US && US.closed) cornerSpan[M - 1] = cornerSpan[0];   // Ober- und Unterseite teilen die Endleistenkante
     // Kontrollnetz eines Bogens als stückweise Bézier (Grad 3) aus den Katmull-Rom-Kontrollen:
     // u-Spalten [P0, Q1_0, Q2_0, P1, Q1_1, Q2_1, ..., P_{n-1}]; Knoten je Segment (Vielfachheit 3),
     // geometrisch C1 (überschwingfrei). ctrl[nu][nv].
     function interpU(idx) {
+      if (US) {
+        if (idx.length === 2 && idx[0] === M - 1 && idx[1] === 0)   // Endleistenfläche: gerade (Grad 1)
+          return { pu: 1, uknots: realList([0, 1]), umult: intList([2, 2]), ctrl: [chainCo[M - 1], chainCo[0]] };
+        const up = idx[0] === 0, h = US.knots.filter(t => up ? t < 0.5 - 1e-12 : t > 0.5 + 1e-12);
+        const kv = up ? h.concat([0.5, 0.5, 0.5, 0.5]) : [0.5, 0.5, 0.5, 0.5].concat(h);
+        const kn = [], mu = [];
+        for (let i = 0; i < kv.length;) { let j = i; while (j < kv.length && Math.abs(kv[j] - kv[i]) < 1e-12) j++; kn.push(kv[i]); mu.push(j - i); i = j; }
+        return { pu: 3, uknots: realList(kn), umult: intList(mu), ctrl: idx.map(i => chainCo[i]) };
+      }
       const n = idx.length, ctrl = [chainCo[idx[0]]];
       for (let k = 0; k < n - 1; k++) { ctrl.push(Q1[idx[k]]); ctrl.push(Q2[idx[k]]); ctrl.push(chainCo[idx[k + 1]]); }
       const mult = [4]; for (let k = 1; k < n - 1; k++) mult.push(3); mult.push(4);
@@ -661,7 +688,135 @@
     return assemble(w, [shell], opt);
   }
 
-  const CORE = { ringsToStep, _R: R, _interp: commonKnots };
+  /* Ringe (gleiche Punktzahl M, Punkt i liegt in jedem Ring auf demselben Kurvenparameter:
+   * Kosinus-Verteilung je Profilseite, Nase bei Index ceil(M/2)-1 — so tastet der Formenbau seine
+   * B-Spline-Kurven ab) -> gemeinsames B-Spline-Kontrollnetz. Parameter s: Oberseite 0..0,5,
+   * Unterseite 0,5..1, Knoten 0,5 dreifach (Nase = Kontrollpunkt). Endleistenpunkte und Nase
+   * fest. Kleinste Quadrate über alle Ringe mit EINER Matrix; Knotenspannen werden halbiert,
+   * solange irgendein Ringpunkt weiter als tol von seiner Kurve liegt. Ringe einer Formenbau-
+   * Station liegen exakt im Spline-Raum, Zwischenringe (linear) ebenso; Aufmaß, Endleistendicke
+   * oder V-Form-Schnitt werden auf tol angenähert. Rückgabe { rings (Kontrollpunkte), knots,
+   * jNose, closed, dev, K }. */
+  function fitRingNet(rings, tol, maxK, hint) {
+    const M = rings[0].pts.length, Mu = Math.ceil(M / 2), Ml = M - Mu + 1, iLE = Mu - 1;
+    const s = [];
+    for (let i = 0; i < Mu; i++) s.push(0.25 * (1 - Math.cos(Math.PI * i / (Mu - 1))));
+    for (let j = 1; j < Ml; j++) s.push(0.5 + 0.25 * (1 - Math.cos(Math.PI * j / (Ml - 1))));
+    const G = rings.map(r => r.pts.map(p => [p.x, p.y, (p.z == null ? r.z : p.z)]));
+    // Startknoten: je Seite ~20 innere Knoten an Quantilen der Parameter
+    const quant = (a, b, n) => { const S = s.filter(v => v > a && v < b), out = []; for (let j = 1; j <= n; j++) out.push(S[Math.min(S.length - 1, Math.round(j * (S.length - 1) / (n + 1)))]); return out; };
+    // Mit Knotenvorgabe (Knoten der Stationskurven): exakte Darstellung der Stationen und ihrer
+    // linearen Zwischenringe; fast gleiche Knoten zusammenlegen (Kondition).
+    let seed = hint && hint.length ? hint.slice() : quant(0, 0.5, 20).concat(quant(0.5, 1, 20));
+    seed = seed.filter(v => v > 1e-5 && v < 1 - 1e-5 && Math.abs(v - 0.5) > 1e-5).sort((a, b) => a - b);
+    const merged = []; for (const v of seed) if (!merged.length || v - merged[merged.length - 1] > 2e-5) merged.push(v);
+    // Jede Knotenspanne braucht mindestens einen Ringpunkt (sonst singulär / schlecht konditioniert:
+    // die Kurve trifft die Punkte, schwingt aber dazwischen aus). Knoten ohne Punkt davor entfallen.
+    const between = (a, b) => { let c = 0; for (const v of s) if (v > a && v < b) c++; return c; };
+    const kept = []; let last = 0;
+    for (const v of merged) {
+      const lim = v < 0.5 ? 0.5 : 1;
+      if (last < 0.5 && v > 0.5) last = 0.5;
+      if (between(last, v) >= 1 && between(v, lim) >= 1) { kept.push(v); last = v; }
+    }
+    let inner = kept.concat([0.5, 0.5, 0.5]).sort((a, b) => a - b);
+    const dropped = merged.length - kept.length;
+    tol = tol || 0.001; maxK = maxK || Math.min(400, M - 4);
+    let res = null;
+    for (let pass = 0; pass < 16; pass++) {
+      const U = [0, 0, 0, 0].concat(inner, [1, 1, 1, 1]), K = U.length - 4, n = K - 1, jN = inner.filter(v => v < 0.5).length + 3;
+      const rows = s.map(u => { const uu = Math.min(u, 1 - 1e-12), sp = findSpan(n, 3, uu, U); return { sp, N: basisFuns(sp, uu, 3, U) }; });
+      rows[M - 1] = { sp: n, N: [0, 0, 0, 1] };
+      rows[iLE] = { sp: jN, N: [0, 0, 0, 1] };   // u = 0,5 exakt -> Kontrollpunkt jN
+      const fixed = new Set([0, jN, K - 1]), free = []; for (let j = 0; j < K; j++) if (!fixed.has(j)) free.push(j);
+      const col = new Int32Array(K).fill(-1); free.forEach((j, k) => { col[j] = k; });
+      const F = free.length, A = []; for (let i = 0; i < F; i++) A.push(new Float64Array(F));
+      const Wd = 3 * G.length, B = []; for (let i = 0; i < F; i++) B.push(new Float64Array(Wd));
+      const fixVal = (r, j) => j === 0 ? G[r][0] : j === K - 1 ? G[r][M - 1] : G[r][iLE];
+      for (let i = 0; i < M; i++) {
+        const { sp, N } = rows[i];
+        for (let a = 0; a < 4; a++) {
+          const ja = sp - 3 + a, ca = col[ja]; if (ca < 0 || !N[a]) continue;
+          for (let b2 = 0; b2 < 4; b2++) { const jb = sp - 3 + b2, cb = col[jb]; if (cb >= 0 && N[b2]) A[ca][cb] += N[a] * N[b2]; }
+          for (let r = 0; r < G.length; r++) {
+            let px = G[r][i][0], py = G[r][i][1], pz = G[r][i][2];
+            for (let b2 = 0; b2 < 4; b2++) { const jb = sp - 3 + b2; if (col[jb] < 0 && N[b2]) { const f = fixVal(r, jb); px -= N[b2] * f[0]; py -= N[b2] * f[1]; pz -= N[b2] * f[2]; } }
+            B[ca][3 * r] += N[a] * px; B[ca][3 * r + 1] += N[a] * py; B[ca][3 * r + 2] += N[a] * pz;
+          }
+        }
+      }
+      // Stabilisierung: winzige Strafe auf zweite Differenzen (benachbarte freie Kontrollpunkte)
+      let tr = 0; for (let i = 0; i < F; i++) tr += A[i][i];
+      const eps = 1e-9 * tr / Math.max(1, F);
+      for (let i = 1; i < F - 1; i++) { const w3 = [1, -2, 1]; for (let a = 0; a < 3; a++) for (let b2 = 0; b2 < 3; b2++) A[i - 1 + a][i - 1 + b2] += eps * w3[a] * w3[b2]; }
+      solveBanded(A, B, 3);
+      const net = G.map((P, r) => { const C = new Array(K); for (let j = 0; j < K; j++) C[j] = col[j] >= 0 ? [B[col[j]][3 * r], B[col[j]][3 * r + 1], B[col[j]][3 * r + 2]] : fixVal(r, j).slice(); return C; });
+      // Restfehler je Ringpunkt; schlechte Spannen sammeln
+      let dev = 0, worst = null; const bad = new Set();
+      for (let r = 0; r < G.length; r++) for (let i = 0; i < M; i++) {
+        const { sp, N } = rows[i]; let x = 0, y = 0, z = 0;
+        for (let a = 0; a < 4; a++) { const c = net[r][sp - 3 + a]; x += N[a] * c[0]; y += N[a] * c[1]; z += N[a] * c[2]; }
+        const d = Math.hypot(x - G[r][i][0], y - G[r][i][1], z - G[r][i][2]);
+        if (d > dev) { dev = d; worst = { r, i }; }
+        if (d > tol) { bad.add(sp); bad.add(sp - 1); bad.add(sp + 1); }   // Nachbarn mit: der Punkt liegt oft am Spannenrand
+      }
+      res = { net, knots: U, jNose: jN, K, dev, worst };
+      if (!bad.size || K >= maxK) break;
+      const add = [];
+      for (const sp of bad) {
+        if (sp < 3 || sp > n) continue;
+        const a = U[sp], b = U[sp + 1], mid = (a + b) / 2; if (b - a < 1e-6) continue;
+        let nl = 0, nr = 0; for (const v of s) { if (v > a && v < mid) nl++; else if (v >= mid && v < b) nr++; }
+        if (nl && nr) add.push(mid);
+      }
+      if (!add.length || K + add.length > maxK) break;
+      inner = inner.concat(add).sort((a, b) => a - b);
+    }
+    // Prüfung ZWISCHEN den Ringpunkten: Kurve in der Mitte jeder Punktlücke gegen die Sehnenmitte
+    // (Sehnenfehler bei dichter Abtastung << 0,01 mm). Großer Wert = Ausschwingen -> Aufrufer fällt zurück.
+    let devMid = 0;
+    {
+      const U = res.knots, n = res.K - 1;
+      for (let i = 0; i < M - 1; i++) {
+        const um = (s[i] + s[i + 1]) / 2, sp = findSpan(n, 3, um, U), N = basisFuns(sp, um, 3, U);
+        for (let r = 0; r < G.length; r++) {
+          let x = 0, y = 0, z = 0; for (let a = 0; a < 4; a++) { const c = res.net[r][sp - 3 + a]; x += N[a] * c[0]; y += N[a] * c[1]; z += N[a] * c[2]; }
+          const A0 = G[r][i], B0 = G[r][i + 1], d = Math.hypot(x - (A0[0] + B0[0]) / 2, y - (A0[1] + B0[1]) / 2, z - (A0[2] + B0[2]) / 2);
+          if (d > devMid) devMid = d;
+        }
+      }
+    }
+    // Ausreißende Kontrollpunkte (schlecht konditioniert): Abstand zum Hüllquader des Rings
+    let ctrlOut = 0;
+    res.net.forEach((C, r) => {
+      const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (const P of G[r]) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], P[k]); mx[k] = Math.max(mx[k], P[k]); }
+      for (const c of C) for (let k = 0; k < 3; k++) ctrlOut = Math.max(ctrlOut, mn[k] - c[k], c[k] - mx[k]);
+    });
+    let closed = true;
+    for (const C of res.net) if (len(sub(C[0], C[C.length - 1])) > 1e-6) { closed = false; break; }
+    return { rings: res.net.map((C, r) => ({ z: rings[r].z, pts: C.map(c => ({ x: c[0], y: c[1], z: c[2] })) })), knots: res.knots, jNose: res.jNose, closed, dev: res.dev, devMid, ctrlOut, K: res.K, worst: res.worst, dropped };
+  }
+  // Öffentliche API: Ringe -> STEP mit Querschnitten als B-Spline-Kurven (statt Bézier durch die Punkte).
+  function ringsToStepSpline(rings, opt) {
+    opt = opt || {};
+    if (!rings || rings.length < 2) throw new Error('mindestens 2 Ringe nötig');
+    const M0 = rings[0].pts.length;
+    for (const r of rings) if (r.pts.length !== M0) throw new Error('alle Ringe brauchen dieselbe Punktzahl');
+    const hint = opt.knotHint || rings.knotHint;
+    rings = resampleZ(rings);
+    rings = refineRings(rings, 0.05);
+    const net = fitRingNet(rings, opt.tol || 0.001, null, hint);
+    const NR = net.rings;
+    if (opt.flip == null) opt = Object.assign({}, opt, { flip: signedVolume(NR) < 0 });
+    const w = new StepWriter();
+    const shell = buildShell(w, NR, Object.assign({}, opt, { uspline: { knots: net.knots, jNose: net.jNose, closed: net.closed }, holes: null }));
+    const txt = assemble(w, [shell], opt);
+    if (opt.info) Object.assign(opt.info, { dev: net.dev, devMid: net.devMid, ctrlOut: net.ctrlOut, K: net.K, rings: NR.length, closed: net.closed });
+    return txt;
+  }
+
+  const CORE = { ringsToStep, ringsToStepSpline, fitRingNet, _R: R, _interp: commonKnots };
   if (typeof module !== 'undefined' && module.exports) module.exports = CORE;
   if (typeof window !== 'undefined') { const App = (window.App = window.App || {}); App.stepExport = CORE; }
 })();

@@ -1,6 +1,7 @@
 /* model3d.js — Reiter „3D-Modell"
  *
- * Lädt STL- (binär + ASCII) und OBJ-Dateien, zeigt das Netz in einer
+ * Lädt STL- (binär + ASCII), OBJ- und STEP/IGES-Dateien (über occt_wasm.js),
+ * setzt bei Bedarf mehrere Teile zu einer Baugruppe zusammen, zeigt das Netz in einer
  * orthografischen Orbit-Ansicht und zerlegt es durch senkrechte Schnittebenen
  * entlang einer wählbaren Achse (X/Y/Z) in einzelne, schneidbare Segmente.
  *
@@ -39,6 +40,11 @@
     contourMode: 'both',      // Konturen beim Zerlegen: 'both' außen+innen | 'outer' nur außen | 'inner' nur innen
     gapTol: null,             // Netzlücken bis zu dieser Weite überbrücken (null = automatisch, 2 % des Querschnitts)
     cleanCache: null,         // Cache: bereinigte Querschnitte "axis|pos|mode|gap|dichte"
+    parts: [],                // Baugruppe: [{name, verts (Original-Lage), dx,dy,dz, rx,ry,rz}] — leer = Einzelmodell
+    partSel: -1,              // hervorgehobenes Teil (-1 = keins)
+    partVerts: null,          // Teile in Weltlage (nur Anzeige/Farben), Index wie parts
+    partCaps: true,           // ebene Stirnkappen an Fugen beim Zusammensetzen entfernen
+    segColors: {},            // eigene Farben der zerlegten Segmente {Index: '#rrggbb'}
     sectionDensity: 1         // Punktdichte der abgeleiteten Querschnitte (1 = Standard, höher = feiner)
   };
 
@@ -80,36 +86,45 @@
   // extras: weitere gewählte Dateien (z. B. .bin-Puffer zu einer .gltf).
   async function loadFile(file, extras) {
     if (Array.isArray(file)) {                       // Mehrfachauswahl: Hauptdatei suchen
-      const main = file.find(f => /\.(him|gltf|glb|ac|obj|stl)$/i.test(f.name)) || file[0];
+      const main = file.find(f => /\.(him|gltf|glb|ac|obj|stl|stp|step|igs|iges)$/i.test(f.name)) || file[0];
       extras = file.filter(f => f !== main); file = main;
     }
     const name = file.name || 'modell';
-    const ext = (name.split('.').pop() || '').toLowerCase();
     const mb = (file.size / 1e6).toFixed(1);
     setInfo(T('Lädt ') + name + ' (' + mb + ' MB) …');
     // Ein Frame abwarten, damit die Lade-Anzeige erscheint, bevor der (bei großen
     // Dateien länger blockierende) synchrone Parser läuft.
-    await new Promise(r => { let done = false; const go = () => { if (!done) { done = true; r(); } };
-      requestAnimationFrame(go); setTimeout(go, 60); });   // Fallback, falls kein Frame kommt (Tab verdeckt)
+    await nextFrame();
     let verts;
-    try {
-      // Flugsimulator-Formate (X-Plane-OBJ, FlightGear-AC3D, glTF/GLB) zuerst;
-      // null = kein Simulatorformat (z. B. normales Wavefront-OBJ).
-      if (window.SimModel && ext !== 'stl') verts = await SimModel.parse(file, extras);
-      if (verts) { /* Simulatormodell */ }
-      else if (ext === 'stl') verts = parseSTL(await file.arrayBuffer());
-      else if (ext === 'obj') verts = parseOBJ(await file.text());
-      else throw new Error(T('Format nicht unterstützt (STL, OBJ, X-Plane-OBJ, AC3D, glTF/GLB).'));
-    } catch (err) {
+    try { verts = await parseFile(file, extras); }
+    catch (err) {
       setInfo(T('Fehler beim Laden: ') + err.message, true);
       return;
     }
     if (!verts || verts.length < 9) { setInfo(T('Keine Dreiecke gefunden.'), true); return; }
+    M.parts = []; M.partSel = -1; M.partVerts = null; M.segColors = {};   // Einzelmodell ersetzt eine Baugruppe
     setMesh(verts, name);
+  }
+  function nextFrame() {
+    return new Promise(r => { let done = false; const go = () => { if (!done) { done = true; r(); } };
+      requestAnimationFrame(go); setTimeout(go, 60); });   // Fallback, falls kein Frame kommt (Tab verdeckt)
+  }
+  // Datei → Dreieckssuppe (Float32Array, 9 Werte je Dreieck). Wirft bei Fehlern.
+  async function parseFile(file, extras) {
+    const ext = ((file.name || '').split('.').pop() || '').toLowerCase();
+    let verts = null;
+    // Flugsimulator-Formate (X-Plane-OBJ, FlightGear-AC3D, glTF/GLB) zuerst;
+    // null = kein Simulatorformat (z. B. normales Wavefront-OBJ).
+    if (window.SimModel && /^(obj|ac|gltf|glb|him|msh|mdl)$/.test(ext)) verts = await SimModel.parse(file, extras || []);
+    if (verts) return verts;
+    if (ext === 'stl') return parseSTL(await file.arrayBuffer());
+    if (ext === 'obj') return parseOBJ(await file.text());
+    if (ext === 'stp' || ext === 'step' || ext === 'igs' || ext === 'iges') return parseCAD(await file.arrayBuffer(), ext);
+    throw new Error(T('Format nicht unterstützt (STL, OBJ, STEP, IGES, X-Plane-OBJ, AC3D, glTF/GLB).'));
   }
   // Netz übernehmen + Standard-Schnittachse/Reset. Bei restore=true bleiben
   // Achse/Ebenen erhalten (werden danach vom Projekt gesetzt).
-  function setMesh(verts, name, restore) {
+  function setMesh(verts, name, restore, quiet) {
     M.name = name;
     M.verts = verts;
     M.ntri = verts.length / 9;
@@ -125,33 +140,213 @@
     M.segs = null; M.sections = null; M.profiles = null; M.sel = 'all';
     M.multiCache = null; M.triIndex = null;
     plateSegCache = {}; plateGcMemo = null;
-    frameCamera();
-    if (window.__model3dRebuildSidebar) window.__model3dRebuildSidebar();
+    if (!quiet) frameCamera();
+    if (!quiet && window.__model3dRebuildSidebar) window.__model3dRebuildSidebar();
     draw();
     updateInfo();
   }
   // Projekt-Serialisierung: Netz (Base64 der Float32-Rohdaten) + Achse + Ebenen.
-  function serialize() {
-    if (!M.verts) return null;
-    const fa = M.verts instanceof Float32Array ? M.verts : new Float32Array(M.verts);
+  // Bei einer Baugruppe werden statt des Gesamtnetzes die Teile (Original-Lage +
+  // Verschiebung/Drehung) gespeichert und beim Laden neu zusammengesetzt.
+  function f32ToB64(v) {
+    const fa = v instanceof Float32Array ? v : new Float32Array(v);
     let bin = ''; const u8 = new Uint8Array(fa.buffer, fa.byteOffset, fa.byteLength);
     for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
-    return { name: M.name || 'modell', axis: M.axis, planes: (M.planes || []).slice(), sectionDensity: M.sectionDensity, contourMode: contourMode(), gapTol: M.gapTol, verts64: btoa(bin) };
+    return btoa(bin);
+  }
+  function b64ToF32(b64) {
+    const bin = atob(b64); const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return new Float32Array(u8.buffer);
+  }
+  function serialize() {
+    if (!M.verts) return null;
+    const o = { name: M.name || 'modell', axis: M.axis, planes: (M.planes || []).slice(), sectionDensity: M.sectionDensity, contourMode: contourMode(), gapTol: M.gapTol };
+    if (Object.keys(M.segColors || {}).length) o.segColors = Object.assign({}, M.segColors);
+    if (M.parts.length) {
+      o.parts = M.parts.map(p => ({ name: p.name, tf: PART_TF.map(k => +p[k] || 0), color: p.color || null, verts64: f32ToB64(p.verts) }));
+      o.partCaps = M.partCaps;
+    } else o.verts64 = f32ToB64(M.verts);
+    return o;
   }
   function deserialize(obj) {
-    if (!obj || !obj.verts64) return false;
-    const bin = atob(obj.verts64); const u8 = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-    const verts = new Float32Array(u8.buffer);
-    setMesh(verts, obj.name || 'modell', true);
+    if (!obj || !(obj.verts64 || (Array.isArray(obj.parts) && obj.parts.length))) return false;
+    if (obj.parts && obj.parts.length) {
+      M.parts = obj.parts.map(q => {
+        const p = { name: q.name || 'Teil', verts: b64ToF32(q.verts64), color: q.color || null };
+        PART_TF.forEach((k, i) => { p[k] = +(q.tf || [])[i] || 0; });
+        p.bb0 = computeBBox(p.verts); return p;
+      });
+      M.partCaps = obj.partCaps !== false; M.partSel = -1;
+      assembleParts(false, obj.name);
+    } else {
+      M.parts = []; M.partSel = -1; M.partVerts = null;
+      setMesh(b64ToF32(obj.verts64), obj.name || 'modell', true);
+    }
     M.axis = (obj.axis != null) ? obj.axis : M.axis;
     M.planes = Array.isArray(obj.planes) ? obj.planes.slice() : [];
     if (obj.sectionDensity != null && isFinite(obj.sectionDensity)) M.sectionDensity = Math.max(0.2, Math.min(16, obj.sectionDensity));
     M.contourMode = obj.contourMode || 'both';
     M.gapTol = (obj.gapTol != null && isFinite(obj.gapTol)) ? obj.gapTol : null;
+    M.segColors = (obj.segColors && typeof obj.segColors === 'object') ? Object.assign({}, obj.segColors) : {};
     invalidateSections(); draw(); updateInfo();
     if (window.__model3dRebuildSidebar) window.__model3dRebuildSidebar();
     return true;
+  }
+
+  // ---------- Baugruppe: Segmente wieder zu einem Rumpf zusammensetzen ----
+  // Jedes Teil behält sein Originalnetz; Lage = Drehung (rx,ry,rz in Grad, um die
+  // eigene Bbox-Mitte, Reihenfolge X→Y→Z) + Verschiebung (dx,dy,dz in mm). Das
+  // Gesamtnetz M.verts entsteht bei jeder Änderung neu und ist danach ein ganz
+  // normales Modell (Zerlegen, G-Code, Export).
+  const PART_TF = ['dx', 'dy', 'dz', 'rx', 'ry', 'rz'];
+  function partMatrix(p) {
+    const r = [p.rx, p.ry, p.rz].map(a => (+a || 0) * Math.PI / 180);
+    const cx = Math.cos(r[0]), sx = Math.sin(r[0]), cy = Math.cos(r[1]), sy = Math.sin(r[1]), cz = Math.cos(r[2]), sz = Math.sin(r[2]);
+    // R = Rz · Ry · Rx
+    return [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+            sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+            -sy, cy * sx, cy * cx];
+  }
+  function partWorld(p) {
+    const v = p.verts, b = p.bb0 || (p.bb0 = computeBBox(v));
+    const c = [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, (b.min[2] + b.max[2]) / 2];
+    const d = [+p.dx || 0, +p.dy || 0, +p.dz || 0];
+    const rot = !!(+p.rx || +p.ry || +p.rz);
+    const R = partMatrix(p), out = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i += 3) {
+      if (rot) {
+        const x = v[i] - c[0], y = v[i + 1] - c[1], z = v[i + 2] - c[2];
+        out[i] = R[0] * x + R[1] * y + R[2] * z + c[0] + d[0];
+        out[i + 1] = R[3] * x + R[4] * y + R[5] * z + c[1] + d[1];
+        out[i + 2] = R[6] * x + R[7] * y + R[8] * z + c[2] + d[2];
+      } else { out[i] = v[i] + d[0]; out[i + 1] = v[i + 1] + d[1]; out[i + 2] = v[i + 2] + d[2]; }
+    }
+    return out;
+  }
+  function jointTol(bbs) {
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (const b of bbs) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], b.min[a]); hi[a] = Math.max(hi[a], b.max[a]); }
+    return Math.max(0.02, 1e-3 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]));
+  }
+  // Fugen: Stellen, an denen die Bbox-Stirn eines Teils auf die eines anderen
+  // trifft (entlang einer Achse, quer überlappend) → [{a, pos, i, j}] (i endet, j beginnt).
+  function partJoints(bbs, tol) {
+    const out = [];
+    for (let a = 0; a < 3; a++) for (let i = 0; i < bbs.length; i++) for (let j = 0; j < bbs.length; j++) {
+      if (i === j || Math.abs(bbs[i].max[a] - bbs[j].min[a]) > tol) continue;
+      let ov = true;
+      for (let b = 0; b < 3; b++) if (b !== a && (bbs[i].max[b] < bbs[j].min[b] - tol || bbs[j].max[b] < bbs[i].min[b] - tol)) ov = false;
+      if (ov) out.push({ a, pos: (bbs[i].max[a] + bbs[j].min[a]) / 2, i, j });
+    }
+    return out;
+  }
+  // Ebene Dreiecke in der Fugenebene (Normale ∥ Achse) entfernen — das sind die
+  // Stirnkappen der getrennt exportierten Segmente; sie lägen sonst als
+  // Innenwände im Rumpf.
+  function stripCaps(v, a, pos, tol) {
+    const keep = new Uint8Array(v.length / 9); let n = 0;
+    for (let t = 0, o = 0; o < v.length; t++, o += 9) {
+      let flat = Math.abs(v[o + a] - pos) < tol && Math.abs(v[o + 3 + a] - pos) < tol && Math.abs(v[o + 6 + a] - pos) < tol;
+      if (flat) {
+        const ux = v[o + 3] - v[o], uy = v[o + 4] - v[o + 1], uz = v[o + 5] - v[o + 2];
+        const wx = v[o + 6] - v[o], wy = v[o + 7] - v[o + 1], wz = v[o + 8] - v[o + 2];
+        const nn = [uy * wz - uz * wy, uz * wx - ux * wz, ux * wy - uy * wx], L = Math.hypot(nn[0], nn[1], nn[2]);
+        flat = L > 0 ? Math.abs(nn[a]) / L > 0.98 : true;
+      }
+      if (!flat) { keep[t] = 1; n++; }
+    }
+    if (n === keep.length) return v;
+    const out = new Float32Array(n * 9);
+    for (let t = 0, k = 0; t < keep.length; t++) if (keep[t]) { out.set(v.subarray(t * 9, t * 9 + 9), k); k += 9; }
+    return out;
+  }
+  // Gesamtnetz aus den Teilen bilden und als Modell übernehmen. keep=true behält
+  // Achse/Ebenen/Kamera (Lage-Änderung, ohne Sidebar-Neubau), sonst wie beim Laden.
+  function assembleParts(keep, name) {
+    if (!M.parts.length) return;
+    const W = M.parts.map(partWorld);
+    const bbs = W.map(computeBBox), tol = jointTol(bbs);
+    bbs.forEach((b, k) => { M.parts[k].bbW = b; });
+    M.partJointList = partJoints(bbs, tol);
+    M.partCapsRemoved = 0;
+    if (M.partCaps) {
+      for (const jn of M.partJointList) for (const k of [jn.i, jn.j]) {
+        const n0 = W[k].length; W[k] = stripCaps(W[k], jn.a, jn.pos, tol); M.partCapsRemoved += (n0 - W[k].length) / 9;
+      }
+    }
+    M.partVerts = W;
+    let n = 0; for (const w of W) n += w.length;
+    const all = new Float32Array(n); let o = 0;
+    for (const w of W) { all.set(w, o); o += w.length; }
+    const nm = name || (M.parts.length === 1 ? M.parts[0].name : T('Baugruppe') + ' (' + M.parts.length + ' ' + T('Teile') + ')');
+    const ax = M.axis, pl = (M.planes || []).slice(), gt = M.gapTol;
+    setMesh(all, nm, !!keep, !!keep);
+    if (keep) { M.axis = ax; M.planes = pl; M.gapTol = gt; }
+  }
+  // Teile anhängen (Mehrfachauswahl). Liegt schon ein Einzelmodell vor, wird es
+  // zum ersten Teil der Baugruppe.
+  async function addParts(files) {
+    files = Array.from(files || []);
+    if (!files.length) return;
+    const had = !!M.verts;     // vorhandenes Modell/Baugruppe: Achse + Ebenen bleiben
+    if (M.verts && !M.parts.length) M.parts.push({ name: M.name || 'Teil 1', verts: M.verts, bb0: M.bbox, dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 });
+    const errs = [];
+    for (const f of files) {
+      setInfo(T('Lädt ') + f.name + ' (' + (f.size / 1e6).toFixed(1) + ' MB) …');
+      await nextFrame();
+      try {
+        const v = await parseFile(f, []);
+        if (!v || v.length < 9) throw new Error(T('Keine Dreiecke gefunden.'));
+        M.parts.push({ name: f.name, verts: v, bb0: computeBBox(v), dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 });
+      } catch (e) { errs.push(f.name + ': ' + e.message); }
+    }
+    M.partSel = -1;
+    assembleParts(had);
+    if (had) { frameCamera(); draw(); }
+    if (errs.length) setInfo(T('Fehler beim Laden: ') + errs.join(' · '), true);
+  }
+  // Querschnitt-Mitte (Bbox der Eckpunkte nahe der Stirnfläche) quer zu Achse a.
+  function faceCenter(v, a, pos, tol) {
+    const b1 = (a + 1) % 3, b2 = (a + 2) % 3;
+    let lo1 = Infinity, hi1 = -Infinity, lo2 = Infinity, hi2 = -Infinity, n = 0;
+    for (let i = 0; i < v.length; i += 3) if (Math.abs(v[i + a] - pos) < tol) {
+      n++; const p = v[i + b1], q = v[i + b2];
+      if (p < lo1) lo1 = p; if (p > hi1) hi1 = p; if (q < lo2) lo2 = q; if (q > hi2) hi2 = q;
+    }
+    return n >= 3 ? [(lo1 + hi1) / 2, (lo2 + hi2) / 2] : null;
+  }
+  // Teile in Listenreihenfolge entlang Achse a lückenlos aneinanderreihen
+  // (Teil 1 bleibt liegen). center=true richtet die Querschnitte der Stoßflächen
+  // mittig aufeinander aus (sonst bzw. ohne Stoßfläche: Bbox-Mitten quer zur Achse).
+  function chainParts(a, center, gap) {
+    if (M.parts.length < 2) return;
+    gap = +gap || 0;
+    const b1 = (a + 1) % 3, b2 = (a + 2) % 3, key = ['dx', 'dy', 'dz'];
+    let prevW = partWorld(M.parts[0]), prevB = computeBBox(prevW);
+    for (let k = 1; k < M.parts.length; k++) {
+      const p = M.parts[k];
+      const w = partWorld(p), b = computeBBox(w);
+      const tol = jointTol([prevB, b]) * 5;
+      const sh = [0, 0, 0];
+      sh[a] = prevB.max[a] + gap - b.min[a];
+      let ca = center ? faceCenter(prevW, a, prevB.max[a], tol) : null, cb = center ? faceCenter(w, a, b.min[a], tol) : null;
+      if (!ca || !cb) { ca = [(prevB.min[b1] + prevB.max[b1]) / 2, (prevB.min[b2] + prevB.max[b2]) / 2]; cb = [(b.min[b1] + b.max[b1]) / 2, (b.min[b2] + b.max[b2]) / 2]; }
+      sh[b1] = ca[0] - cb[0]; sh[b2] = ca[1] - cb[1];
+      for (let i = 0; i < 3; i++) p[key[i]] = +((+p[key[i]] || 0) + sh[i]).toFixed(4);
+      prevW = partWorld(p); prevB = computeBBox(prevW);
+    }
+    assembleParts(true);
+    frameCamera(); draw();
+  }
+  // Schnittebenen genau an die Fugen (entlang der aktuellen Schnittachse) setzen
+  // → die Zerlegung liefert wieder die Original-Segmente.
+  function planesAtJoints() {
+    const js = (M.partJointList || []).filter(j => j.a === M.axis).map(j => j.pos).sort((x, y) => x - y);
+    const u = [];
+    for (const p of js) if (!u.length || Math.abs(p - u[u.length - 1]) > 1e-3) u.push(p);
+    M.planes = u; invalidateSections(); draw();
+    return u.length;
   }
 
   // ---- STL (binär oder ASCII) ----
@@ -224,6 +419,44 @@
     }
     if (!out.length) throw new Error(T('OBJ nicht lesbar (keine Flächen gefunden).'));
     return new Float32Array(out);
+  }
+
+  // ---- STEP/IGES über OpenCascade (occt-import-js, Feature „stepimport") ----
+  // Die .wasm steckt gzip+Base64 in occt_wasm.js (window.OCCT_WASM_GZ64) und wird
+  // erst beim ersten STEP-Import entpackt und gestartet (danach wiederverwendet).
+  let occtP = null;
+  function occtReady() {
+    if (occtP) return occtP;
+    if (typeof window.occtimportjs !== 'function' || !window.OCCT_WASM_GZ64 || typeof DecompressionStream !== 'function')
+      return Promise.reject(new Error(T('STEP-/IGES-Import ist in dieser Ausgabe nicht enthalten.')));
+    occtP = (async () => {
+      const bin = atob(window.OCCT_WASM_GZ64), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      const ds = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+      const wasm = new Uint8Array(await new Response(ds).arrayBuffer());
+      return window.occtimportjs({ wasmBinary: wasm });
+    })();
+    occtP.catch(() => { occtP = null; });
+    return occtP;
+  }
+  // Feinheit der Triangulierung: Sehnenabweichung als Anteil der mittleren
+  // Modellgröße (OpenCascade „bounding_box_ratio") + Winkelabweichung in rad.
+  const CAD_MESH = { linearUnit: 'millimeter', linearDeflectionType: 'bounding_box_ratio', linearDeflection: 0.0005, angularDeflection: 0.2 };
+  async function parseCAD(buf, ext) {
+    const occt = await occtReady();
+    const data = new Uint8Array(buf);
+    const r = (ext === 'igs' || ext === 'iges') ? occt.ReadIgesFile(data, CAD_MESH) : occt.ReadStepFile(data, CAD_MESH);
+    if (!r || !r.success) throw new Error(T('STEP-/IGES-Datei nicht lesbar.'));
+    let n = 0;
+    for (const m of r.meshes || []) if (m.index && m.index.array) n += m.index.array.length;
+    if (!n) throw new Error(T('Die Datei enthält keine Flächen (nur Kurven/Punkte?).'));
+    const out = new Float32Array(n * 3); let o = 0;
+    for (const m of r.meshes) {
+      const P = m.attributes && m.attributes.position && m.attributes.position.array, I = m.index && m.index.array;
+      if (!P || !I) continue;
+      for (let k = 0; k < I.length; k++) { const j = I[k] * 3; out[o++] = P[j]; out[o++] = P[j + 1]; out[o++] = P[j + 2]; }
+    }
+    return o === out.length ? out : out.slice(0, o);
   }
 
   // ---------- Geometrie -------------------------------------------------
@@ -1934,6 +2167,43 @@
     for (const [k, b] of glBufs) if (!b.used) { gl.deleteBuffer(b.buf); glBufs.delete(k); }
   }
 
+  // Eigene Farben (Farbwähler liefert #rrggbb) ↔ hsl()-Text, den die Zeichner erwarten.
+  function hexToHsl(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if (!m) return null;
+    const r = parseInt(m[1].slice(0, 2), 16) / 255, g = parseInt(m[1].slice(2, 4), 16) / 255, b = parseInt(m[1].slice(4, 6), 16) / 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+    let h = 0, sat = 0;
+    if (d) {
+      sat = d / (1 - Math.abs(2 * l - 1));
+      h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      h = (h * 60 + 360) % 360;
+    }
+    return 'hsl(' + Math.round(h) + ',' + Math.round(sat * 100) + '%,' + Math.round(l * 100) + '%)';
+  }
+  function hslToHex(c) {
+    const q = hslParts(c), s0 = q.s / 100, l = q.l / 100;
+    const f = n => { const k = (n + q.h / 30) % 12, a = s0 * Math.min(l, 1 - l); const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(v * 255).toString(16).padStart(2, '0'); };
+    return '#' + f(0) + f(8) + f(4);
+  }
+  // Farbe eines Teils der Baugruppe: eigene Wahl oder Standardfarbe nach Index.
+  function partColor(i) { const p = M.parts[i]; return (p && hexToHsl(p.color)) || segColor(i); }
+  // Farbe eines zerlegten Segments: eigene Wahl › Farbe des Teils, aus dem es
+  // (überwiegend) stammt, sofern das Teil eine eigene Farbe hat › Standard.
+  function segBase(i) {
+    const own = hexToHsl(M.segColors && M.segColors[i]); if (own) return own;
+    const s = M.segs && M.segs[i];
+    if (s && M.partVerts && M.parts.some(p => p.color)) {
+      let best = -1, bo = 0;
+      M.partVerts.forEach((v, k) => {
+        const b = M.parts[k].bbW; if (!b) return;
+        const o = Math.min(b.max[M.axis], s.hi) - Math.max(b.min[M.axis], s.lo);
+        if (o > bo) { bo = o; best = k; }
+      });
+      if (best >= 0 && M.parts[best].color) return partColor(best);
+    }
+    return segColor(i);
+  }
+  function dimColor(c) { const q = hslParts(c); return 'hsl(' + q.h + ',' + Math.round(q.s * 0.3) + '%,' + q.l + '%)'; }
   function segColor(i, sat) {
     const h = (i * 47) % 360;
     return 'hsl(' + h + ',' + (sat || 55) + '%,58%)';
@@ -1942,8 +2212,13 @@
   // Zeichenquelle: bei Zerlegung die Segmente, sonst das Rohnetz.
   function drawSources() {
     if (M.segs) {
-      return M.segs.map((s, i) => ({ verts: s.verts, base: segColor(i), idx: i }))
+      return M.segs.map((s, i) => ({ verts: s.verts, base: segBase(i), idx: i }))
         .filter(s => M.sel === 'all' || s.idx === M.sel);
+    }
+    // Baugruppe: jedes Teil in eigener Farbe, gewähltes Teil hervorgehoben.
+    if (M.partVerts && M.partVerts.length > 1) {
+      // Gewähltes Teil in seiner Farbe, die übrigen dann blass.
+      return M.partVerts.map((v, i) => ({ verts: v, base: (M.partSel >= 0 && M.partSel !== i) ? dimColor(partColor(i)) : partColor(i), idx: -1 }));
     }
     if (M.verts) return [{ verts: M.verts, base: col('--accent', '#4aa3ff'), idx: -1 }];
     return [];
@@ -2439,7 +2714,7 @@
     // Stücke: Blockrechteck + Schnittkontur (Turm-L-Pfad) + Nummer.
     const piecesActive = plateEdit && plateEditMode === 'pieces';
     for (let k = 0; k < gc.pieces.length; k++) {
-      const pc = gc.pieces[k], color = segColor(pc.seg);
+      const pc = gc.pieces[k], color = segBase(pc.seg);
       // Beim Ziehen dieses Stücks: Kontur/Box lokal um (ox,oy) versetzt zeichnen.
       const po = (dpv && dpv.type === 'piece' && dpv.seg === pc.seg) ? dpv : null;
       const ox = po ? po.ox : 0, oy = po ? po.oy : 0;
@@ -2737,11 +3012,12 @@
     if (el) { el.textContent = txt; el.style.color = err ? 'var(--bad)' : ''; }
   }
   function updateInfo() {
-    if (!M.verts) { setInfo(T('Keine Datei geladen. STL/OBJ laden.')); return; }
+    if (!M.verts) { setInfo(T('Keine Datei geladen. STL/OBJ/STEP laden.')); return; }
     const b = M.bbox;
     const dim = [b.max[0] - b.min[0], b.max[1] - b.min[1], b.max[2] - b.min[2]].map(x => x.toFixed(1)).join(' × ');
     const nseg = M.segs ? M.segs.length : 0;
     setInfo(M.name + ' · ' + M.ntri.toLocaleString() + ' ' + T('Dreiecke') + ' · ' + dim + ' mm'
+      + (M.parts.length > 1 ? ' · ' + M.parts.length + ' ' + T('Teile') : '')
       + (nseg ? ' · ' + nseg + ' ' + T('Segmente') : ''));
   }
 
@@ -2791,6 +3067,14 @@
   window.Model3D = {
     init, resize, show, draw,
     loadFile, segment, equalSplit, exportSegment, exportAll,
+    // für den Reiter „3D-Bearbeitung" (meshedit.js): Parser + Übernahme fertiger Netze
+    parseFile, occtReady,
+    loadMesh(verts, name) { if (!verts || verts.length < 9) return; M.parts = []; M.partSel = -1; M.partVerts = null; M.segColors = {}; setMesh(verts, name || 'modell'); },
+    loadParts(list) {
+      list = (list || []).filter(q => q && q.verts && q.verts.length >= 9); if (!list.length) return;
+      M.parts = list.map(q => ({ name: q.name || T('Teil'), verts: q.verts, bb0: computeBBox(q.verts), color: q.color || null, dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 }));
+      M.partSel = -1; M.segColors = {}; assembleParts(false);
+    },
     buildSegmentPaths, baseName, ensureSegments, segCount, segStats,
     buildPlatePaths, plateLayout, segSpan,
     pairData, cutPaths, sectionName, sectionLabel, sectionInfo,   // Segmentpaar-/Schnittspur-Daten (z.B. CAD-Import)
@@ -2806,6 +3090,7 @@
     // Ansicht zurücksetzen. Zeichnet die leere Vorschau.
     reset() {
       M.verts = null; M.ntri = 0; M.bbox = null; M.name = ''; pivot = null;
+      M.parts = []; M.partSel = -1; M.partVerts = null; M.partJointList = null; M.segColors = {};
       M.planes = []; M.axis = 0; M.sel = 'all';
       M.segs = null; M.sections = null; M.profiles = null;
       M.multiCache = null; M.triIndex = null; M.cleanCache = null; M.gapTol = null;
@@ -2815,6 +3100,31 @@
       try { updateInfo(); } catch (e) {}
     },
     select(i) { M.sel = i; draw(); },
+    // Baugruppe (Segmente zusammensetzen)
+    addParts, chainParts, planesAtJoints,
+    getParts: () => M.parts, partCount: () => M.parts.length,
+    partJoints: () => (M.partJointList || []).slice(), partCapsRemoved: () => M.partCapsRemoved || 0,
+    selectPart(i) { M.partSel = (i === M.partSel) ? -1 : i; draw(); }, getPartSel: () => M.partSel,
+    setPartTf(i, k, v) { const p = M.parts[i]; if (!p || PART_TF.indexOf(k) < 0 || !isFinite(v)) return; if (+p[k] === +v) return; p[k] = +v; assembleParts(true); },
+    resetPartTf(i) { const p = M.parts[i]; if (!p) return; PART_TF.forEach(k => { p[k] = 0; }); assembleParts(true); },
+    rotatePart90(i, a) { const p = M.parts[i]; if (!p) return; const k = ['rx', 'ry', 'rz'][a]; p[k] = (((+p[k] || 0) + 90) % 360 + 360) % 360; assembleParts(true); },
+    movePart(i, d) { const j = i + d; if (j < 0 || j >= M.parts.length) return; const t = M.parts[i]; M.parts[i] = M.parts[j]; M.parts[j] = t; if (M.partSel === i) M.partSel = j; else if (M.partSel === j) M.partSel = i; assembleParts(true); },
+    removePart(i) {
+      if (!M.parts[i]) return;
+      M.parts.splice(i, 1); M.partSel = -1;
+      if (!M.parts.length) { window.Model3D.reset(); return; }
+      assembleParts(true);
+    },
+    // Farben: eigene Wahl (#rrggbb) oder null = Standardfarbe.
+    partColorHex(i) { const p = M.parts[i]; return (p && p.color) || hslToHex(partColor(i)); }, hasPartColor: i => !!(M.parts[i] && M.parts[i].color),
+    setPartColor(i, hex) { const p = M.parts[i]; if (!p) return; p.color = hexToHsl(hex) ? hex : null; draw(); },
+    segColorHex(i) { return (M.segColors && M.segColors[i]) || hslToHex(segBase(i)); }, hasSegColor: i => !!(M.segColors && M.segColors[i]),
+    setSegColor(i, hex) { if (!M.segColors) M.segColors = {}; if (hexToHsl(hex)) M.segColors[i] = hex; else delete M.segColors[i]; draw(); },
+    resetSegColors() { M.segColors = {}; draw(); },
+    setPartCaps(on) { M.partCaps = !!on; assembleParts(true); }, getPartCaps: () => M.partCaps !== false,
+    // Baugruppe auflösen: das zusammengesetzte Netz bleibt als Einzelmodell.
+    dissolveParts() { M.parts = []; M.partSel = -1; M.partVerts = null; M.partJointList = null; draw(); updateInfo(); },
+    exportModel() { if (M.verts) exportSTL(M.verts, baseName() + '.stl'); },
     setView, getView: () => M.view, refresh,
     serialize, deserialize,
     setPairEdit, isPairEdit: () => pairEdit, pairInfo: () => pairX,

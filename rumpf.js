@@ -840,7 +840,7 @@
     ctx.lineJoin = 'round'; ctx.lineWidth = 1;
     for (const f of faces) {
       ctx.beginPath(); f.p.forEach((q, i) => i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y)); ctx.closePath();
-      ctx.fillStyle = ctx.strokeStyle = 'rgb(' + Math.min(255, Math.round(f.c[0] * f.l)) + ',' + Math.min(255, Math.round(f.c[1] * f.l)) + ',' + Math.min(255, Math.round(f.c[2] * f.l)) + ')'; ctx.fill(); ctx.stroke();
+      ctx.fillStyle = ctx.strokeStyle = (window.DrawTheme ? DrawTheme.raw('rgb(' + Math.min(255, Math.round(f.c[0] * f.l)) + ',' + Math.min(255, Math.round(f.c[1] * f.l)) + ',' + Math.min(255, Math.round(f.c[2] * f.l)) + ')') : 'rgb(' + Math.min(255, Math.round(f.c[0] * f.l)) + ',' + Math.min(255, Math.round(f.c[1] * f.l)) + ',' + Math.min(255, Math.round(f.c[2] * f.l)) + ')'); ctx.fill(); ctx.stroke();
     }
   }
   /* WebGL2-Darstellung (wie im Formenbau): eigene Canvas hinter der 2D-Canvas; die 2D-Canvas wird im

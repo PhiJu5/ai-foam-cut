@@ -146,7 +146,7 @@
    * den falschen Punkt und das Profil wird beim Drehen verzerrt.
    */
   function canonicalize(pts) {
-    let P = dedupe(pts, 1e-9);
+    let P = despike(dedupe(pts, 1e-9));
     const n = P.length;
 
     // Startet die Liste an der LE statt an der TE? (beide Enden ~gleich weit
@@ -234,6 +234,28 @@
       if (Math.hypot(pts[i].x - out[out.length - 1].x, pts[i].y - out[out.length - 1].y) > eps)
         out.push(pts[i]);
     return out;
+  }
+
+  // Mini-Zickzack entfernen: Punkt mit sehr kurzem Nachbar-Teilstück
+  // (< 0,1 % der Profilgröße), an dem die Kontur fast umkehrt (> ~155°).
+  // Typisch FLZ: Nasenpunkt doppelt, Oberseite endet minimal UNTER dem Start
+  // der Unterseite (JWL065: 0/-0.00013 dann 0/0) -> Selbstschnitt, den
+  // Spline und Abbrand-/Beplankungs-Offset zu einer sichtbaren Schlaufe aufblasen.
+  function despike(P) {
+    if (P.length < 6) return P;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    P.forEach(p => { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); });
+    const lim = 1e-3 * (Math.max(x1 - x0, y1 - y0) || 1);
+    const Q = P.slice();
+    for (let i = 1; i < Q.length - 1 && Q.length > 5; i++) {
+      const a = Q[i - 1], b = Q[i], c = Q[i + 1];
+      const ux = b.x - a.x, uy = b.y - a.y, vx = c.x - b.x, vy = c.y - b.y;
+      const lu = Math.hypot(ux, uy), lv = Math.hypot(vx, vy);
+      if (!lu || !lv || Math.min(lu, lv) > lim) continue;
+      if ((ux * vx + uy * vy) / (lu * lv) < -0.9) { Q.splice(i, 1); i = Math.max(0, i - 2); }
+    }
+    Q.name = P.name;
+    return Q;
   }
 
   // Nicht-uniforme (chordale) Catmull-Rom-Auswertung (Barry–Goldman).

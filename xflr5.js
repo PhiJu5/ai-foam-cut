@@ -66,6 +66,14 @@
         type: (txt(we, 'Type') || '').trim(),
         symmetric: /true/i.test(txt(we, 'Symetric')),
         tilt: num(txt(we, 'Tilt_angle')),
+        // Lage der Wurzel-Nase im Flugzeug (Längeneinheit der Datei), wie .xfl `le`
+        le: (() => {
+          const p = (txt(we, 'Position') || '').split(',').map(num);
+          return { x: p[0] || 0, y: p[1] || 0, z: p[2] || 0, tilt: num(txt(we, 'Tilt_angle')) };
+        })(),
+        isFin: /true/i.test(txt(we, 'isFin')),
+        isSymFin: /true/i.test(txt(we, 'isSymFin')),
+        isDoubleFin: /true/i.test(txt(we, 'isDoubleFin')),
         sections
       });
     }
@@ -200,9 +208,7 @@
       w.sections.push(s);
     }
     w.volumeMass = r.f64();
-    const npm = r.i32();
-    if (npm < 0 || npm > 5000) throw new Error(T('Unplausible Massenzahl.'));
-    for (let i = 0; i < npm; i++) { r.skip(32); r.str(); }
+    w.pointMasses = readPointMasses(r);            // Lage relativ zur Flügelwurzel-Nase
     r.i32();                                       // früher bTextures
     for (let i = 1; i < 19; i++) r.i32();
     w.typeIdx = r.i32();                           // 0 Fläche, 1 zweite Fläche, 2 HLW, 3 SLW
@@ -221,6 +227,18 @@
     r.skip(3 * n * csz);
   }
 
+  // Punktmassen: je Eintrag Masse (kg), x, y, z (m), Bezeichnung.
+  function readPointMasses(r) {
+    const k = r.i32();
+    if (k < 0 || k > 5000) throw new Error(T('Unplausible Massenzahl.'));
+    const out = [];
+    for (let i = 0; i < k; i++) {
+      const m = r.f64(), x = r.f64(), y = r.f64(), z = r.f64();
+      out.push({ m, x, y, z, tag: r.str() });
+    }
+    return out;
+  }
+
   function xflBody(r, csz) {
     r.i32();                                       // Formatkennung
     r.str(); r.str(); r.color();
@@ -231,22 +249,20 @@
     n = r.i32();
     if (n < 0 || n > 5000) throw new Error(T('Unplausible Spantzahl.'));
     for (let i = 0; i < n; i++) { r.i32(); r.f64(); xflFrame(r, csz); }
-    r.f64();
-    const k = r.i32();
-    if (k < 0 || k > 5000) throw new Error(T('Unplausible Massenzahl.'));
-    for (let i = 0; i < k; i++) { r.skip(32); r.str(); }
+    const body = { volumeMass: r.f64() };
+    body.pointMasses = readPointMasses(r);         // Lage relativ zur Rumpflage
     for (let i = 0; i < 20; i++) r.i32();
     r.skip(400);
+    return body;
   }
 
   // Reserveblock am Ende jedes Flugzeugs: 20 Nullen (int) + 50 Nullen (double).
   // Er ist der Prüfstein dafür, dass der Rumpf richtig gelesen wurde.
   function xflPlaneTail(r) {
-    const k = r.i32();
-    if (k < 0 || k > 5000) throw new Error(T('Unplausible Massenzahl.'));
-    for (let i = 0; i < k; i++) { r.skip(32); r.str(); }
+    const pms = readPointMasses(r);                 // Lage absolut
     for (let i = 0; i < 20; i++) if (r.i32() !== 0) throw new Error(T('Reserveblock nicht leer.'));
     for (let i = 0; i < 50; i++) if (r.f64() !== 0) throw new Error(T('Reserveblock nicht leer.'));
+    return pms;
   }
 
   function xflPlane(r) {
@@ -259,17 +275,19 @@
     p.doubleFin = r.bool(); p.symFin = r.bool(); r.bool();
     for (let i = 0; i < 4; i++)
       p.wings[i].le = { x: r.f64(), y: r.f64(), z: r.f64(), tilt: r.f64() };
-    const hasBody = r.bool(); r.f64(); r.f64();
+    const hasBody = r.bool();
+    p.bodyPos = { x: r.f64(), z: r.f64() };
+    p.body = null; p.pointMasses = [];
     if (hasBody) {
       const o0 = r.o;
       let ok = false;
       for (const csz of [8, 4]) {
         r.o = o0;
-        try { r.str(); xflBody(r, csz); xflPlaneTail(r); ok = true; break; }
+        try { r.str(); p.body = xflBody(r, csz); p.pointMasses = xflPlaneTail(r); ok = true; break; }
         catch (e) { /* andere Punktgröße versuchen */ }
       }
       if (!ok) throw new Error(T('Rumpfdaten nicht lesbar.'));
-    } else xflPlaneTail(r);
+    } else p.pointMasses = xflPlaneTail(r);
     return p;
   }
 
@@ -519,7 +537,7 @@
         wings.push(w);
       });
       planes.push({ name: p.name || (T('Flugzeug ') + (i + 1)), desc: p.desc, wings: wings,
-        doubleFin: p.doubleFin, symFin: p.symFin });
+        doubleFin: p.doubleFin, symFin: p.symFin, bodyPos: p.bodyPos, body: p.body, pointMasses: p.pointMasses });
     }
     const out = { kind: 'xfl', unit: 1, planes: planes, foils: foils, foilNames: foilNames,
       wpolars: [], popps: [], foilPolars: [], resultsError: null };

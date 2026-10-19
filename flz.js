@@ -160,13 +160,32 @@
       chain = wing.segments.slice(); side = 'right';
     }
 
+    // Senkrechte Flächen (Seitenleitwerk: V-Form 90°) NICHT als V-Form-Höhe
+    // umrechnen — tan(90°) liefert ~1e16·Spannweite und zerlegt jede Ansicht.
+    // Steht die ganze Kette steiler als 45°, wird der Winkel des ersten
+    // Segments zur Drehung des Bauteils um die Längsachse (meta.rot, wie
+    // aeroParts.rot: 90° = nach oben); die Tragfläche selbst bleibt eben und
+    // trägt nur noch die V-Form relativ dazu.
+    let baseV = 0;
+    if (chain.length && chain.every(s => Math.abs(s.vform) >= 45)) baseV = chain[0].vform;
+    // Einseitig nur links: Außenrichtung (−cos v, sin v) -> Drehung 180°−v,
+    // relative V-Form dreht dabei das Vorzeichen.
+    const leftOnly = side === 'left' && !right.length;
+    const rot = leftOnly ? 180 - baseV : baseV;
+    const dSign = leftOnly ? -1 : 1;
+    const pos = wing.pos || { x: 0, y: 0, z: 0 };
+
     const rootProfile = wing.rootProfile ||
       (window.Airfoil ? Airfoil.naca4('2412', 120) : null);
     const cfg = {
       root: { profile: rootProfile, chord: +(wing.rootChord * M).toFixed(2) },
       segments: [],
       meta: { name: wing.name, incidence: wing.incidence, side: side,
-              nLeft: left.length, nRight: right.length }
+              nLeft: left.length, nRight: right.length,
+              // Lage im Flugzeug (mm) für den Aerodynamik-Reiter
+              pos: { x: pos.x * M, y: pos.y * M, z: pos.z * M },
+              rot: +rot.toFixed(3), mirror: left.length > 0 && right.length > 0,
+              mass: wing.mass || 0 }
     };
 
     chain.forEach(s => {
@@ -183,7 +202,8 @@
         + f * (rootChordMM - tipChordMM);
       // V-Form: FLZ-Winkel ist ABSOLUT je Segment. Als Höhe (mm) des Außen- über
       // dem Innenende ausgedrückt bleibt die V-Form über die Kette stetig 3° usw.
-      const dihMM = spanMM * Math.tan(s.vform * Math.PI / 180);
+      const vRel = Math.max(-85, Math.min(85, dSign * (s.vform - baseV)));
+      const dihMM = spanMM * Math.tan(vRel * Math.PI / 180);
       cfg.segments.push(mkSeg({
         profile: s.profile || rootProfile,
         chord: tipChordMM,
@@ -276,7 +296,7 @@
         else if (ln === '[FLUGZEUG ENDE]') { plane = null; }
         else if (/^\[FLAECHE\d+\]$/.test(ln)) {
           if (!plane) { plane = { name: '', wings: [] }; planes.push(plane); }
-          wing = { name: '', art: '', rootChord: 0, incidence: 0,
+          wing = { name: '', art: '', rootChord: 0, incidence: 0, pos: null, mass: 0,
             rootProfile: null, rootProfileName: 'Profil', segments: [] };
           seg = null;
         } else if (ln === '[FLAECHE ENDE]') {
@@ -320,9 +340,23 @@
           case 'BEZEICHNUNG': wing.name = val; break;
           case 'PROFILTIEFE': wing.rootChord = num(val); break;
           case 'EINSTELLWINKEL': wing.incidence = num(val); break;
+          case 'MASSE': wing.mass = num(val); break;
+          case 'POSITION X,Y,Z': {   // Wurzel-Nase der Fläche im Flugzeug (m)
+            const p = val.split(/\s+/);
+            wing.pos = { x: num(p[0]), y: num(p[1]), z: num(p[2]) };
+            break;
+          }
           default: break;
         }
-      } else if (plane && key === 'BEZEICHNUNG') plane.name = val;
+      } else if (plane) {
+        // [FLUGZEUG]-Kopf; dessen POSITION ist nur die Kamera -> ignorieren.
+        switch (key) {
+          case 'BEZEICHNUNG': plane.name = val; break;
+          case 'SCHWERPUNKT X': plane.cgX = num(val); break;
+          case 'ZUSAETZLICHE MASSEN': plane.extraMass = num(val); break;
+          default: break;
+        }
+      }
     }
     planes.forEach((pl, i) => {
       if (!pl.name) pl.name = T('Flugzeug ') + (i + 1);

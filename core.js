@@ -13,6 +13,25 @@
     return parseFloat(String(v).trim().replace(',', '.'));
   }
   window.parseNum = parseNum;
+  // Re-Zahl-Eingabe überall einheitlich: k = Tausend, M = Million, ',' oder '.'
+  // als Dezimaltrenner, Leerzeichen erlaubt („50 k", „1,5M", „200000").
+  function parseRe(v) {
+    if (v == null) return NaN;
+    if (typeof v === 'number') return v;
+    const m = String(v).trim().replace(/\s+/g, '').replace(',', '.').match(/^([\d.]+)([kKmM])?$/);
+    if (!m) return NaN;
+    const x = parseFloat(m[1]);
+    return isFinite(x) ? Math.round(x * (m[2] ? (/k/i.test(m[2]) ? 1e3 : 1e6) : 1)) : NaN;
+  }
+  // Gegenstück für die Anzeige im Eingabefeld: 200000 → „200k", 1500000 → „1.5M"
+  function fmtRe(v) {
+    v = Math.round(+v);
+    if (!isFinite(v) || v <= 0) return v === 0 ? '0' : '';
+    if (v >= 1e6 && v % 1e4 === 0) return (v / 1e6) + 'M';
+    if (v % 100 === 0 && v >= 1000) return (v / 1000) + 'k';
+    return String(v);
+  }
+  window.parseRe = parseRe; window.fmtRe = fmtRe;
   // Wie T, aber Gruppentitel mit Zähler-Suffix „ (n)" bleiben übersetzbar:
   // wenn der Gesamttitel keine Übersetzung hat, Basis übersetzen, Zähler anhängen.
   function Ttitle(s) {
@@ -659,7 +678,7 @@
   Object.assign(App, { askText });
   Object.assign(App, { PAL_DEF, PAL_GROUPS, PAL_KEY, PER_VIEW_KEYS, PER_VIEW_LABEL, PROJECT_DEFAULTS, T, Ttitle });
   Object.assign(App, { VIEWS, VLST, VLST_KEY, VPAL, VPAL_KEY, applyPalette, applyView, copyViewSettings });
-  Object.assign(App, { curView, dashFor, loadLineStyles, loadPalette, loadViewPalettes, mkSeg, parseNum, saveLineStyles });
+  Object.assign(App, { curView, dashFor, loadLineStyles, loadPalette, loadViewPalettes, mkSeg, parseNum, parseRe, fmtRe, saveLineStyles });
   Object.assign(App, { KTRUE, KTRUE_DEF, KTRUE_VIEWS, kerfTrueAlpha, kerfTrueOn, kerfView, loadKerfTrue, saveKerfTrue });
   // Maschinengrenzen + Warnschalter für Simulation (sim3d) und Schneiden (grbl).
   // Abgeschaltete Warnungen liefern 0/false, sodass die Prüfungen still bleiben.

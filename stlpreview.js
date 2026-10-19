@@ -92,7 +92,7 @@
     const st = document.createElement('style'); st.id = 'stlPrevCss';
     st.textContent = '#stlPrevModal .modal{width:min(1200px,100%);height:min(780px,90vh)}'
       + '#stlPrevModal .sp-main{flex:1;min-height:0;display:flex}'
-      + '#stlPrevModal .sp-view{flex:1;min-width:0;position:relative;overflow:hidden;background:#0c0f13}'
+      + '#stlPrevModal .sp-view{flex:1;min-width:0;position:relative;overflow:hidden;background:var(--bg2,#0c0f13)}'
       + '#stlPrevModal .sp-view canvas{position:absolute;inset:0;width:100%;height:100%;display:block}'
       + '#stlPrevModal .sp-side{width:270px;border-left:1px solid var(--line);overflow:auto;padding:8px 10px;font-size:12px}'
       + '#stlPrevModal .sp-file{display:flex;gap:7px;align-items:flex-start;padding:6px 4px;border-radius:5px;cursor:pointer}'
@@ -268,7 +268,7 @@
     tris.sort((p, q) => p.d - q.d);
     for (const t of tris) {
       const c = t.back && V.showBack ? [0.92, 0.25, 0.22] : t.col, k = 0.35 + 0.65 * t.lit;
-      o.fillStyle = 'rgb(' + Math.round(c[0] * 255 * k) + ',' + Math.round(c[1] * 255 * k) + ',' + Math.round(c[2] * 255 * k) + ')';
+      o.fillStyle = (window.DrawTheme ? DrawTheme.raw('rgb(' + Math.round(c[0] * 255 * k) + ',' + Math.round(c[1] * 255 * k) + ',' + Math.round(c[2] * 255 * k) + ')') : 'rgb(' + Math.round(c[0] * 255 * k) + ',' + Math.round(c[1] * 255 * k) + ',' + Math.round(c[2] * 255 * k) + ')');
       o.beginPath(); o.moveTo(t.a.x, t.a.y); o.lineTo(t.b.x, t.b.y); o.lineTo(t.c.x, t.c.y); o.closePath(); o.fill();
     }
   }

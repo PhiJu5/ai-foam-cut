@@ -217,7 +217,7 @@
     const s = st();
     M.on[tab] = !M.on[tab]; M.cur = null; M.hover = null;
     const ptOff = M.on[tab] && s.ptEdit && s.ptEdit.on;
-    if (ptOff) { s.ptEdit.on = false; s.ptEdit.drag = null; if (App.buildSidebar) App.buildSidebar(); }   // Punkte-Editor aus (belegt ebenfalls den Linksklick)
+    if (ptOff) { if (App.ptEditUnbake) App.ptEditUnbake(); s.ptEdit.on = false; s.ptEdit.drag = null; if (App.buildSidebar) App.buildSidebar(); }   // Punkte-Editor aus (belegt ebenfalls den Linksklick)
     refresh(tab); syncBtn(tab);
     if (ptOff) { if (tab === 'neg') { if (App.renderNeg) App.renderNeg(); } else if (App.render) App.render(); }
   }

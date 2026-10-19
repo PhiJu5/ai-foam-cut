@@ -31,6 +31,54 @@
     return (hi - lo) * unit * 1000;
   }
 
+  // Schwerpunkt + Masse eines XFLR5-Flugzeugs (Ergebnis in mm / kg).
+  // 1. Aus den Massen des Flugzeugs (.xfl): Punktmassen (Flugzeug absolut,
+  //    Flügel relativ zur Wurzel-Nase, Rumpf relativ zur Rumpflage) +
+  //    Volumenmassen der Flügel (Schwerpunkt genähert: Gewicht c²·Δy,
+  //    x = Nase + 0,42·c). Das ist, was XFLR5 bei „automatischer Trägheit" nimmt.
+  // 2. Sind Volumenmassen im Spiel (Näherung) und gibt es gerechnete Polaren,
+  //    kommt x aus den Polaren selbst: XFLR5 rechnet Cm um seinen Schwerpunkt,
+  //    also x_cg = XCP + Cm·c/CL (Median über die Punkte).
+  // 3. Sonst Masse/Schwerpunkt der Flugzeugpolare (WPolar, ohne Auto-Trägheit).
+  function planeCg(parsed, pl) {
+    const W = (parsed.wpolars || []).filter(x => x.plane === pl.name);
+    const wp = W.find(x => x.type === 2 && x.mass > 0) || W.find(x => x.mass > 0) || null;
+    let m = 0, mx = 0, mz = 0, approx = false;
+    const add = (k, x, z) => { if (!(k > 0)) return; m += k; mx += k * x; mz += k * z; };
+    (pl.pointMasses || []).forEach(q => add(q.m, q.x, q.z));
+    const bp = pl.bodyPos || { x: 0, z: 0 };
+    if (pl.body) {
+      (pl.body.pointMasses || []).forEach(q => add(q.m, bp.x + q.x, bp.z + q.z));
+      if (pl.body.volumeMass > 0) { add(pl.body.volumeMass, bp.x, bp.z); approx = true; }
+    }
+    (pl.wings || []).forEach(wg => {
+      const le = wg.le || { x: 0, z: 0 }, fin = /FIN/i.test(wg.type || '');
+      (wg.pointMasses || []).forEach(q => add(q.m, le.x + q.x, le.z + q.z));
+      const sec = (wg.sections || []).slice().sort((a, b) => a.y - b.y);
+      if (wg.volumeMass > 0 && sec.length > 1) {
+        let g = 0, gx = 0, gz = 0;
+        for (let i = 1; i < sec.length; i++) {
+          const a = sec[i - 1], b = sec[i], dy = b.y - a.y;
+          const c = (a.chord + b.chord) / 2, wt = c * c * Math.abs(dy);
+          g += wt;
+          gx += wt * ((a.xOffset + b.xOffset) / 2 + 0.42 * c);
+          gz += wt * (fin ? (a.y + b.y) / 2 : 0);
+        }
+        if (g > 0) { add(wg.volumeMass, le.x + gx / g, le.z + gz / g); approx = true; }
+      }
+    });
+    if (m > 0) {
+      let x = mx / m;
+      if (approx && wp && wp.pts && wp.pts.length && wp.c > 0) {
+        const xs = wp.pts.filter(q => Math.abs(q.CL) > 0.1 && isFinite(q.XCP) && isFinite(q.Cm))
+          .map(q => q.XCP + q.Cm * wp.c / q.CL).sort((a, b) => a - b);
+        if (xs.length >= 3) x = xs[xs.length >> 1];
+      }
+      return { cgX: x * 1000, cgZ: mz / m * 1000, mass: m };
+    }
+    return wp && wp.cg ? { cgX: wp.cg.x * 1000, cgZ: wp.cg.z * 1000, mass: wp.mass } : { cgX: 0, cgZ: 0, mass: 0 };
+  }
+
   // XFLR5 (.xfl-Projekt ODER plane-XML) -> Einträge.
   // `foils` ist die Namensbibliothek: aus der Datei selbst (.xfl) und aus
   // bereits geladenen .dat (state.xflrFoils).
@@ -55,6 +103,21 @@
           nProf: names.length,
           missing: missing,
           incidence: wg.tilt || 0,
+          // für „Flugzeug im Aerodynamik-Reiter anlegen": Lage (Dateieinheit
+          // -> mm), Seitenleitwerk 90° um die Längsachse wie im XFLR5-Vergleich
+          // (aero.js xflMakePlane), Doppel-SLW an ±y.
+          planeInfo: Object.assign({ name: pl.name || '', tag: 'XFLR5' }, planeCg(parsed, pl)),
+          aeroParts: () => {
+            const le = wg.le || { x: 0, y: 0, z: 0, tilt: 0 }, k = unit * 1000;
+            const b = { x: le.x * k, y: le.y * k, z: le.z * k, rot: 0, inc: +(le.tilt || wg.tilt || 0),
+              mirror: wg.symmetric !== false };
+            if (/FIN/i.test(wg.type || '') || wg.isFin) {
+              b.rot = 90; b.mirror = !!(pl.symFin || wg.isSymFin);
+              if ((pl.doubleFin || wg.isDoubleFin) && Math.abs(b.y) > 0.5)
+                return [Object.assign({}, b, { y: Math.abs(b.y) }), Object.assign({}, b, { y: -Math.abs(b.y) })];
+            }
+            return [b];
+          },
           build: () => XFLR5.toWingConfig(wg, { unit: unit, foils: foils, mkSeg: App.mkSeg })
         });
       });
@@ -93,6 +156,13 @@
           nProf: names.length,
           missing: missing,
           incidence: wg.incidence || 0,
+          // für „Flugzeug im Aerodynamik-Reiter anlegen"
+          planeInfo: { name: pl.name || '', tag: 'FLZ', cgX: (pl.cgX || 0) * 1000, cgZ: 0, mass: pl.extraMass || 0 },
+          aeroParts: cfg => {
+            const m = cfg.meta || {}, pos = m.pos || { x: 0, y: 0, z: 0 };
+            return [{ x: pos.x, y: pos.y, z: pos.z, rot: m.rot || 0, inc: m.incidence || 0, mirror: m.mirror }];
+          },
+          aeroMass: cfg => (cfg.meta && cfg.meta.mass) || 0,
           build: () => FLZ.toWingConfig(wg, { side: 'auto', mkSeg: App.mkSeg })
         });
       });
@@ -140,7 +210,7 @@
     const L = App.wingList();
     App.captureWing(L[state.activeWing]);           // Live-Zustand sichern
     const taken = new Set(L.map(w => String(w.name || '').trim().toLowerCase()));
-    const done = [], errors = [], missing = [];
+    const done = [], errors = [], missing = [], placed = [];
     let focus = null;
 
     jobs.forEach(j => {
@@ -163,6 +233,7 @@
       writeWing(rec, cfg, rec.name);
       if (focus == null) focus = L.indexOf(rec);
       done.push(rec.name);
+      placed.push({ item: j.item, cfg: cfg, rec: rec });
       (cfg.missingFoils || j.item.missing || []).forEach(n => {
         if (missing.indexOf(n) < 0) missing.push(n);
       });
@@ -175,7 +246,39 @@
     App.buildSidebar();
     App.render();
     if (App.switchView) { try { App.switchView(state.activeTab || 'wing'); } catch (e) {} }
-    return { done: done, missing: missing, errors: errors };
+    App.wingList();                                 // Kennungen der neuen Tragflächen vergeben
+    return { done: done, missing: missing, errors: errors, placed: placed };
+  }
+
+  // Übernommene Flächen als Flugzeug in den Aerodynamik-Reiter (FLZ_Vortex
+  // und XFLR5): Lage, Drehung um die Längsachse (Seitenleitwerk 90°),
+  // Einstellwinkel, Spiegelung, Schwerpunkt und Masse aus der Datei.
+  // Je Modell der Datei ein Flugzeug.
+  function importAeroPlanes(placed, isMain) {
+    if (typeof App.aeroMakePlane !== 'function') return 0;
+    const groups = new Map();
+    placed.forEach(p => {
+      if (!p.item.planeInfo || !p.item.aeroParts) return;
+      const k = p.item.plane || '';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(p);
+    });
+    let n = 0;
+    groups.forEach(list => {
+      const info = list[0].item.planeInfo;
+      let mass = info.mass || 0, main = -1;
+      const parts = [];
+      list.forEach(p => {
+        mass += p.item.aeroMass ? p.item.aeroMass(p.cfg) : 0;
+        p.item.aeroParts(p.cfg).forEach(a => {
+          if (main < 0 && isMain(p.item) && !a.rot) main = parts.length;
+          parts.push(Object.assign({ wing: p.rec.id }, a));
+        });
+      });
+      if (App.aeroMakePlane({ name: (info.name || list[0].item.name) + ' (' + info.tag + ')', parts: parts,
+        main: Math.max(0, main), cgX: info.cgX, cgZ: info.cgZ, mass: mass * 1000 })) n++;
+    });
+    return n;
   }
 
   // ---------- Fenster ------------------------------------------------------
@@ -269,6 +372,11 @@
     let firstMain = -1;
     items.forEach((it, i) => { if (firstMain < 0 && isMain(it)) firstMain = i; });
     if (firstMain < 0) firstMain = 0;
+    // Mit „Flugzeug anlegen": alle Flächen DESSELBEN Modells wie der erste
+    // Hauptflügel vorwählen (neu anlegen), damit es im Aerodynamik-Reiter
+    // vollständig ankommt. Andere Modelle/Varianten der Datei bleiben aus.
+    const allFlz = opts.aeroPlane && typeof App.aeroMakePlane === 'function';
+    const mainPlane = items[firstMain] ? items[firstMain].plane : null;
 
     items.forEach((it, i) => {
       const tr = document.createElement('tr');
@@ -281,7 +389,7 @@
       const tdC = document.createElement('td');
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = (i === firstMain);
+      cb.checked = (i === firstMain) || (allFlz && !!it.planeInfo && it.plane === mainPlane);
       tdC.appendChild(cb);
       tr.appendChild(tdC);
 
@@ -311,6 +419,18 @@
     wrap.appendChild(tbl);
     body.appendChild(wrap);
 
+    let aeroCb = null;
+    if (allFlz) {
+      const lb = document.createElement('label');
+      lb.style.cssText = 'display:flex;gap:6px;align-items:flex-start;margin:10px 0 2px';
+      aeroCb = document.createElement('input'); aeroCb.type = 'checkbox'; aeroCb.checked = true;
+      const sp = document.createElement('span');
+      sp.innerHTML = '<b></b><br><span class="hint"></span>';
+      sp.querySelector('b').textContent = T('Flugzeug im Aerodynamik-Reiter anlegen');
+      sp.querySelector('.hint').textContent = T('Lage und Abstände der Flächen, Einstellwinkel, Seitenleitwerk senkrecht, Schwerpunkt und Masse werden aus der Datei übernommen (je Modell ein Flugzeug).');
+      lb.appendChild(aeroCb); lb.appendChild(sp); body.appendChild(lb);
+    }
+
     m.querySelector('#wimpOk').onclick = () => {
       err.textContent = '';
       const jobs = rows.filter(r => r.cb.checked)
@@ -337,8 +457,14 @@
       catch (e) { err.textContent = T('Fehler: ') + T(e.message); return; }
       close();
 
+      let nPl = 0;
+      if (aeroCb && aeroCb.checked) {
+        try { nPl = importAeroPlanes(res.placed, isMain); }
+        catch (e) { res.errors.push(T('Aerodynamik-Flugzeug: ') + T(e.message)); }
+      }
       const parts = [(opts.title || T('Import')) + ':'];
       parts.push(res.done.length + ' ' + T('Tragfläche(n) übernommen: ') + res.done.join(', '));
+      if (nPl) parts.push(T('Flugzeug im Aerodynamik-Reiter angelegt (Lage aus der Datei).'));
       if (res.errors.length) parts.push('\n' + T('Übersprungen: ') + '\n• ' + res.errors.join('\n• '));
       if (res.missing.length)
         parts.push('\n' + T('Ohne Profilkoordinaten (Platzhalter gesetzt — bitte als .dat zuordnen): ')
@@ -350,5 +476,5 @@
   }
 
   Object.assign(App, { wingImportOpen: open, wingImportItemsXflr: itemsFromXflr,
-    wingImportItemsFlz: itemsFromFlz, wingImportApply: applyJobs });
+    wingImportItemsFlz: itemsFromFlz, wingImportApply: applyJobs, xflPlaneCg: planeCg });
 })();

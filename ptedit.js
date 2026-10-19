@@ -45,12 +45,25 @@
     return { root: cut.root.pl, tip: cut.tip.pl };
   }
   // Beim Aktivieren: beide Rippen auf gleiche Punktzahl bringen (Index-Synchron).
+  /* Bake überschreibt die Profile des Segments. Ohne echte Bearbeitung wird beim Verlassen
+   * wieder die Original-.dat eingesetzt (ptEditUnbake) — Formenbau bezieht sich darauf. */
+  function ptEditUnbake() {
+    const b = state.ptEdit && state.ptEdit.baked; if (!b) return;
+    state.ptEdit.baked = null;
+    let hit = false;
+    for (const e of b) if (e.owner.profile === e.baked) { e.owner.profile = e.orig; hit = true; }
+    if (hit && typeof recompute === 'function') recompute();
+  }
   function ptEditBake() {
+    ptEditUnbake();
     const r = ptRibArrays();
+    const ownR = r.idx === 0 ? state.root : state.segments[r.idx - 1], ownT = state.segments[r.idx];
+    const oR = r.getR(), oT = r.getT();
     const N = Math.max(PT_MIN, state.cfg.points | 0);
     const rp = Airfoil.resample(r.getR(), N), tp = Airfoil.resample(r.getT(), N);
     rp.name = r.getR().name; tp.name = r.getT().name;
     r.setR(rp); r.setT(tp);
+    state.ptEdit.baked = [{ owner: ownR, orig: oR, baked: rp }, { owner: ownT, orig: oT, baked: tp }];
   }
   // Wirksames Ziel je Canvas: Negativschale immer Profil (dort ist der Schnitt-
   // pfad die Schalenkontur, kein freier Polygonzug wie im Kerndesign).
@@ -158,6 +171,7 @@
     setR(s.root.map(p => ({ x: p.x, y: p.y }))); state.segments[idx].profile = s.tip.map(p => ({ x: p.x, y: p.y }));
   }
   function ptPushUndo(m) {
+    if (m.kind !== 'path' && m.kind !== 'neg' && m.kind !== 'negburn') state.ptEdit.baked = null;   // echte Profil-Bearbeitung: bleibt
     state.ptEdit.undo.push(ptSnap(m));
     if (state.ptEdit.undo.length > 60) state.ptEdit.undo.shift();
     state.ptEdit.redo.length = 0;
@@ -280,14 +294,14 @@
     // Nur das Kern-„Profil"-Ziel tastet die geteilte Kontur neu ab (bake). Das
     // Negativdesign bearbeitet seinen EIGENEN Override -> niemals baken.
     boolRow(g.body, 'Bearbeiten aktiv', () => state.ptEdit.on,
-      v => { state.ptEdit.on = v; if (v && !pathTgt && !negTab) { ptEditBake(); } state.ptEdit.undo.length = 0; state.ptEdit.redo.length = 0; state.ptEdit.drag = null; buildSidebar(); render(); },
+      v => { state.ptEdit.on = v; if (v && !pathTgt && !negTab) { ptEditBake(); } if (!v) ptEditUnbake(); state.ptEdit.undo.length = 0; state.ptEdit.redo.length = 0; state.ptEdit.drag = null; buildSidebar(); render(); },
       'Zeigt die Stützpunkte des AKTIVEN Segments (Wurzel blau, Rand orange) als Griffe. '
       + 'Linksklick halten = verschieben, Doppelklick links auf eine Kante = Punkt hinzufügen, Rechtsklick auf einen Griff = Punkt löschen. Wurzel und Rand bleiben index-synchron.');
     if (state.ptEdit.on) {
       if (tab === 'core')
         selectRow(g.body, 'Ziel',
           [['profile', 'Profil (Kontur)'], ['path', 'Schneidepfad (mit Abbrand)']],
-          () => state.ptEdit.target, v => { state.ptEdit.target = v; if (v === 'profile') ptEditBake(); state.ptEdit.drag = null; state.ptEdit.undo.length = 0; state.ptEdit.redo.length = 0; buildSidebar(); render(); },
+          () => state.ptEdit.target, v => { state.ptEdit.target = v; if (v === 'profile') ptEditBake(); else ptEditUnbake(); state.ptEdit.drag = null; state.ptEdit.undo.length = 0; state.ptEdit.redo.length = 0; buildSidebar(); render(); },
           '„Profil": die normierte Profilkontur bearbeiten (wird für den Schnitt neu abgetastet). '
           + '„Schneidepfad": den FERTIGEN Drahtweg (inkl. Abbrand, Verlängerungen, Stapeln) direkt bearbeiten. '
           + 'Der Pfad wird dabei EINGEFROREN — Beplankung/Abbrand/Stapeln ändern ihn dann nicht mehr, bis zurückgesetzt.');
@@ -340,7 +354,7 @@
 
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----
   Object.assign(App, { PT_MIN, flash, mmFromNorm, negBurnEditEnsure, negEditEnsure, normFromMM, pathEditEnsure, ptCurModel });
-  Object.assign(App, { ptDrawHandles, ptEditBake, ptEditDbl, ptEditDown, ptEditMenu, ptEditMove, ptEditUp, ptHitEdge, ptHitVertex });
+  Object.assign(App, { ptDrawHandles, ptEditBake, ptEditUnbake, ptEditDbl, ptEditDown, ptEditMenu, ptEditMove, ptEditUp, ptHitEdge, ptHitVertex });
   Object.assign(App, { ptModel, ptPlacedM, ptPushUndo, ptRedo, ptRibArrays, ptRibPl, ptSnap, ptSnapApply });
   Object.assign(App, { ptTarget, ptUndo, ptWorld });
   Object.defineProperty(App, 'negDraw', { get: () => negDraw, set: v => { negDraw = v; }, enumerable: true, configurable: true });

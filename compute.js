@@ -123,6 +123,12 @@
       EXT_FIELDS.forEach(f => { state.segments[k][f.r] = +extEffTip(prev, prc, ptc, f).toFixed(3); });
     }
   }
+  // Rippenkontur der Schnittrippen (Methode/Toleranz, cfg.rib*) für Wing.build.
+  function ribFitCfg() {
+    const c = state.cfg, mode = ['bspline', 'interp'].includes(c.ribFit) ? c.ribFit : 'cr';
+    return { mode, ctrl: Math.max(4, Math.round(c.ribCtrl || 18)), lambda: c.ribLambda != null ? Math.max(0, +c.ribLambda) : 1,
+      tol: c.ribTol != null ? Math.max(0, +c.ribTol) : 0.02, nose: c.ribNoseFix === true };
+  }
   function recompute() {
     inheritRootExtensions();
     // Scharnierlinien-Pfeilung: berechnete LE-Versätze in geklonten Segmenten an
@@ -136,7 +142,8 @@
       root: state.root, segments: segs,
       twistRef: state.cfg.twistRef, points: state.cfg.points,
       dihedralCut: state.cfg.dihedralCut, flipY: state.cfg.flipY,
-      align: state.cfg.align, globalDih: state.cfg.globalDih
+      align: state.cfg.align, globalDih: state.cfg.globalDih,
+      ribFit: ribFitCfg()
     });
     App.segZ = []; let z = 0;
     state.segments.forEach(s => { App.segZ.push({ z0: z, z1: z + s.span }); z += s.span; });
@@ -773,7 +780,7 @@
   }
   migrateExtOverBlock(state.cfg);
   Object.assign(App, { currentFeed, currentHeat, currentKerf, currentWireS, cutKerf, delMaterial, effSweep, extEffTip, migrateExtOverBlock });
-  Object.assign(App, { feedPair, inheritRootExtensions, kerfForSpeed, kerfPair, lerpProfile, matField, matHeat, matOptions });
+  Object.assign(App, { ribFitCfg, feedPair, inheritRootExtensions, kerfForSpeed, kerfPair, lerpProfile, matField, matHeat, matOptions });
   Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor, matExtPower, relayLevel, extPowerText });
   Object.assign(App, { matPair, moveSeg, polyPerim, profIsAll, profSet, profShowIndices, profToggle, projectCut, rootAtRight });
   Object.assign(App, { recompute, removeSeg, setFeed, setHeat, setKerf, setMatField, setPair, sheetActive });

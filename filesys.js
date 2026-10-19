@@ -285,6 +285,7 @@
       const items = App.wingImportItemsFlz(parsed);
       App.wingImportOpen(items, {
         title: T('FLZ_Vortex-Import: ') + file.name,
+        aeroPlane: parsed.kind === 'flz',
         note: T('FLZ beschreibt jeden Flügel von Spitze zu Spitze; übernommen wird eine Hälfte (Wurzel nach außen) — genau das, was der Tragflächendesigner schneidet. Der Einstellwinkel der Fläche wird NICHT auf die Rippen angewandt.')
       });
     } catch (err) { alert(T('FLZ-Import fehlgeschlagen: ') + T(err.message)); }
@@ -305,7 +306,8 @@
       const isXfl = /\.xfl$/i.test(file.name) || tag === 200001 || tag === 200002;
       let parsed, note;
       if (isXfl) {
-        parsed = XFLR5.parseXfl(file.buf);
+        // mit Ergebnissen: Schwerpunkt/Masse stehen nur in den Flugzeugpolaren
+        parsed = XFLR5.parseXfl(file.buf, { results: true });
         // Profile der Datei in die Namensbibliothek übernehmen — so greifen sie
         // auch bei später importierten plane-XML derselben Modelle.
         state.xflrFoils = state.xflrFoils || {};
@@ -318,7 +320,7 @@
       }
       const foils = Object.assign({}, state.xflrFoils || {}, parsed.foils || {});
       const items = App.wingImportItemsXflr(parsed, foils);
-      App.wingImportOpen(items, { title: T('XFLR5-Import: ') + file.name, note: note });
+      App.wingImportOpen(items, { title: T('XFLR5-Import: ') + file.name, note: note, aeroPlane: true });
     } catch (err) { alert(T('XFLR5-Import fehlgeschlagen: ') + T(err.message)); }
   }
 
@@ -1204,7 +1206,40 @@
     det.appendChild(sum); parent.appendChild(det);
     return det;
   }
+  // Erscheinungsbild: 'dark' (Standard), 'light' (alles hell) oder 'lightui'
+  // (Bedienbereiche hell, Zeichenflächen dunkel). data-theme=light an <html>
+  // schaltet die hellen Bedienfarben (CSS), data-draw=light zusätzlich die
+  // Zeichenflächen: CSS für Legenden/Überlagerungen, theme.js rechnet die
+  // Zeichenfarben um. :root behält immer die dunklen Variablen.
+  const THEME_KEY = 'hw_theme', THEMES = ['dark', 'light', 'lightui'];
+  function getTheme() { try { const t = localStorage.getItem(THEME_KEY); return THEMES.indexOf(t) >= 0 ? t : 'dark'; } catch (e) { return 'dark'; } }
+  function setTheme(t, keep) {
+    t = THEMES.indexOf(t) >= 0 ? t : 'dark';
+    const de = document.documentElement;
+    if (t === 'dark') de.removeAttribute('data-theme'); else de.setAttribute('data-theme', 'light');
+    if (t === 'light') de.setAttribute('data-draw', 'light'); else de.removeAttribute('data-draw');
+    if (window.DrawTheme) DrawTheme.setOn(t === 'light');
+    if (!keep) { try { localStorage.setItem(THEME_KEY, t); } catch (e) {} }
+    // Zeichenflächen neu zeichnen (die Module zeichnen bei Größenänderung neu).
+    try { if (typeof App.render === 'function') App.render(); } catch (e) {}
+    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+  }
+  function buildSettingsTheme(body) {
+    const head = document.createElement('b'); head.textContent = T('Erscheinungsbild'); head.className = 'set-h';
+    body.appendChild(head);
+    const row = document.createElement('div'); row.className = 'row'; row.style.gridTemplateColumns = '1fr 260px';
+    const l = document.createElement('label'); l.textContent = T('Bedienoberfläche');
+    const s = document.createElement('select');
+    [['dark', 'Dunkel'], ['light', 'Hell'], ['lightui', 'Hell, Zeichenflächen dunkel']].forEach(([v, t]) => {
+      const o = document.createElement('option'); o.value = v; o.textContent = T(t); s.appendChild(o);
+    });
+    s.value = getTheme();
+    s.onchange = () => setTheme(s.value);
+    row.appendChild(l); row.appendChild(s); body.appendChild(row);
+    App.hint(body, 'Hell: auch Zeichenflächen und 3D-Ansichten hell — die Zeichnungsfarben unten werden dafür automatisch umgerechnet (Helligkeit gespiegelt, Farbton bleibt). Schattierte 3D-Flächen, Bilder und Motivfarben bleiben unverändert. „Hell, Zeichenflächen dunkel": nur Kopfzeile, Reiter, Seitenleiste, Dialoge und Formulare hell.');
+  }
   function buildSettingsColors(body) {
+    buildSettingsTheme(body);
     // Werkseinstellung wiederherstellen (Farben + Strichtypen).
     const reset = document.createElement('button');
     reset.textContent = T('Standard wiederherstellen');
@@ -1385,7 +1420,7 @@
   // und bleiben außen vor.
   const PREF_KEYS = ['hotwire-lang', 'hotwing.linestyle', 'hotwing.vpalette', 'hotwing.vlinestyle',
     'hw_menu_colors', 'hw_hints_mode', 'hw_notes_enabled', 'cadRelCoords', 'cadCmdList',
-    'hotwire-homeSetZero', 'hotwing.recentProjects', DIR_USED_KEY, DIR_REMIND_KEY, 'hw_tab_layout'];
+    'hotwire-homeSetZero', 'hotwing.recentProjects', DIR_USED_KEY, DIR_REMIND_KEY, 'hw_tab_layout', 'hw_theme'];
   const PREF_PREFIXES = ['hw_set_open_'];
   function isPrefKey(k) {
     return PREF_KEYS.indexOf(k) >= 0 || PREF_PREFIXES.some(p => String(k).indexOf(p) === 0);
@@ -1430,6 +1465,7 @@
     try { if (has('cadRelCoords') && state.cad && state.cad.edit) { state.cad.edit.relCoords = changed['cadRelCoords'] !== '0'; App.cadUpdateRelButtons(); } } catch (e) {}
     try { if (has('cadCmdList')) App.cadToggleCmdList(changed['cadCmdList'] === '1'); } catch (e) {}
     try { if (has('hw_tab_layout')) App.tabMenuReload(); } catch (e) {}   // Gliederung der Reiterleiste
+    try { if (has('hw_theme')) setTheme(changed['hw_theme'], true); } catch (e) {}   // Erscheinungsbild hell/dunkel
     // Sprache zuletzt: setLang baut Seitenleiste/Einstellungen neu auf.
     try { if (has('hotwire-lang') && window.I18N && window.I18N.getLang() !== changed['hotwire-lang']) window.I18N.setLang(changed['hotwire-lang']); } catch (e) {}
     // GRBL-Homing, Recent-Liste, Klappzustände, Ordner-Merker werden bei Bedarf
@@ -1672,6 +1708,7 @@
       || (state.dxf && state.dxf.layers && Object.keys(state.dxf.layers).length)
       || (state.cad && state.cad.order && state.cad.order.length)
       || (window.Model3D && Model3D.state && Model3D.state.verts)
+      || (window.MeshEdit && MeshEdit.hasData())
       || (state.modelGcode);
     if (!silent && hasWork) {
       if (!confirm(T('Neues Projekt starten? Alle Tragflächen-, DXF-, 3D- und CAD-Daten des aktuellen Projekts werden verworfen. Maschinen-Einstellungen und Werkstoff-Datenbank bleiben erhalten.'))) return;
@@ -1703,6 +1740,7 @@
     // 3D-Modell verwerfen.
     state.modelGcode = null;
     if (window.Model3D && Model3D.reset) { try { Model3D.reset(); } catch (e) {} }
+    if (window.MeshEdit && MeshEdit.reset) { try { MeshEdit.reset(); } catch (e) {} }   // Reiter „3D-Bearbeitung“
     // Reiter „Schriften" (optional): Text, Schrift und Einstellungen zurücksetzen.
     if (window.Schrift && Schrift.reset) { try { Schrift.reset(); } catch (e) {} }
     if (window.Ausschnitt && Ausschnitt.reset) { try { Ausschnitt.reset(); } catch (e) {} }
@@ -1780,7 +1818,8 @@
       // DXF-/SVG-Formen und 3D-Modell (Netz + Bearbeitungen) mitspeichern.
       dxf: dxfClean,
       modelGcode: state.modelGcode || null,
-      model3d: (window.Model3D && Model3D.serialize) ? Model3D.serialize() : null
+      model3d: (window.Model3D && Model3D.serialize) ? Model3D.serialize() : null,
+      meshedit: (window.MeshEdit && MeshEdit.serialize) ? MeshEdit.serialize() : null
     });
     const text = JSON.stringify(data, null, 1);
     if (quick && projFileHandle && FS_SUPPORTED && !App.demoSaveBlocked('svProject')) {
@@ -1944,6 +1983,7 @@
       if (state.modelGcode.kerfMode == null) state.modelGcode.kerfMode = (d.cfg && d.cfg.kerfMode) || 'ratio';
     }
     if (d.model3d && window.Model3D && Model3D.deserialize) { try { Model3D.deserialize(d.model3d); } catch (e) {} }
+    if (window.MeshEdit && MeshEdit.deserialize) { try { MeshEdit.deserialize(d.meshedit || null); } catch (e) {} }
     state.activeSeg = 0;
     App.buildSidebar(); App.render();
     // Nach dem Laden JEDEN Reiter sofort auf die neuen Daten bringen: App.render()
@@ -2206,6 +2246,7 @@
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----
   Object.assign(App, { DIR_DEFAULT, DIR_KEYS, DIR_TREE, FS_SUPPORTED, createDirTree, useDirTree, dirReminder, loadFileVia, markDirUsed, pickerOpts, startDir, MACHINE_KEYS, RECENT_KEY, RECENT_MAX, SEGKEYS, SETTINGS_ENDPOINT, SETTINGS_FILE });
   Object.assign(App, { SETTINGS_KEY, addFoilDats, anchorDownload, applyFoilsToWing, applySettings, buildLoadMenu, buildPc2Controls, buildPc2StationList });
+  Object.assign(App, { getTheme, setTheme });
   Object.assign(App, { buildSaveMenu, buildSettingsColors, buildSettingsFiles, buildSettingsLanguage, buildSettingsMenuColors, buildSettingsModal, clearDir, closeLoadMenu });
   Object.assign(App, { closePc2, closeSaveMenu, closeSettings, colGroupHead, colSection, collectSettings, colorRow, decProf });
   Object.assign(App, { dirHandles, dxfToProfileDat, exportProfileDat, exportProfileDxf, exportViaPicker, fmtRecentTime, fsDel, fsGet });

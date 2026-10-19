@@ -570,7 +570,7 @@
     const pad = 14, sc = Math.min((W - 2 * pad) / Math.max(1e-6, x1 - x0), (H - 2 * pad) / Math.max(1e-6, y1 - y0));
     const cx = (W - (x1 - x0) * sc) / 2, cy = (H - (y1 - y0) * sc) / 2;
     const X = (p, o) => cx + (p.x + o - x0) * sc, Y = p => H - cy - (p.y - y0) * sc;
-    const fg = getComputedStyle(document.body).color || '#ccc';
+    const fg = getComputedStyle(document.documentElement).color || '#ccc';
     // Verbindungslinien (jede n-te)
     ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(140,140,140,.55)';
     if (A.rawN === B.rawN) for (let r = 0; r < A.rawN; r += Math.max(1, every | 0)) {

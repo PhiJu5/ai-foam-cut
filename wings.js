@@ -21,7 +21,7 @@
   // ---------- Welche cfg-Werte gehören zur Tragfläche? --------------------
   const WING_CFG_KEYS = [
     // Tragflächendesign
-    'twistRef', 'points', 'sheeting', 'sheetMode', 'sheetSides', 'sheetTop', 'sheetBot',
+    'twistRef', 'points', 'ribFit', 'ribCtrl', 'ribLambda', 'ribTol', 'ribNoseFix', 'sheeting', 'sheetMode', 'sheetSides', 'sheetTop', 'sheetBot',
     'globalDih', 'align', 'hingeAlign', 'sweepRef', 'dihedralCut', 'profSegs', 'pc2Show', 'pc2ShowSec',
     // Kerndesign
     'leStyle', 'leAngle', 'leGap', 'eightW', 'eightH', 'eightCross', 'teStyle',
@@ -34,6 +34,8 @@
     'rib',
     // Rippenfläche (Rippenbauweise, rippenflaeche.js)
     'rf',
+    // Holmauslegung (holm.js)
+    'holm',
     // Werkstoff-Zuweisung (Reiter „Projektübersicht")
     'design', 'matId', 'matHeight', 'negMatId', 'negMatHeight',
     // Gewichtsabschätzung (Reiter „Projektübersicht")
@@ -140,7 +142,7 @@
 
   // Nach jedem Wechsel: Editoren schließen, alles neu berechnen und zeichnen.
   function afterWingChange() {
-    if (state.ptEdit) { state.ptEdit.on = false; state.ptEdit.drag = null; state.ptEdit.hover = null; state.ptEdit.undo = []; state.ptEdit.redo = []; }
+    if (state.ptEdit) { if (App.ptEditUnbake) { try { App.ptEditUnbake(); } catch (e) {} } state.ptEdit.on = false; state.ptEdit.drag = null; state.ptEdit.hover = null; state.ptEdit.undo = []; state.ptEdit.redo = []; }
     if (state.profEdit) state.profEdit.target = 'root';
     if (App.profModalOpen && App.closeProfModal) { try { App.closeProfModal(); } catch (e) {} }
     if (state.gcodeEdited) { state.gcodeEdited = false; if (App.setGcodeEditMode) { try { App.setGcodeEditMode(false); } catch (e) {} } }

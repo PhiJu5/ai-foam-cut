@@ -127,6 +127,10 @@ def main():
         cmd += ["--icon", ico]
     for f in data_files:
         cmd += ["--add-data", "%s;." % f]
+    # xfoil.exe mitpacken (Reiter „Aerodynamik“, xfoilrun sucht in _MEIPASS/XFOIL)
+    xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
+    if os.path.isfile(xf):
+        cmd += ["--add-binary", "%s;XFOIL" % xf]
     cmd.append(ENTRY)
 
     subprocess.run(cmd, cwd=HERE, check=True)

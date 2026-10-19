@@ -20,13 +20,15 @@ schnell drehenden Werkzeugen. **Betrieb ausschließlich auf eigene Verantwortung
 
 - **Tragflächen**: Mehrsegmentflügel, Profil je Segment (NACA oder `.dat`), Pfeilung, Schränkung,
   Holm- und Spar-Schnitte, Beplankungsabzug, Abbrandkompensation je Designebene
+- **Holmauslegung**: Holmgurte, Stege und Torsionsschale bemessen, Bruchgrenze, 3D-Ansicht unter Last
 - **Kern- und Negativdesign**: Negativschalen, Kern-Stege, Kern zerteilen
 - **Formenbau**: Urmodell und Negativform als STL, B-Spline-Glättung, Trennfläche,
   Krümmungs- und Zebra-Analyse, STEP-Export
 - **Rumpf**: Loft aus Bezier-Splines, Spanten mit Anformungen
 - **Fräse**: 2D-CAM (außen/innen/Tasche/Bohren, Haltestege) und GRBL-Steuerung
 - **CAD-Bearbeitung**: eigener 2D-Editor mit AutoCAD-artiger Befehlszeile
-- **3D-Modell**: STL/OBJ und Flugsimulator-Modelle (X-Plane, FlightGear, glTF) zerlegen
+- **3D-Modell**: STL/OBJ/STEP und Flugsimulator-Modelle (X-Plane, FlightGear, glTF) zerlegen,
+  Segmente zusammensetzen
 - **Schriften**: Linienschriften und TTF/OTF als Schnittbahn
 - **Tragflächenausschnitt**: Profil als Ausschnitt aus einem Block oder als Profilstück schneiden
   (Anfahrt oben/unten/vorne/hinten, Startpunkt per Klick)
@@ -76,7 +78,7 @@ lassen sich als Profil speichern und wieder laden.
 Ohne Fenster geht es auch:
 
 ```
-python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.92
+python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.93
 python build_tool_electron.py --cli --target linux
 ```
 

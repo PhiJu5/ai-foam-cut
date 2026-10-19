@@ -68,7 +68,7 @@
     });
   }
   // Gruppen, die standardmäßig OFFEN starten (weiterhin zuklappbar).
-  const GRP_OPEN_DEFAULT = new Set(['Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
+  const GRP_OPEN_DEFAULT = new Set(['rpssMain', 'rpssCuts', 'rpssSel', 'rpssJoints', 'Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
   /* opts.alwaysOpen = true -> Gruppe ist dauerhaft offen und NICHT klappbar
    * (kein Pfeil, kein Klick). Sonst: gemerkter Zustand, Standard zugeklappt
    * (außer in GRP_OPEN_DEFAULT). */
@@ -387,12 +387,12 @@
     wrap.style.cssText = 'display:flex;align-items:stretch;gap:3px;min-width:0';
     input.style.flex = '1'; input.style.minWidth = '0';
     const bump = dir => {
-      const cur = parseNum(input.value);
+      const cur = opt.re ? window.parseRe(input.value) : parseNum(input.value);
       let v = (isNaN(cur) ? 0 : cur) + dir * step;
       v = opt.int ? Math.round(v) : Math.round(v * Math.pow(10, dp)) / Math.pow(10, dp);
       if (opt.min != null) v = Math.max(opt.min, v);
       if (opt.max != null) v = Math.min(opt.max, v);
-      input.value = v;
+      input.value = opt.re ? window.fmtRe(v) : v;
       input.dispatchEvent(new Event('input', { bubbles: true }));
       input.dispatchEvent(new Event('change', { bubbles: true }));
     };
@@ -448,25 +448,30 @@
     // Browser-Locale eines der beiden Zeichen).
     const i = document.createElement('input'); i.type = 'text'; i.inputMode = 'decimal';
     if (opt.step) i.step = opt.step; if (opt.min != null) i.min = opt.min; if (opt.max != null) i.max = opt.max;
-    i.value = get();
+    // opt.re: Re-Zahl mit k/M (z. B. „150k"), siehe parseRe/fmtRe in core.js
+    i.value = opt.re ? window.fmtRe(get()) : get();
+    if (opt.re) i.inputMode = 'text';
+    if (opt.re) i.title = T('k = Tausend, M = Million (z. B. 150k)');
     if (opt.readonly) {
       i.readOnly = true; i.tabIndex = -1;
       i.style.opacity = '.6'; i.title = T(opt.roTitle || 'automatisch berechnet');
       row.appendChild(l); row.appendChild(i); body.appendChild(row);
       return i;
     }
-    const commit = () => { let v = parseNum(i.value); if (isNaN(v)) return; if (opt.int) v = Math.round(v); set(v); if (!opt.norender) render(); };
-    if (opt.enter) {
+    // src (2. Argument des Setters): 'enter' | 'blur' | 'spin' | 'input' — damit
+    // ein Reiter z. B. nur bei Enter neu rechnen kann (Aerodynamik)
+    const commit = src => { let v = opt.re ? window.parseRe(i.value) : parseNum(i.value); if (isNaN(v)) return; if (opt.int) v = Math.round(v); set(v, src); if (!opt.norender) render(); };
+    if (opt.enter || opt.re) {          // Re: „150“ nicht schon vor dem „k“ übernehmen
       // Wert erst mit Enter (oder beim Verlassen des Felds) übernehmen – für
       // Setter, die die Sidebar neu aufbauen und sonst das Tippen unterbrechen.
       // Die Spinner-Pfeile lösen 'change' aus und gelten damit sofort.
       let last = String(i.value);
-      const go = () => { if (String(i.value) === last) return; last = String(i.value); commit(); };
-      i.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
-      i.onchange = go; i.onblur = go;
-    } else i.oninput = commit;
+      const go = src => { if (String(i.value) === last) return false; last = String(i.value); commit(src); return true; };
+      i.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); if (!go('enter') && opt.onEnter) opt.onEnter(); } };
+      i.onchange = e => go(e.isTrusted ? 'blur' : 'spin'); i.onblur = () => go('blur');
+    } else i.oninput = () => commit('input');
     row.appendChild(l);
-    row.appendChild(wrapWithSpinner(i, { step: opt.step, min: opt.min, max: opt.max, int: opt.int }));
+    row.appendChild(wrapWithSpinner(i, { step: opt.step, min: opt.min, max: opt.max, int: opt.int, re: opt.re }));
     body.appendChild(row);
     return i;
   }
@@ -1447,10 +1452,26 @@
     sparEditor(hg.body);
     side.appendChild(hg.g);
 
-    const gf = grp('Anzahl Profilpunkte', true, 'wing');
+    const gf = grp('Profilkontur der Schnittrippen', true, 'wing');
     numRow(gf.body, 'Profil Punkteanzahl', () => state.cfg.points, v => state.cfg.points = v,
       { int: true, min: 40, max: 400, hint: 'Anzahl der Stützpunkte, mit denen jedes Profil (und damit die '
         + 'Schnittbahn) abgetastet wird. Mehr Punkte = feinere Kontur, aber längerer G-Code. 120–200 sind üblich.' });
+    const rfMode = () => ['bspline', 'interp'].includes(state.cfg.ribFit) ? state.cfg.ribFit : 'cr';
+    selectRow(gf.body, 'Kurve durch die .dat-Punkte',
+      [['cr', 'Spline neu abtasten (bisher)'], ['bspline', 'B-Spline geglättet (Toleranz)'], ['interp', 'exakt durch die Punkte (Interpolation)']],
+      rfMode, v => { state.cfg.ribFit = v; buildSidebar(); },
+      'Wie aus den Punkten der .dat die Schnittkontur entsteht. Spline neu abtasten: lokaler Catmull-Rom-Spline durch alle Punkte (bisheriges Verhalten). '
+      + 'B-Spline geglättet: Ausgleichskurve wie im Formenbau — glättet Rundungsfehler, bleibt innerhalb der Toleranz zur .dat. '
+      + 'Exakt durch die Punkte: glatter kubischer Spline ohne Abweichung (wie Wingdesigner), übernimmt aber Rauschen der Datei. '
+      + 'Den Unterschied zum Originalprofil zeigt „Profilvergleich …".');
+    if (rfMode() === 'bspline') {
+      boolRow(gf.body, 'Nase fest (Nasenpunkt + Tangente)', () => state.cfg.ribNoseFix === true, v => { state.cfg.ribNoseFix = v; });
+      numRow(gf.body, 'Kontrollpunkte je Seite', () => state.cfg.ribCtrl != null ? state.cfg.ribCtrl : 18, v => { state.cfg.ribCtrl = v; }, { int: true, min: 4, max: 60 });
+      numRow(gf.body, 'Glättung (0 = keine Strafe)', () => state.cfg.ribLambda != null ? state.cfg.ribLambda : 1, v => { state.cfg.ribLambda = v; }, { step: 0.5, min: 0 });
+      numRow(gf.body, 'Toleranz zur .dat (mm, 0 = aus)', () => state.cfg.ribTol != null ? state.cfg.ribTol : 0.02, v => { state.cfg.ribTol = v; }, { step: 0.01, min: 0 });
+    }
+    { const b = document.createElement('button'); b.textContent = T('Profilvergleich …'); b.title = T('Schnittrippe gegen die Original-.dat: Punkte, Kontur und Abweichung entlang des Profils');
+      b.onclick = () => { if (App.ribCompareOpen) App.ribCompareOpen(); }; gf.body.appendChild(b); }
     hint(gf.body, 'Der Drehpunkt der Schränkung (Washout) wird jetzt je Profil im '
       + 'Tragflächendesigner eingestellt (Zeile „Drehpunkt Schränkung") — nicht mehr global.');
     side.appendChild(gf.g);
@@ -2039,7 +2060,9 @@
     // --- Reiter „Rumpf-Pro" (rpro) und „Rumpf-Pro Spanten" (rprob), optionale Features ---
     if (App.rproSidebar) App.rproSidebar(side);
     if (App.rprobSidebar) App.rprobSidebar(side);
+    if (App.rpssSidebar) App.rpssSidebar(side);   // Reiter „Rumpf-Pro Schnittspanten“ (optional)
     if (App.rprofSidebar) App.rprofSidebar(side);
+    if (App.meshedSidebar) App.meshedSidebar(side);   // Reiter „3D-Bearbeitung“ (optional)
     if (App.cockpitSidebar) App.cockpitSidebar(side);   // Reiter „Cockpit" (optional)
 
     // --- Reiter „Fräse" (fraese, optionales Feature) --------------------
@@ -2059,6 +2082,9 @@
 
     // --- Reiter „Auslegung" (ausl, optionales Feature) --------------------
     if (App.auslSidebar) App.auslSidebar(side);
+
+    // --- Reiter „Holmauslegung" (holm, optionales Feature) ---------------
+    if (App.holmSidebar) App.holmSidebar(side);
 
     // --- Reiter „Profildatenbank" (foildb, optionales Feature) ------------
     if (App.foildbSidebar) App.foildbSidebar(side);
@@ -2937,6 +2963,112 @@
     side.appendChild(g.g);
   }
 
+  // --- Reiter „3D-Modell": Segmente zusammensetzen (Baugruppe) ---------
+  // Mehrere STL/OBJ/STEP-Teile (z. B. einzeln konstruierte oder gedruckte
+  // Rumpfsegmente) laden, ausrichten und zu einem Netz vereinen.
+  const M3D_ASM = { axis: null, center: true, gap: 0 };
+  async function pickModelParts() {
+    const ext = ['.stl', '.obj', '.stp', '.step', '.igs', '.iges'];
+    if (App.FS_SUPPORTED && window.showOpenFilePicker) {
+      try {
+        const opts = Object.assign({}, App.pickerOpts ? App.pickerOpts('ldStl', '.stl') : {}, { multiple: true,
+          types: [{ description: T('3D-Modelle (STL, OBJ, STEP, IGES)'), accept: { 'model/stl': ext } }] });
+        const hs = await window.showOpenFilePicker(opts);
+        if (App.markDirUsed) App.markDirUsed('ldStl', '.stl');
+        return Promise.all(hs.map(h => h.getFile()));
+      } catch (e) { if (e && e.name === 'AbortError') return null; }
+    }
+    return new Promise(res => {
+      const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = ext.join(',');
+      inp.onchange = () => res(inp.files.length ? Array.from(inp.files) : null);
+      inp.click();
+    });
+  }
+  // Kleiner Farbwähler (Teile der Baugruppe, zerlegte Segmente).
+  function m3dColorInput(get, set, tip) {
+    const c = document.createElement('input'); c.type = 'color'; c.value = get(); c.title = T(tip);
+    c.style.cssText = 'width:30px;height:24px;padding:0 2px;flex:none;cursor:pointer';
+    c.oninput = () => set(c.value);
+    return c;
+  }
+  function buildModelAssemblySidebar(side) {
+    const M = Model3D.state;
+    const parts = Model3D.getParts ? Model3D.getParts() : [];
+    const ag = grp('Segmente zusammensetzen', parts.length > 0, 'model');
+    const reshow = () => { buildSidebar(); if (state.activeTab === 'model') Model3D.show(); };
+    const add = document.createElement('button');
+    add.textContent = T(parts.length ? '+ Weitere Teile hinzufügen…' : 'Teile laden… (STL/OBJ/STEP)');
+    if (!parts.length) add.className = 'primary';
+    add.onclick = async () => { const fs = await pickModelParts(); if (fs && fs.length) { await Model3D.addParts(fs); reshow(); } };
+    ag.body.appendChild(add);
+    hint(ag.body, 'Mehrere Segmente eines Rumpfs (STL, OBJ, STEP oder IGES, Mehrfachauswahl) '
+      + 'wieder zu einem Modell vereinen. Teile aus einer gemeinsamen Konstruktion liegen schon '
+      + 'richtig; einzeln am Nullpunkt exportierte Teile reiht „Automatisch aneinanderreihen" '
+      + 'in Listenreihenfolge auf. Ein bereits geladenes Modell wird zum ersten Teil.');
+    if (!parts.length) { side.appendChild(ag.g); return; }
+
+    if (M3D_ASM.axis == null) M3D_ASM.axis = M.axis;
+    selectRow(ag.body, 'Aneinanderreihen entlang', [['0', 'X'], ['1', 'Y'], ['2', 'Z']],
+      () => String(M3D_ASM.axis), v => { M3D_ASM.axis = +v; });
+    boolRow(ag.body, 'Stoßflächen mittig ausrichten', () => M3D_ASM.center, v => { M3D_ASM.center = v; });
+    numRow(ag.body, 'Fugenabstand (mm)', () => M3D_ASM.gap, v => { M3D_ASM.gap = v; }, { step: 0.5, norender: true });
+    const ch = document.createElement('button'); ch.textContent = T('Automatisch aneinanderreihen');
+    ch.onclick = () => { Model3D.chainParts(M3D_ASM.axis, M3D_ASM.center, M3D_ASM.gap); reshow(); };
+    ag.body.appendChild(ch);
+    boolRow(ag.body, 'Stirnkappen an den Fugen entfernen', () => Model3D.getPartCaps(), v => { Model3D.setPartCaps(v); reshow(); },
+      'Getrennt exportierte Segmente sind an den Trennstellen mit ebenen Deckeln geschlossen. '
+      + 'Liegen zwei Teile Stirn an Stirn, werden diese Deckel entfernt, damit keine Innenwände im Rumpf bleiben.');
+    const js = Model3D.partJoints(), jsAx = js.filter(j => j.a === M.axis);
+    hint(ag.body, T('Fugen: ') + js.length + (Model3D.getPartCaps() ? T(' · entfernte Kappen-Dreiecke: ') + Model3D.partCapsRemoved() : ''));
+    if (jsAx.length) {
+      const pj = document.createElement('button'); pj.textContent = T('Schnittebenen an die Fugen setzen');
+      pj.title = T('Setzt die Schnittebenen genau auf die Trennstellen — die Zerlegung liefert dann wieder die Original-Segmente.');
+      pj.onclick = () => { Model3D.planesAtJoints(); reshow(); };
+      ag.body.appendChild(pj);
+    }
+
+    // Teileliste: Klick wählt (gelb hervorgehoben) und zeigt Lage-Felder.
+    hint(ag.body, T('Teile (') + parts.length + T(') — anklicken zum Ausrichten:'));
+    const sel = Model3D.getPartSel();
+    parts.forEach((p, i) => {
+      const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+      row.appendChild(m3dColorInput(() => Model3D.partColorHex(i), v => Model3D.setPartColor(i, v), 'Farbe dieses Teils'));
+      const nb = document.createElement('button'); nb.textContent = (i + 1) + '. ' + p.name; nb.title = p.name;
+      nb.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left';
+      if (i === sel) nb.className = 'primary';
+      nb.onclick = () => { Model3D.selectPart(i); buildSidebar(); };
+      row.appendChild(nb);
+      const mini = (txt, tip, fn, dis) => { const b = document.createElement('button'); b.textContent = txt; b.title = T(tip); b.disabled = !!dis; b.style.padding = '2px 7px'; b.onclick = fn; row.appendChild(b); };
+      mini('↑', 'Nach vorne (Reihenfolge beim Aneinanderreihen)', () => { Model3D.movePart(i, -1); reshow(); }, i === 0);
+      mini('↓', 'Nach hinten', () => { Model3D.movePart(i, 1); reshow(); }, i === parts.length - 1);
+      mini('✕', 'Teil entfernen', () => { Model3D.removePart(i); reshow(); });
+      ag.body.appendChild(row);
+      if (i !== sel) return;
+      const live = { step: 1, norender: true, enter: true };
+      [['dx', 'Verschiebung X (mm)'], ['dy', 'Verschiebung Y (mm)'], ['dz', 'Verschiebung Z (mm)']].forEach(([k, lbl]) =>
+        numRow(ag.body, lbl, () => +(+p[k] || 0).toFixed(3), v => { Model3D.setPartTf(i, k, v); }, live));
+      [['rx', 'Drehung um X (°)', 0], ['ry', 'Drehung um Y (°)', 1], ['rz', 'Drehung um Z (°)', 2]].forEach(([k, lbl]) =>
+        numRow(ag.body, lbl, () => +(+p[k] || 0).toFixed(3), v => { Model3D.setPartTf(i, k, v); }, Object.assign({}, live, { step: 90 })));
+      const rr = document.createElement('button'); rr.textContent = T('Lage dieses Teils zurücksetzen');
+      rr.onclick = () => { Model3D.resetPartTf(i); reshow(); };
+      ag.body.appendChild(rr);
+      if (Model3D.hasPartColor(i)) {
+        const rc = document.createElement('button'); rc.textContent = T('Standardfarbe');
+        rc.onclick = () => { Model3D.setPartColor(i, null); buildSidebar(); };
+        ag.body.appendChild(rc);
+      }
+    });
+
+    const ex = document.createElement('button'); ex.textContent = T('Zusammengesetztes Modell als STL exportieren');
+    ex.onclick = () => Model3D.exportModel();
+    ag.body.appendChild(ex);
+    const ds = document.createElement('button'); ds.textContent = T('Baugruppe auflösen (als ein Netz behalten)');
+    ds.title = T('Die Teileliste wird verworfen; das zusammengesetzte Netz bleibt als normales Modell.');
+    ds.onclick = () => { Model3D.dissolveParts(); reshow(); };
+    ag.body.appendChild(ds);
+    side.appendChild(ag.g);
+  }
+
   // --- Reiter „3D-Modell": Laden, Zerlegen, Segmente ------------------
   function buildModelSidebar(side) {
     if (!window.Model3D) return;
@@ -2946,12 +3078,13 @@
 
     const lg = grp('3D-Modell laden', true, 'model', { alwaysOpen: true });
     const load = document.createElement('button');
-    load.textContent = T('STL/OBJ laden…'); load.className = 'primary';
-    load.onclick = () => App.loadFileVia({ 'model/stl': ['.stl', '.obj'] }, f => {
+    load.textContent = T('STL/OBJ/STEP laden…'); load.className = 'primary';
+    load.onclick = () => App.loadFileVia({ 'model/stl': ['.stl', '.obj', '.stp', '.step', '.igs', '.iges'] }, f => {
       Model3D.loadFile(f).then(() => { buildSidebar(); if (state.activeTab === 'model') Model3D.show(); });
     }, 'fileModel3d', 'ldStl');
     lg.body.appendChild(load);
-    hint(lg.body, 'Lädt ein Dreiecksnetz (STL binär/ASCII oder Wavefront-OBJ). Es wird '
+    hint(lg.body, 'Lädt ein Dreiecksnetz (STL binär/ASCII, Wavefront-OBJ) oder ein CAD-Modell '
+      + '(STEP/IGES, wird beim Laden fein trianguliert). Es wird '
       + 'entlang einer Achse durch senkrechte Schnittebenen in einzelne Segmente zerlegt.');
     if (window.SimModel) {
       const sim = document.createElement('button');
@@ -2978,6 +3111,7 @@
         + 'FSX/P3D-.mdl und verschlüsselte Marketplace-Modelle sind nicht lesbar.');
     }
     side.appendChild(lg.g);
+    buildModelAssemblySidebar(side);
 
     if (!Model3D.hasModel()) return;
 
@@ -3095,8 +3229,16 @@
       l.textContent = T('Segment ') + (i + 1) + ' · ' + dim + ' mm';
       const dl = document.createElement('button'); dl.textContent = T('STL');
       dl.onclick = () => Model3D.exportSegment(i);
-      row.appendChild(l); row.appendChild(dl); sg.body.appendChild(row);
+      const wrap = document.createElement('div'); wrap.style.cssText = 'display:flex;gap:4px;align-items:center';
+      wrap.appendChild(m3dColorInput(() => Model3D.segColorHex(i), v => Model3D.setSegColor(i, v), 'Farbe dieses Segments'));
+      dl.style.flex = '1'; wrap.appendChild(dl);
+      row.appendChild(l); row.appendChild(wrap); sg.body.appendChild(row);
     });
+    if (M.segs.some((s, i) => Model3D.hasSegColor(i))) {
+      const rc = document.createElement('button'); rc.textContent = T('Segmentfarben zurücksetzen');
+      rc.onclick = () => { Model3D.resetSegColors(); buildSidebar(); };
+      sg.body.appendChild(rc);
+    }
     const all = document.createElement('button'); all.textContent = T('Alle Segmente als STL');
     all.onclick = () => Model3D.exportAll(); sg.body.appendChild(all);
     hint(sg.body, 'Jedes Segment wird an den Schnittebenen mit Kappen geschlossen und als '

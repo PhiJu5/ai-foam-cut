@@ -45,6 +45,8 @@
     formSmooth: 'bspline',     // 'bspline' | 'none'
     formCtrl: 18,              // Kontrollpunkte je Profilseite
     formLambda: 1,             // Glättungsgewicht (0 = reine Ausgleichung)
+    formNoseFix: false,        // Nase fest: Kurve exakt durch den Nasenpunkt der .dat, Tangente senkrecht zur Sehne (gemessen: kein Gewinn, daher aus)
+    formTol: 0.02,             // Toleranz (mm) zur Original-.dat: Kurve wird lokal verfeinert, bis alle Punkte innerhalb liegen (0 = aus, feste Kontrollpunktzahl)
     formPts: 240,              // Punkte je Rippe (Ausgabe)
     formRingMm: 5,             // Ringabstand entlang der Spannweite (mm)
     formPlan: 'smooth',        // Grundriss bei .pc2-Import: 'smooth' glatt wie im Planform Creator | 'trap' Trapeze (wie Heißdraht)
@@ -167,7 +169,7 @@
     formPinDepth: 10,          // Tiefe in der Tragfläche (mm)
     formPinDepthTip: 10,       // Tiefe im Randbogen / Winglet (mm)
     formPinPts: null,          // [[x, y], …] Lochmitten bezogen auf die Profilnase der letzten Rippe (mm)
-    formPinGap: 30,            // Vorschau: Teile auseinanderziehen (mm)
+    formPinGap: 0,             // Vorschau: Tragfläche und Randbogen / Winglet auseinanderziehen (mm, 0 = zusammen)
     formStk: false,            // Steckungs-Ausnehmungen in der Wurzelverlängerung (Tragflächensteckung)
     formStkN: 1,               // (alt) Anzahl — nur noch für Altstände ohne Liste
     formStkShape: 'circle',    // Vorgabe für neue Ausnehmungen: 'circle' | 'rect'
@@ -185,6 +187,17 @@
     formStkTA: 10, formStkTB: 6,
     formStkTLen: 25,
     formStkTPts: null,
+    /* Bauteile aus Segmentgruppen: die Tragfläche wird an frei gewählten Fugen zwischen den Segmenten in mehrere
+     * Bauteile geteilt (je eigenes Urmodell bzw. eigene Form). Randbogen / Winglet gehört zum letzten Bauteil oder
+     * ist ein eigenes. Je Fuge eine eigene Steckungs-Liste formStkJ<k> (k = Fuge nach Segment k), gleiche Felder wie
+     * formStk; sie wirkt in beiden angrenzenden Bauteilen deckungsgleich (Lage ab Nase der Fugenrippe). */
+    formGrpOn: false,
+    formGrpCuts: null,         // [k, …] Fugen nach Segment k (1 … Segmentzahl − 1)
+    formGrpTip: 'join',        // 'join' Randbogen / Winglet gehört zum letzten Bauteil | 'sep' eigenes Bauteil
+    formGrpSel: 0,             // aktives Bauteil (Index; = Gruppenzahl -> Randbogen / Winglet bei 'sep')
+    formOvJ: 20,               // Überstand der Form an den Fugen (mm, beide Seiten)
+    formGrpAll: false,         // Vorschau: alle Bauteile gleichzeitig zeigen
+    formGrpGap: 30,            // … dabei je Fuge um diesen Abstand auseinanderziehen (mm)
     formTipCut: 'seg',         // Abschlusskante am Spitzen-Überstand (nur Rand 'offset'): 'seg' senkrecht zum letzten Segment (schräg) | 'span' senkrecht zur Spannweite
     formSegOn: false,          // Segmentierung: Formteile für den Druck in Stücke entlang der Spannweite teilen (beim Export)
     formSegMode: 'len',        // 'len' feste Stücklänge | 'seg' Tragflächen-Segmente, je in n Stücke | 'n' gesamt in n Stücke | 'max' gesamt in gleich lange Stücke ≤ max. Länge
@@ -260,7 +273,13 @@
     const segZ = App.segZ || [];
     const fy = state.cfg.flipY ? -1 : 1;
     const conv = (pts, dx) => pts.map(p => ({ x: p.x + dx, y: p.y * fy }));
-    const out = [{ pts: conv(w.cuts[0].root.pts, 0), z: 0, name: T('Wurzel') }];
+    // Originalprofil der Rippe (vor dem Neu-Abtasten) mit derselben Platzierung in mm.
+    const srcOf = (r, dx) => {
+      if (!r.src || !r.pl || !window.Wing || r.src.length < 5) return null;
+      const pl = r.pl, pts = Wing.place(r.src, { chord: pl.chord, washoutDeg: pl.twist, twistRefX: pl.twistRef, leOffset: pl.leOffset, z: 0 }).pts;
+      return conv(pts.map(p => ({ x: p.x, y: (p.y + (pl.shift || 0)) * (pl.flip ? -1 : 1) })), dx);
+    };
+    const out = [{ pts: conv(w.cuts[0].root.pts, 0), src: srcOf(w.cuts[0].root, 0), z: 0, name: T('Wurzel') }];
     let cumLE = 0;
     w.cuts.forEach((c, k) => {
       // Alle Segmente inkl. V-Form (Höhenversatz steckt in den Schnitt-Rippen). Hat ein
@@ -269,140 +288,24 @@
       if (k > 0) {
         const prev = out[out.length - 1], rp = conv(c.root.pts, cumLE);
         let diff = 0; for (let i = 0; i < Math.min(rp.length, prev.pts.length); i++) diff = Math.max(diff, Math.abs(rp[i].y - prev.pts[i].y), Math.abs(rp[i].x - prev.pts[i].x));
-        if (diff > 1e-6) out.push({ pts: rp, z: prev.z, name: T('Segment ') + (k + 1) + ' ' + T('Wurzel') });
+        if (diff > 1e-6) out.push({ pts: rp, src: srcOf(c.root, cumLE), z: prev.z, name: T('Segment ') + (k + 1) + ' ' + T('Wurzel') });
       }
-      out.push({ pts: conv(c.tip.pts, cumLE), z: segZ[k] ? segZ[k].z1 : out[out.length - 1].z + c.span,
+      out.push({ pts: conv(c.tip.pts, cumLE), src: srcOf(c.tip, cumLE), z: segZ[k] ? segZ[k].z1 : out[out.length - 1].z + c.span,
         name: T('Segment ') + (k + 1) + ' ' + T('außen') });
       cumLE += (c.tip.pl && c.tip.pl.leOffset) || 0;
     });
     return out;
   }
 
-  // ---------- B-Spline-Ausgleichung ---------------------------------------
-  function chordParam(P) {
-    const u = [0];
-    for (let i = 1; i < P.length; i++) u.push(u[i - 1] + Math.hypot(P[i].x - P[i - 1].x, P[i].y - P[i - 1].y));
-    const L = u[u.length - 1] || 1;
-    return u.map(v => v / L);
-  }
-  // Kubische B-Spline-Basis (geklemmt), NURBS-Book A2.2. t: Knoten (K+4), K Kontrollpunkte.
-  function bsBasis(u, t, K) {
-    const p = 3, N = new Float64Array(K);
-    if (u >= 1) u = 1 - 1e-12; if (u < 0) u = 0;
-    let k = p; while (k < K - 1 && u >= t[k + 1]) k++;
-    const left = [], right = [], Nn = [1];
-    for (let j = 1; j <= p; j++) {
-      left[j] = u - t[k + 1 - j]; right[j] = t[k + j] - u;
-      let saved = 0;
-      for (let r = 0; r < j; r++) { const tmp = Nn[r] / (right[r + 1] + left[j - r]); Nn[r] = saved + right[r + 1] * tmp; saved = left[j - r] * tmp; }
-      Nn[j] = saved;
-    }
-    for (let j = 0; j <= p; j++) N[k - p + j] = Nn[j];
-    return N;
-  }
-  // Knoten: geklemmt, innere Knoten an den Quantilen der Punktparameter (dicht an
-  // Nase/Endleiste, wo die Punkte dicht liegen).
-  function knotsFor(u, K) {
-    const t = [0, 0, 0, 0], ni = K - 4, n = u.length;
-    for (let j = 1; j <= ni; j++) {
-      const pos = j * (n - 1) / (ni + 1), i0 = Math.floor(pos), f = pos - i0;
-      t.push(u[i0] + f * ((u[Math.min(i0 + 1, n - 1)] - u[i0]) || 0));
-    }
-    t.push(1, 1, 1, 1);
-    return t;
-  }
-  function solveLinear(A, b, n, m) {   // A n×n (Array of Float64Array), b n×m; Gauß mit Pivot
-    for (let c = 0; c < n; c++) {
-      let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
-      if (piv !== c) { const tA = A[c]; A[c] = A[piv]; A[piv] = tA; const tb = b[c]; b[c] = b[piv]; b[piv] = tb; }
-      const d = A[c][c] || 1e-12;
-      for (let r = c + 1; r < n; r++) {
-        const f = A[r][c] / d; if (!f) continue;
-        for (let k = c; k < n; k++) A[r][k] -= f * A[c][k];
-        for (let k = 0; k < m; k++) b[r][k] -= f * b[c][k];
-      }
-    }
-    const x = []; for (let r = 0; r < n; r++) x[r] = new Float64Array(m);
-    for (let r = n - 1; r >= 0; r--) {
-      for (let k = 0; k < m; k++) {
-        let s = b[r][k]; for (let c = r + 1; c < n; c++) s -= A[r][c] * x[c][k];
-        x[r][k] = s / (A[r][r] || 1e-12);
-      }
-    }
-    return x;
-  }
-  /* Ausgleichs-B-Spline durch die Rippe P (offen: TE oben … Nase … TE unten).
-   * Rückgabe: Auswertefunktion ev(u) und Kontrollpunkte. Erster/letzter Kontroll-
-   * punkt = Endleistenpunkte (fest). lambda: Strafe auf 2. Differenzen der
-   * Kontrollpunkte (relativ zur Punktzahl skaliert). */
-  function fitBSpline(P, K, lambda) {
-    const n = P.length; K = Math.max(6, Math.min(K, n - 1));
-    const u = chordParam(P), t = knotsFor(u, K);
-    const B = []; for (let i = 0; i < n; i++) B.push(bsBasis(u[i], t, K));
-    const A = []; for (let i = 0; i < K; i++) A.push(new Float64Array(K));
-    const b = []; for (let i = 0; i < K; i++) b.push(new Float64Array(2));
-    for (let i = 0; i < n; i++) {
-      const Bi = B[i];
-      for (let r = 0; r < K; r++) { const br = Bi[r]; if (!br) continue;
-        for (let c = 0; c < K; c++) if (Bi[c]) A[r][c] += br * Bi[c];
-        b[r][0] += br * P[i].x; b[r][1] += br * P[i].y; }
-    }
-    // Krümmungsstrafe: sum (c[i-1] - 2c[i] + c[i+1])^2, skaliert mit Punktdichte
-    // und Sehnenlänge (Kontrollpunktabstand ~ L/K).
-    const lam = (lambda || 0) * (n / K) * 0.02;
-    if (lam > 0) for (let i = 1; i < K - 1; i++) {
-      const idx = [i - 1, i, i + 1], w = [1, -2, 1];
-      for (let a = 0; a < 3; a++) for (let c = 0; c < 3; c++) A[idx[a]][idx[c]] += lam * w[a] * w[c];
-    }
-    // Enden fest: c0 = P0, cK-1 = Pn-1 -> aus dem System herausnehmen.
-    const m = K - 2, A2 = [], b2 = [];
-    for (let r = 1; r < K - 1; r++) {
-      A2.push(A[r].slice(1, K - 1));
-      b2.push(new Float64Array([b[r][0] - A[r][0] * P[0].x - A[r][K - 1] * P[n - 1].x,
-        b[r][1] - A[r][0] * P[0].y - A[r][K - 1] * P[n - 1].y]));
-    }
-    const xs = solveLinear(A2, b2, m, 2);
-    const ctrl = [{ x: P[0].x, y: P[0].y }];
-    for (let i = 0; i < m; i++) ctrl.push({ x: xs[i][0], y: xs[i][1] });
-    ctrl.push({ x: P[n - 1].x, y: P[n - 1].y });
-    const ev = uu => { const N = bsBasis(uu, t, K); let x = 0, y = 0;
-      for (let i = 0; i < K; i++) if (N[i]) { x += N[i] * ctrl[i].x; y += N[i] * ctrl[i].y; } return { x, y }; };
-    return { ev, ctrl, u, uLE: u[Math.ceil(n / 2) - 1] };
-  }
-  // Auswerte-Parameter: Kosinus-Verteilung um die Nase (uLE), Nase bei Index Mu-1.
-  function evalParams(M, uLE) {
-    const Mu = Math.ceil(M / 2), Ml = M - Mu + 1, out = [];
-    for (let i = 0; i < Mu; i++) out.push(uLE * (1 - Math.cos(Math.PI * i / (Mu - 1))) / 2);
-    for (let j = 1; j < Ml; j++) out.push(uLE + (1 - uLE) * (1 - Math.cos(Math.PI * j / (Ml - 1))) / 2);
-    return out;
-  }
-  function leIndex(M) { return Math.ceil(M / 2) - 1; }
-  // Abstand Punkt -> Polylinie (max über alle Rohpunkte = Abweichung der Glättung).
-  function maxDeviation(raw, curve) {
-    let worst = 0;
-    for (const p of raw) {
-      let best = Infinity;
-      for (let i = 0; i < curve.length - 1; i++) {
-        const a = curve[i], b = curve[i + 1], dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy || 1e-12;
-        let s = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; s = s < 0 ? 0 : s > 1 ? 1 : s;
-        const d = Math.hypot(p.x - a.x - s * dx, p.y - a.y - s * dy); if (d < best) best = d;
-      }
-      if (best > worst) worst = best;
-    }
-    return worst;
-  }
-  /* Geglättete/neu abgetastete Rippe: M Punkte, Nase bei leIndex(M). */
-  function smoothRib(P, opt) {
-    const M = opt.pts;
-    if (opt.mode === 'none') {
-      const r = Airfoil.resample(P, M).map(p => ({ x: p.x, y: p.y }));
-      return { pts: r, dev: 0, ctrl: null };
-    }
-    const K = 2 * opt.ctrl + 1;
-    const f = fitBSpline(P, K, opt.lambda);
-    const pts = evalParams(M, f.uLE).map(f.ev);
-    return { pts, dev: maxDeviation(P, pts), ctrl: f.ctrl };
-  }
+  // ---------- Profilkurve (Mathematik in profilfit.js, gemeinsam mit den Heißdraht-Rippen) ----
+  const PF = window.ProfilFit;
+  const { chordParam, fitBSpline, fitTolerance, noseIndex, leIndex } = PF;
+  /* Geglättete/neu abgetastete Rippe: M Punkte, Nase bei leIndex(M).
+   * src: Originalkontur (vor dem Neu-Abtasten) — Abweichung wird immer dagegen gemessen.
+   * opt.mode 'bspline' (Ausgleich; tol > 0: direkt an src mit toleranzgesteuerter Verfeinerung),
+   * 'interp' (exakt durch alle Punkte), 'none' (nur neu abtasten); opt.nose: Nase fest.
+   * chordMm: Sehne in mm, falls P normiert ist (Winglet-Profile aus .dat) -> tol umrechnen. */
+  function smoothRib(P, opt, src, chordMm) { return PF.ribCurve(P, opt, src, chordMm); }
   // Aufmaß: Parallelversatz nach außen (Ring CCW: außen = rechts der Laufrichtung).
   function offsetRib(pts, d) {
     if (!d) return pts;
@@ -646,7 +549,7 @@
    * Rückgabe { rings:[{pts,z}], stations:[{raw, sm, dev, z, name}], tipStart }. */
   function wingRings(opt) {
     const st = stationsAbs(); if (st.length < 2) return null;
-    const stations = st.map(s => { const r = smoothRib(s.pts, opt); return { raw: s.pts, sm: teThickRing(offsetRib(r.pts, opt.aufmass), opt.teThk), dev: r.dev, ctrl: r.ctrl, z: s.z, name: s.name }; });
+    const stations = st.map(s => { const r = smoothRib(s.pts, opt, s.src); return { raw: s.src || s.pts, sm: teThickRing(offsetRib(r.pts, opt.aufmass), opt.teThk), dev: r.dev, ok: r.ok, ctrl: r.ctrl, knS: PF.knotsToS(r.t, r.uLE), z: s.z, name: s.name }; });
     let rings = [];
     if (opt.loft === 'spline') rings = splineLoftRings(stations, opt);
     else for (let k = 0; k < stations.length - 1; k++) {
@@ -875,7 +778,7 @@
   }
   const wlTipUV = (q, shp) => shp ? { u: shp.uLE + q.x * (shp.uTE - shp.uLE), v: q.y * (shp.uTE - shp.uLE) * shp.thk } : { u: q.x, v: q.y };
   function unitProfile(P, opt) {
-    const pts = smoothRib(P, opt).pts, e = ribExtent(pts), iLE = leIndex(pts.length), yLE = pts[iLE].y;
+    const pts = smoothRib(P, opt, null, opt.wl && opt.wl.cRoot).pts, e = ribExtent(pts), iLE = leIndex(pts.length), yLE = pts[iLE].y;
     return pts.map(q => ({ x: (q.x - e.xLE) / (e.c || 1), y: (q.y - yLE) / (e.c || 1) }));
   }
   function wingletRings(last, prev, opt) {
@@ -1126,9 +1029,9 @@
     const R = last.sm, M = R.length, prof = opt.wlProf || {};
     const rl = wlRails(last, prev, opt); if (!rl.le || !rl.te) return [];
     const Pw = chordUnit(R);
-    const Pr = prof.root ? chordUnit(smoothRib(prof.root.pts, opt).pts) : Pw;
-    const Pt = prof.tip ? chordUnit(smoothRib(prof.tip.pts, opt).pts) : Pr;
-    const Pm = prof.mid ? chordUnit(smoothRib(prof.mid.pts, opt).pts) : null;
+    const Pr = prof.root ? chordUnit(smoothRib(prof.root.pts, opt, null, ribExtent(R).c).pts) : Pw;
+    const Pt = prof.tip ? chordUnit(smoothRib(prof.tip.pts, opt, null, ribExtent(R).c).pts) : Pr;
+    const Pm = prof.mid ? chordUnit(smoothRib(prof.mid.pts, opt, null, ribExtent(R).c).pts) : null;
     const ur = Math.min(0.95, Math.max(0.02, (opt.wlDrawRootAt || 30) / 100)), mp = Math.min(0.95, Math.max(0.05, opt.wl.midPos / 100));
     const Lm = (rl.le.L + rl.te.L) / 2, step = Math.max(opt.ringMm, 0.5);
     const mid = u => V3.mul(V3.add(rl.le.at(u), rl.te.at(u)), 0.5);
@@ -1292,11 +1195,14 @@
    * liegen oder sich überlappen, werden ausgelassen. */
   function pinPolys(ring, pin) {
     const R = ring.pts, iLE = leIndex(R.length), x0 = R[iLE].x, y0 = R[iLE].y, out = [];
-    for (let k = 0; k < pin.n; k++) {
-      const P = pin.pts[k] || [0, 0], cx = x0 + (+P[0] || 0), cy = y0 + (+P[1] || 0), pts = [], ky = pin.ky || 1;
-      if (pin.shape === 'rect') { const a = pin.a / 2, b = pin.b / 2 * ky; pts.push({ x: cx - a, y: cy - b }, { x: cx + a, y: cy - b }, { x: cx + a, y: cy + b }, { x: cx - a, y: cy + b }); }
-      else { const r = pin.d / 2, N = Math.max(16, Math.round(Math.PI * 2 * r / 1.0)); for (let q = 0; q < N; q++) { const th = 2 * Math.PI * q / N; pts.push({ x: cx + r * Math.cos(th), y: cy + r * ky * Math.sin(th) }); } }
-      out.push({ cx, cy, pts });
+    // pin.items (Steckung an einer Fuge): je Loch eigene Werte { x, y, shape, d, a, b, len = Tiefe }
+    const n = pin.items ? pin.items.length : pin.n;
+    for (let k = 0; k < n; k++) {
+      const it = pin.items ? pin.items[k] : null, P = it ? [it.x, it.y] : pin.pts[k] || [0, 0], h = it || pin;
+      const cx = x0 + (+P[0] || 0), cy = y0 + (+P[1] || 0), pts = [], ky = pin.ky || 1;
+      if (h.shape === 'rect') { const a = h.a / 2, b = h.b / 2 * ky; pts.push({ x: cx - a, y: cy - b }, { x: cx + a, y: cy - b }, { x: cx + a, y: cy + b }, { x: cx - a, y: cy + b }); }
+      else { const r = h.d / 2, N = Math.max(16, Math.round(Math.PI * 2 * r / 1.0)); for (let q = 0; q < N; q++) { const th = 2 * Math.PI * q / N; pts.push({ x: cx + r * Math.cos(th), y: cy + r * ky * Math.sin(th) }); } }
+      out.push({ cx, cy, pts, depth: it ? Math.max(0.5, +it.len || 0) : pin.depth });
     }
     return out;
   }
@@ -1344,7 +1250,7 @@
     return poly;
   }
   function capPins(mesh, ring, outwardPlusZ, pin, tag) {
-    const res = { placed: 0, skipped: 0, edges: [] }, zc = ring.z, margin = 0.5;
+    const res = { placed: 0, skipped: 0, edges: [], bad: [] }, zc = ring.z, margin = 0.5;
     let outer = ring.pts;
     let area = 0; for (let i = 0; i < outer.length; i++) { const a = outer[i], b = outer[(i + 1) % outer.length]; area += a.x * b.y - b.x * a.y; }
     if (area < 0) outer = outer.slice().reverse();
@@ -1360,18 +1266,19 @@
       const bb = bbox(h.pts);
       const fits = h.pts.every(p => pointInPoly(p, outer) && edgeDist(p, outer) >= margin);
       const overlap = holes.some(o => bb.x0 - margin < o.bb.x1 && o.bb.x0 - margin < bb.x1 && bb.y0 - margin < o.bb.y1 && o.bb.y0 - margin < bb.y1);
-      if (!fits || overlap) { res.skipped++; continue; }
-      holes.push({ pts: h.pts, bb, cx: h.cx, cy: h.cy }); res.placed++;
+      // nicht platzierbar: Soll-Lage für die Vorschau merken (rot), Grund für die Infozeile
+      if (!fits || overlap) { res.skipped++; res.bad.push({ pts: h.pts.map(p => ({ x: p.x, y: p.y, z: zAt(p) })), why: overlap && fits ? 'overlap' : 'outside' }); continue; }
+      holes.push({ pts: h.pts, bb, cx: h.cx, cy: h.cy, depth: h.depth }); res.placed++;
     }
     if (!holes.length) { cap(mesh, ring, outwardPlusZ, tag); return res; }
     const poly = mergeHoles(outer, holes.map(h => h.pts)), tris = earClip(poly, true);
     const top = p => [p.x, p.y, p.z != null ? p.z : zAt(p)];   // Rippenpunkte exakt wie im Loft (keine Rundungslücke)
-    // Lochgrund: Deckelpunkt entlang der Bohrachse um die Tiefe ins Teil verschoben (Wand = gerader Zylinder)
-    const dB = [0, -nOut[1] * pin.depth, -nOut[2] * pin.depth];
-    const bot = p => { const t = top(p); return [t[0], t[1] + dB[1], t[2] + dB[2]]; };
     const emit = (P, T, f) => { for (const t of T) { const a = f(P[t[0]]), b = f(P[t[1]]), c = f(P[t[2]]); if (outwardPlusZ) mesh.tri(a, b, c, tag); else mesh.tri(a, c, b, tag); } };
     emit(poly, tris, top);
     for (const h of holes) {
+      // Lochgrund: Deckelpunkt entlang der Bohrachse um die Tiefe ins Teil verschoben (Wand = gerader Zylinder)
+      const dp = h.depth != null ? h.depth : pin.depth, dB = [0, -nOut[1] * dp, -nOut[2] * dp];
+      const bot = p => { const t = top(p); return [t[0], t[1] + dB[1], t[2] + dB[2]]; };
       const H = h.pts, N = H.length;
       const P3 = H.map(top), B3 = H.map(bot);
       res.edges.push({ pts: P3.map(q => ({ x: q[0], y: q[1], z: q[2] })), zc, pts2: B3.map(q => ({ x: q[0], y: q[1], z: q[2] })), zb: zc + dB[2], dir: outwardPlusZ ? 1 : -1, n: nOut });
@@ -1398,16 +1305,26 @@
     // Randbogen-Ringe (ab tipStart) als Tag 2 -> eigene Farbe in der Vorschau
     const tb = tipBands(W, 0, opt.mirror ? 2 * wr.length - 1 : wr.length, !!opt.mirror);
     loft(wing, opt.mirror ? wr.slice(1).reverse().map(flip).concat(wr) : wr, null, tb ? (i, r) => tb(r) ? 2 : 0 : null);
-    if (!opt.mirror) cap(wing, wr[0], false);
+    const jp = { placed: 0, skipped: 0, A: null, B: null };   // Steckung an Fugen (Bauteil einer Segmentgruppe)
+    const capJ = (mesh, ring, out, pin, side) => {
+      if (!pin) return cap(mesh, ring, out);
+      const r = capPins(mesh, ring, out, pin); jp.placed += r.placed; jp.skipped += r.skipped;
+      jp[side] = { placed: (jp[side] ? jp[side].placed : 0) + r.placed, skipped: (jp[side] ? jp[side].skipped : 0) + r.skipped, n: (jp[side] ? jp[side].n : 0) + pin.items.length };
+      (mesh.pinEdges = mesh.pinEdges || []).push(...r.edges.map(e => Object.assign(e, { joint: true }))); (mesh.pinBad = mesh.pinBad || []).push(...r.bad);
+    };
+    if (!opt.mirror) capJ(wing, wr[0], false, jointPin(W.stkA), 'A');
     if (wlr) {
       loft(wl, wlr); cap(wl, wlr[wlr.length - 1], true);
       if (opt.mirror) { const mr = wlr.slice().reverse().map(flip); loft(wl, mr); cap(wl, mr[0], false); }
     } else {
-      cap(wing, wr[wr.length - 1], true);
-      if (opt.mirror) cap(wing, flip(wr[wr.length - 1]), false);
+      capJ(wing, wr[wr.length - 1], true, jointPin(W.stkB), 'B');
+      if (opt.mirror) capJ(wing, flip(wr[wr.length - 1]), false, jointPin(W.stkB), 'B');
     }
     const m = new Mesh(); m.v = wing.v.concat(wl.v); m.t = wing.t.concat(wl.t);
     if (wl.v.length) { m.wing = wing; m.wl = wl; }
+    if (wing.pinEdges) m.pinEdges = wing.pinEdges;
+    if (wing.pinBad) m.pinBad = wing.pinBad;
+    if (W.stkA !== undefined || W.stkB !== undefined) m.jPins = jp;
     return m;
   }
   // Urmodell in zwei getrennte, jeweils geschlossene Körper zerlegt: Tragfläche (bis zur
@@ -1427,11 +1344,22 @@
     const pin = opt.pin && opt.pin.on && tipR ? opt.pin : null;
     let pins = null;
     const capP = (mesh, ring, out, depth) => { if (!pin) return cap(mesh, ring, out); const r = capPins(mesh, ring, out, Object.assign({}, pin, { depth })); if (!pins) pins = r; (mesh.pinEdges = mesh.pinEdges || []).push(...r.edges); };
+    // Steckung an Fugen (Bauteil einer Segmentgruppe): eigene Liste je Fuge, Tiefe = Länge der Ausnehmung
+    const jp = { placed: 0, skipped: 0, A: null, B: null }, pinA = jointPin(W.stkA), pinB = jointPin(W.stkB);
+    const capJ = (mesh, ring, out, p, side) => {
+      const r = capPins(mesh, ring, out, p); jp.placed += r.placed; jp.skipped += r.skipped;
+      jp[side] = { placed: (jp[side] ? jp[side].placed : 0) + r.placed, skipped: (jp[side] ? jp[side].skipped : 0) + r.skipped, n: (jp[side] ? jp[side].n : 0) + p.items.length };
+      (mesh.pinEdges = mesh.pinEdges || []).push(...r.edges.map(e => Object.assign(e, { joint: true }))); (mesh.pinBad = mesh.pinBad || []).push(...r.bad);
+    };
     const wing = new Mesh();
     loft(wing, opt.mirror ? base.slice(1).reverse().map(flip).concat(base) : base);
-    if (!opt.mirror) cap(wing, base[0], false);
-    capP(wing, base[base.length - 1], true, pin && pin.depth);
-    if (opt.mirror) capP(wing, flip(base[base.length - 1]), false, pin && pin.depth);
+    if (!opt.mirror) { if (pinA) capJ(wing, base[0], false, pinA, 'A'); else cap(wing, base[0], false); }
+    if (pinB) { capJ(wing, base[base.length - 1], true, pinB, 'B'); if (opt.mirror) capJ(wing, flip(base[base.length - 1]), false, pinB, 'B'); }
+    else {
+      capP(wing, base[base.length - 1], true, pin && pin.depth);
+      if (opt.mirror) capP(wing, flip(base[base.length - 1]), false, pin && pin.depth);
+    }
+    if (W.stkA !== undefined || W.stkB !== undefined) wing.jPins = jp;
     let tip = null;
     if (tipR) {
       tip = new Mesh();
@@ -2494,12 +2422,14 @@
      * an der Trennlinie abgeschnittenen Querschnitt herum (deep) bzw. flach mit gleicher Aufteilung. */
     /* Bauteil „nur Randbogen / Winglet“: an dessen Wurzel (= Trennebene zur Tragfläche) gilt die
      * Anschluss-Steckung (formStkT), sonst die Tragflächensteckung an der Wurzelrippe. */
-    const stkSrc = W.part === 'tip' ? opt.stkT : opt.stk;
+    // Bauteil einer Segmentgruppe: an einer Fuge gilt deren eigene Liste (W.stkA / W.stkB, siehe grpCrop)
+    const stkSrc = W.stkA !== undefined ? W.stkA : W.part === 'tip' ? opt.stkT : opt.stk;
     const stk = stkSrc && stkSrc.on && opt.ovRoot > 0 ? stkChord(rings[0].pts, half === 'top', opt.teEdge, stkSrc) : null;
     const stkRun = stk && stk.run;
     /* Gegenstück am Außenende des Bauteils „nur Tragfläche“: dieselbe Liste, dieselbe Lage (bezogen auf die
      * Nase der letzten Rippe) — Tragflächen- und Randbogenform bekommen damit deckungsgleiche Ausnehmungen. */
-    const stkE = opt.stkT && opt.stkT.on && W.part === 'wing' ? stkChord(rings[rings.length - 1].pts, half === 'top', opt.teEdge, opt.stkT) : null;
+    const stkEsrc = W.stkB !== undefined ? W.stkB : W.part === 'wing' ? opt.stkT : null;
+    const stkE = stkEsrc && stkEsrc.on ? stkChord(rings[rings.length - 1].pts, half === 'top', opt.teEdge, stkEsrc) : null;
     const stkERun = stkE && stkE.run;
     const collapsed = (P, deep, run) => {
       const LE = P[iLE], TE = teRef(P, half === 'top', opt.teEdge), Q = P.slice(); Q.psTip = P.psTip;
@@ -2826,11 +2756,12 @@
      * Querschnitt als Volumenkörper auf der Trennebene (die davon abgeformte Negativform bekommt
      * daraus die Tasche). Nur an der Wurzelverlängerung, nicht bei gespiegeltem Modell. */
     const ovRootOn = opt.ovRoot > 0;
-    const stkSrc = W.part === 'tip' ? opt.stkT : opt.stk;
+    const stkSrc = W.stkA !== undefined ? W.stkA : W.part === 'tip' ? opt.stkT : opt.stk;
     const stk = stkSrc && stkSrc.on && !opt.mirror && ovRootOn ? stkChord(W.rings[0].pts, top, opt.teEdge, stkSrc) : null;
     const stkRun = stk && stk.run;
-    // Anschluss-Steckung am Außenende (nur Bauteil „nur Tragfläche“): deckungsgleich zur Randbogenform
-    const stkE = opt.stkT && opt.stkT.on && !opt.mirror && W.part === 'wing' ? stkChord(W.rings[W.rings.length - 1].pts, top, opt.teEdge, opt.stkT) : null;
+    // Anschluss-Steckung am Außenende (Bauteil „nur Tragfläche“ bzw. Fuge einer Segmentgruppe): deckungsgleich zum Nachbarteil
+    const stkEsrc = W.stkB !== undefined ? W.stkB : W.part === 'wing' ? opt.stkT : null;
+    const stkE = stkEsrc && stkEsrc.on && !opt.mirror ? stkChord(W.rings[W.rings.length - 1].pts, top, opt.teEdge, stkEsrc) : null;
     const collapsed = (P, deep, run) => {
       const LE = P[iLE], TE = teRef(P, top, opt.teEdge), Q = P.slice(); Q.psTip = P.psTip;
       if (top) for (let i = 0; i <= iLE; i++) { const t = iLE ? i / iLE : 0; Q[i] = { x: LE.x + (TE.x - LE.x) * (1 - t), y: LE.y + (TE.y - LE.y) * (1 - t) }; }
@@ -3073,8 +3004,21 @@
     if (state.cfg.formTipPLE == null && state.cfg.formTipP != null) { state.cfg.formTipPLE = state.cfg.formTipPTE = +state.cfg.formTipP || 2; state.cfg.formTipPreset = 'custom'; }
     // Glatter Grundriss (.pc2): die Kurve schließt die Spitze selbst ab -> kein zusätzlicher Randbogen dahinter.
     const planOn = C('formPlan') !== 'trap' && (() => { const p = planCheck(); return !!(p && !p.err); })();
+    const o = optsRaw(planOn), g = grpOpt();
+    if (!g) return o;
+    /* Bauteil einer Segmentgruppe: an Fugen eigener Überstand, Spiegelung und Schraublöcher nur am Wurzelteil;
+     * Steckungsbohrungen Tragfläche <-> Abschluss (formPin) nur, wenn der Abschluss ein eigenes Bauteil ist. */
+    o.grp = g;
+    if (!g.tipOnly) {
+      if (!g.first) { o.mirror = false; o.ovRoot = Math.max(0, +C('formOvJ') || 0); o.scr = Object.assign({}, o.scr, { on: false }); }
+      if (!g.last) o.ovTip = Math.max(0, +C('formOvJ') || 0);
+      if (o.part === 'all') o.pin = Object.assign({}, o.pin, { on: false });
+    }
+    return o;
+  }
+  function optsRaw(planOn) {
     return {
-      mode: C('formSmooth'), ctrl: Math.max(4, Math.round(C('formCtrl'))), lambda: Math.max(0, +C('formLambda')),
+      mode: C('formSmooth'), ctrl: Math.max(4, Math.round(C('formCtrl'))), lambda: Math.max(0, +C('formLambda')), tol: Math.max(0, +C('formTol') || 0), nose: C('formNoseFix') === true,
       pts: Math.max(40, Math.round(C('formPts'))), ringMm: Math.max(0.5, +C('formRingMm')), loft: C('formLoft') === 'spline' ? 'spline' : 'linear', plan: C('formPlan') === 'trap' ? 'trap' : 'smooth', loftAng: Math.max(0.1, +C('formLoftAng') || 2), aufmass: +C('formAufmass') || 0, teThk: Math.max(0, +C('formTeThk') || 0), teEdge: ['blend', 'flush'].includes(C('formTeEdge')) ? C('formTeEdge') : 'out',
       tipMode: planOn && C('formTipMode') === 'round' ? 'flat' : C('formTipMode'), tipLen: Math.max(0, +C('formTipLen')), tipPLE: +C('formTipPLE') || 2, tipPTE: +C('formTipPTE') || 2,
       tipDih: Math.min(60, Math.max(-45, +C('formTipDih') || 0)), tipRef: +C('formTipRef') || 0, tipRise: +C('formTipRise') || 0, tipTwist: +C('formTipTwist') || 0, tipThk: +C('formTipThk') || 100,
@@ -3127,7 +3071,74 @@
     const p = SCR_PRESETS[C('formScrPre')]; if (!p) return;
     S('formScrDk', C('formScrHead') === 'zyl' ? p.zyl : p.senk); S('formScrD', p.d); S('formScrHk', p.hk);
   }
-  function partMode() { const p = C('formPart'); return p === 'wing' || p === 'tip' ? p : 'all'; }
+  function partMode() { const g = grpOpt(); if (g) return g.part; const p = C('formPart'); return p === 'wing' || p === 'tip' ? p : 'all'; }
+  // ---------- Bauteile aus Segmentgruppen ----------------------------------
+  // Fugen zwischen den Segmenten: [{ k, z }] — k = Fuge nach Segment k (1-basiert), z = Spannweitenlage (mm)
+  function segJoints() {
+    const w = App.wing, n = w && w.cuts ? w.cuts.length : (state.segments || []).length, segZ = App.segZ || [], out = [];
+    let z = 0;
+    for (let k = 1; k < n; k++) {
+      z = segZ[k - 1] && isFinite(segZ[k - 1].z1) ? segZ[k - 1].z1 : z + ((w && w.cuts && w.cuts[k - 1] && w.cuts[k - 1].span) || 0);
+      out.push({ k, z });
+    }
+    return out;
+  }
+  function grpCuts() {
+    const n = segJoints().length + 1, a = Array.isArray(C('formGrpCuts')) ? C('formGrpCuts') : [];
+    return [...new Set(a.map(v => Math.round(+v)).filter(k => k >= 1 && k < n))].sort((p, q) => p - q);
+  }
+  function grpTipSep() { return C('formGrpTip') === 'sep' && C('formTipMode') !== 'flat'; }
+  /* Bauteile: [{ i, s0, s1 (Segmente 1-basiert), jA, jB (Fugen oder null), first, last, tip }] und bei
+   * „eigenes Bauteil“ zusätzlich { i, tipOnly: true }. */
+  function grpList() {
+    const J = segJoints(), n = J.length + 1, cuts = grpCuts(), b = [0].concat(cuts, [n]), out = [];
+    const tipSep = grpTipSep(), tipOn = C('formTipMode') !== 'flat';
+    for (let g = 0; g + 1 < b.length; g++) out.push({ i: g, s0: b[g] + 1, s1: b[g + 1], jA: g > 0 ? b[g] : null, jB: g + 2 < b.length ? b[g + 1] : null,
+      first: g === 0, last: g + 2 === b.length, tip: g + 2 === b.length && tipOn && !tipSep });
+    if (tipSep) out.push({ i: out.length, tipOnly: true });
+    return out;
+  }
+  function grpLabel(q) {
+    if (!q) return '';
+    const wl = C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw';
+    if (q.tipOnly) return T(wl ? 'Winglet' : 'Randbogen');
+    return T('Bauteil') + ' ' + (q.i + 1) + ': ' + (q.s0 === q.s1 ? T('Segment') + ' ' + q.s0 : T('Segment') + ' ' + q.s0 + '–' + q.s1) + (q.tip ? ' + ' + T(wl ? 'Winglet' : 'Randbogen') : '');
+  }
+  function stkJ(k) { const P = 'formStkJ' + k; return { on: !!C(P), pts: stkPts(P) }; }
+  /* Aktives Bauteil als Optionen: part ('all' mit Abschluss, 'wing' ohne, 'tip' nur Abschluss), Spannweitenbereich
+   * zA..zB, Steckungen an Anfangs-/Endfuge (stkA/stkB; undefined = wie bisher: Wurzel- bzw. Anschluss-Steckung). */
+  function grpOpt() {
+    if (!C('formGrpOn')) return null;
+    const L = grpList(); if (L.length < 2) return null;
+    const sel = Math.max(0, Math.min(L.length - 1, Math.round(+C('formGrpSel') || 0))), q = L[sel];
+    if (q.tipOnly) return { i: sel, n: L.length, part: 'tip', tipOnly: true, first: false, last: true, label: grpLabel(q) };
+    const J = segJoints(), zOf = k => (J.find(j => j.k === k) || {}).z;
+    return { i: sel, n: L.length, part: q.last ? (q.tip ? 'all' : 'wing') : 'wing', first: q.first, last: q.last, s0: q.s0, s1: q.s1, jA: q.jA, jB: q.jB,
+      zA: q.first ? -Infinity : zOf(q.jA), zB: q.last ? Infinity : zOf(q.jB),
+      stkA: q.first ? undefined : stkJ(q.jA), stkB: q.last ? undefined : stkJ(q.jB), label: grpLabel(q) };
+  }
+  /* Ringe eines Bauteils aus der ganzen Fläche schneiden (Ringe der Fugenrippe sind in beiden Teilen identisch). An
+   * einer Stufe (gleiche z, Wurzelversatz des Folgesegments) endet das innere Teil mit der Außenrippe, das äußere
+   * beginnt mit der Wurzelrippe des Folgesegments. Zuerst neigen (tiltRings), dann schneiden — sonst stünde die
+   * Fugenrippe in beiden Teilen unterschiedlich schräg. */
+  function grpCrop(W, g) {
+    if (!W || !g || g.tipOnly || (g.first && g.last)) return W;
+    const R = W.rings, eps = 1e-4, near = z => { let b = 0; for (let i = 1; i < R.length; i++) if (Math.abs(R[i].z - z) < Math.abs(R[b].z - z)) b = i; return b; };
+    let iA = 0, iB = R.length - 1;
+    if (!g.first) { iA = near(g.zA); while (iA + 1 < R.length && Math.abs(R[iA + 1].z - R[iA].z) < eps) iA++; }
+    if (!g.last) { iB = near(g.zB); while (iB > 0 && Math.abs(R[iB - 1].z - R[iB].z) < eps) iB--; }
+    if (iB <= iA) return W;
+    const rings = R.slice(iA, iB + 1), o = Object.assign({}, W, { rings, grp: g });
+    o.tipStart = g.last ? W.tipStart - iA : rings.length - 1;
+    if (!g.last) { o.wl = null; o.kink = null; }
+    o.fadeStart = g.last && W.fadeStart != null ? Math.max(0, W.fadeStart - iA) : null;
+    o.stations = (W.stations || []).filter(s => s.z >= g.zA - eps && s.z <= g.zB + eps);
+    if (!g.first) { o.screws = null; o.stkA = g.stkA; }
+    if (!g.last) o.stkB = g.stkB;
+    return o;
+  }
+  // Steckung an einer Fuge im Urmodell: Sacklöcher je Ausnehmung (Querschnitt, Lage, Länge = Tiefe je Teil)
+  function jointPin(spec) { return spec && spec.on && spec.pts && spec.pts.length ? { items: spec.pts } : null; }
   function pinCount() { return Math.max(1, Math.min(20, Math.round(+C('formPinN') || 1))); }
   /* Steckungs-Ausnehmungen: eigene Liste (hinzufügen / löschen), je Eintrag ALLE Werte —
    * { x, y, shape, d, a, b, len }. Altstände mit [x, y] (gemeinsamer Querschnitt aus
@@ -3223,12 +3234,16 @@
     if (o.part === 'tip') o = Object.assign({}, o, { mirror: false });
     // V-Form des Abschlusses: Urmodell (ganz/getrennt) und Einzelteile; Formhälften der ganzen Fläche ohne Knick
     if (o.tipDih && o.target !== 'ur' && o.part === 'all') o = Object.assign({}, o, { tipDih: 0 });
-    const W0 = wingRings(o);
-    if (!W0) return null;
+    const W0f = wingRings(o);
+    if (!W0f) return null;
+    // Bauteil einer Segmentgruppe: ganze Fläche aufbauen, Positiv erst neigen und dann zuschneiden (grpCrop);
+    // die Formen nehmen die senkrechten Ringe, ebenfalls zugeschnitten.
+    const g = o.grp, W0 = g && !g.tipOnly ? grpCrop(W0f, g) : W0f;
     // Schraublöcher (Senkungen) auf Ringebene: fürs Positiv hier, für die Formhälften erst NACH partingReparam
     // (die Umparametrisierung würde die Ecken der Senkung verschleifen)
-    const W = screwRings(W0, o);
-    const Wt = tiltRings(W);   // Anzeige (Drahtgitter-Rippen) wie das Urmodell: senkrecht zur Nasenleiste
+    const Wsf = screwRings(W0f, o);
+    const Wt = g && !g.tipOnly ? grpCrop(tiltRings(Wsf), g) : tiltRings(Wsf);   // Anzeige (Drahtgitter-Rippen) wie das Urmodell: senkrecht zur Nasenleiste
+    const W = g && !g.tipOnly ? Wt : Wsf;   // Positiv (beim Bauteil bereits geneigt + zugeschnitten)
     const m = { W: Wt, Wfull: W, opt: o, ur: null, top: null, bot: null };
     try {
       let Wp = partW(W0, o);
@@ -3241,9 +3256,10 @@
       else if (o.part === 'wing') m.W = partW(Wt, o);
       const oPos = o.target === 'neg' ? Object.assign({}, o, { mirror: false }) : o;
       const positive = () => {
-        if (o.part === 'all') return buildUrmodell(W, oPos);
+        if (o.part === 'all') { const u = buildUrmodell(W, oPos); if (u.jPins) m.jPins = u.jPins; return u; }
         const P = buildUrParts(W, oPos); m.pins = P.pins;
         const mesh = o.part === 'tip' ? P.tip : P.wing; if (mesh && o.part === 'tip') mesh.isTip = true;
+        if (mesh && mesh.jPins) m.jPins = mesh.jPins;
         return mesh;
       };
       // Rückseite der Hälfte im abgerollten Netz: Negativform oben = Oberkante (+1), unten = Unterkante (−1); Trennplatte umgekehrt
@@ -3259,7 +3275,7 @@
     return m;
   }
   // Dateinamen-Zusatz je Bauteil
-  function partSuffix(o) { if (o.part === 'tip') return (o.tipMode === 'winglet' || o.tipMode === 'wldraw') ? '_winglet' : '_randbogen'; return o.part === 'wing' ? '_flaeche' : ''; }
+  function partSuffix(o) { if (o.grp && !o.grp.tipOnly) return '_' + T('bauteil') + (o.grp.i + 1) + '_seg' + o.grp.s0 + (o.grp.s1 !== o.grp.s0 ? '-' + o.grp.s1 : ''); if (o.part === 'tip') return (o.tipMode === 'winglet' || o.tipMode === 'wldraw') ? '_winglet' : '_randbogen'; return o.part === 'wing' ? '_flaeche' : ''; }
   const PREVIEW_MAX = 25000;   // Dreiecke; darüber gröberes Vorschau-Netz (Export bleibt fein)
   let fitInfo = null;   // Infozeile „Formhöhe passend zu den Negativschalen" im Seitenmenü: nach jedem Aufbau nachführen
   function build() {
@@ -3273,9 +3289,27 @@
         const f = Math.sqrt(n / PREVIEW_MAX);
         model.preview = buildWith(Object.assign({}, o, { pts: Math.max(60, Math.round(o.pts / f)), ringMm: o.ringMm * f }));
       }
+      buildOthers(o, model.preview ? Math.sqrt(n / PREVIEW_MAX) : 1);
       prepSources();
     }
     return model;
+  }
+  /* Vorschau „alle Bauteile“: die übrigen Bauteile der Segmentgruppen mit aufbauen (bei großem Netz gröber,
+   * wie die Vorschau des aktiven Bauteils). prepSources setzt sie je Fuge um formGrpGap versetzt daneben. */
+  function buildOthers(o, f) {
+    model.others = null;
+    if (!o.grp || !C('formGrpAll')) return;
+    const keep = C('formGrpSel'), out = [];
+    try {
+      for (const q of grpList()) {
+        if (q.i === o.grp.i) continue;
+        S('formGrpSel', q.i);
+        let oq = opts(); if (f > 1) oq = Object.assign({}, oq, { pts: Math.max(60, Math.round(oq.pts / f)), ringMm: oq.ringMm * f });
+        const mq = buildWith(oq); if (mq && !mq.err) out.push({ i: q.i, m: mq });
+      }
+    } catch (e) { console.error('Formenbau alle Bauteile:', e); }
+    finally { S('formGrpSel', keep); }
+    model.others = out;
   }
   function exportUr() { if (!model || !model.ur) build(); if (!model || !model.ur) return; saveOut(model.ur, model.opt, false, projBase() + partSuffix(model.opt) + '_urmodell.stl', 'ur'); }
   // Getrennter Export Tragfläche / Randbogen: bei Negativform ohne Spiegelung (wie das dortige Urmodell).
@@ -3303,7 +3337,7 @@
   function urmodellRingStack(o) {
     const oPos = o.target === 'neg' ? Object.assign({}, o, { mirror: false }) : o;
     const W0 = wingRings(oPos); if (!W0) return null;
-    const W = tiltRings(W0);
+    const W = oPos.grp ? grpCrop(tiltRings(W0), oPos.grp) : tiltRings(W0);   // Bauteil einer Segmentgruppe
     const flipR = r => ({ pts: r.pts.map(p => (p.z == null ? { x: p.x, y: p.y } : { x: p.x, y: p.y, z: -p.z })), z: -r.z });
     const part = oPos.part;
     let fwd;
@@ -3314,7 +3348,10 @@
     let stack;
     if (oPos.mirror && part !== 'tip') { const mir = fwd.slice(1).reverse().map(flipR); stack = mir.concat(fwd); }
     else stack = fwd;
-    return stepClean(stack);
+    const out = stepClean(stack);
+    // Knoten der Stationskurven (Ringparameter s) -> das STEP-Kurvennetz bildet die Stationen exakt ab
+    if (out) out.knotHint = [].concat(...W0.stations.map(s => s.knS || []));
+    return out;
   }
   // Ringstapel säubern: gleiche Punktzahl vorausgesetzt; aufeinanderfolgende (fast) gleiche Ringe
   // zusammenfassen; entartete Endringe (Fläche ~0, z. B. Spitze eines runden Randbogens) entfernen.
@@ -3330,11 +3367,27 @@
     return R;
   }
   // STEP-Text des aktuellen Positivs (Urmodell) erzeugen. Wirft bei uneinheitlicher Ringpunktzahl.
-  function formStepText(o) {
+  /* Standard: Querschnitte als B-Spline-Kurven (gemeinsames Kontrollnetz, ≤ 0,001 mm an den
+   * abgetasteten Kurvenpunkten, deutlich kleinere Datei). Die Ringe werden dafür dichter direkt
+   * von den Profilkurven abgetastet. Rückfall auf die bisherige Bézier-durch-die-Punkte-Fläche,
+   * wenn das Netz die Kurven nicht trifft (z. B. ungewöhnliche Ringe) oder formStepMode 'points'. */
+  function formStepText(o, info) {
     o = o || (model && model.opt); if (!o) return null;
+    const name = projBase() + partSuffix(o);
+    if (C('formStepMode') !== 'points' && App.stepExport.ringsToStepSpline) {
+      try {
+        const rs = urmodellRingStack(Object.assign({}, o, { pts: Math.max(o.pts, 2000) }));
+        const inf = info || {};
+        if (rs && rs.length >= 2) {
+          const txt = App.stepExport.ringsToStepSpline(rs, { name, info: inf, tol: 0.001 });
+          if (inf.dev <= 0.01 && inf.devMid <= 0.05 && inf.ctrlOut <= 1) { inf.mode = 'spline'; return txt; }
+        }
+      } catch (e) { console.warn('STEP (Kurven) -> Rückfall auf Punkte:', e); }
+    }
     const rings = urmodellRingStack(o);
     if (!rings || rings.length < 2) throw new Error(T('Kein Volumenkörper ableitbar (leeres oder entartetes Modell).'));
-    return App.stepExport.ringsToStep(rings, { name: projBase() + partSuffix(o) });
+    if (info) info.mode = 'points';
+    return App.stepExport.ringsToStep(rings, { name });
   }
   async function exportUrStep() {
     if (demoBlocked()) return;
@@ -3575,6 +3628,7 @@
     }
     // Passstifte: Sackloch je Seite (Achse z), Lochgrund + Zylinderwand (Normale zur Lochachse)
     lo.pinEdges = (mesh.pinEdges || []).slice(); hi.pinEdges = (mesh.pinEdges || []).slice();   // Bohrungen früherer Teilungen mitnehmen
+    if (mesh.pinBad) { lo.pinBad = mesh.pinBad.filter(b => b.pts[0].z <= zc + 1e-6); hi.pinBad = mesh.pinBad.filter(b => b.pts[0].z >= zc - 1e-6); }
     for (const h of pins) for (const side of [[lo, -1, false], [hi, 1, true]]) {
       const [m, dir, flip] = side, zb = zc + dir * pin.depth, H = h.pts, N = H.length;
       m.pinEdges.push({ pts: H, zc, zb, dir: -dir, n: [0, 0, -dir] });   // Vorschau: Lochrand/-grund/Mantellinien (Außennormale der Trennfläche = −dir)
@@ -3675,11 +3729,39 @@
     if (demoBlocked()) return;
     const so = segOpts(), planes = so.on ? segPlanes(so) : [];
     if (!planes.length) { saveSTL(exportTransform(mesh, opt, cavityFlip), name); return; }
-    let parts; try { parts = splitMeshAll(mesh, planes, (i, b) => segPinAt(so, i, b), body); } catch (e) { console.error('Formenbau Segmentierung:', e); alert(T('Segmentierung fehlgeschlagen (Vorschau ungeteilt):') + ' ' + (e && e.message ? e.message : e)); return; }
+    const list = outList(mesh, opt, cavityFlip, name, body, true);
+    if (list) saveSTLMany(list);
+  }
+  // Dateiliste eines Körpers (mit Segmentierung je Druckstück eine Datei); null = Teilung fehlgeschlagen
+  function outList(mesh, opt, cavityFlip, name, body, toast) {
+    const so = segOpts(), planes = so.on ? segPlanes(so) : [];
+    if (!planes.length) return [{ mesh: exportTransform(mesh, opt, cavityFlip), name }];
+    let parts; try { parts = splitMeshAll(mesh, planes, (i, b) => segPinAt(so, i, b), body); } catch (e) { console.error('Formenbau Segmentierung:', e); alert(T('Segmentierung fehlgeschlagen (Vorschau ungeteilt):') + ' ' + (e && e.message ? e.message : e)); return null; }
     const base = name.replace(/\.stl$/i, ''), pad = parts.length > 99 ? 3 : 2;
-    if (so.pin && App.toast) App.toast(T('Passstifte gesetzt:') + ' ' + parts.pins + ' (' + planes.length + ' ' + T('Trennstellen') + ')' + (parts.skipped ? ' · ' + T('manuell außerhalb / zu nah am Rand:') + ' ' + parts.skipped : ''));
-    const list = parts.map((m, i) => ({ mesh: exportTransform(m, opt, cavityFlip), name: base + '_' + T('teil') + String(i + 1).padStart(pad, '0') + '.stl' }));
-    saveSTLMany(list);
+    if (toast && so.pin && App.toast) App.toast(T('Passstifte gesetzt:') + ' ' + parts.pins + ' (' + planes.length + ' ' + T('Trennstellen') + ')' + (parts.skipped ? ' · ' + T('manuell außerhalb / zu nah am Rand:') + ' ' + parts.skipped : ''));
+    return parts.map((m, i) => ({ mesh: exportTransform(m, opt, cavityFlip), name: base + '_' + T('teil') + String(i + 1).padStart(pad, '0') + '.stl' }));
+  }
+  /* Alle Bauteile der Segmentgruppen auf einmal: je Bauteil wird das Modell neu aufgebaut (model vorübergehend
+   * ersetzt, damit Segmentierung & Co. das richtige Bauteil sehen) und seine Körper in einen Ordner geschrieben. */
+  async function exportAllGroups() {
+    if (demoBlocked()) return;
+    const L = grpList(); if (L.length < 2) return;
+    const keep = C('formGrpSel'), keepModel = model, list = [];
+    const run = () => {
+      for (const q of L) {
+        S('formGrpSel', q.i);
+        const m = buildWith(opts()); if (!m || m.err) throw new Error(grpLabel(q) + ': ' + (m && m.err ? m.err : T('kein Modell')));
+        model = m;
+        const o = m.opt, nm = projBase() + partSuffix(o), sp = o.target === 'split';
+        const add = (mesh, flip, suf, body) => { if (!mesh) return; const r = outList(mesh, o, flip, nm + suf, body); if (!r) throw new Error(T('Segmentierung fehlgeschlagen')); list.push(...r); };
+        if (o.target === 'ur') add(m.ur, false, '_urmodell.stl', 'ur');
+        else { add(m.top, !sp && o.cavUp, sp ? '_urmodell_oben.stl' : '_form_oben.stl', 'top'); add(m.bot, sp && o.cavUp, sp ? '_urmodell_unten.stl' : '_form_unten.stl', 'bot'); }
+      }
+    };
+    try { if (App.withBusy) await App.withBusy(T('Bauteile werden aufgebaut …'), run); else run(); }
+    catch (e) { console.error(e); alert(T('Export fehlgeschlagen: ') + (e && e.message ? e.message : e)); }
+    finally { S('formGrpSel', keep); model = keepModel; }
+    if (list.length) saveSTLMany(list);
   }
 
   // ---------- Schnittansicht -------------------------------------------------
@@ -4142,13 +4224,22 @@
     ctx.restore();
   }
   function drawPinEdges(s, wire) {
-    const E = s.mesh && s.mesh.pinEdges; if (!E || !E.length) return;
     const dz = s.dz || 0, dy = s.dy || 0;
+    // nicht platzierbare Bohrungen (Fugen-Steckung): Soll-Lage rot, damit man sieht, wo sie aus der Kontur ragen
+    const Bd = s.mesh && s.mesh.pinBad;
+    if (Bd && Bd.length) {
+      ctx.save(); ctx.lineWidth = 2; ctx.strokeStyle = '#ff4d4d'; ctx.fillStyle = 'rgba(255,60,60,0.25)';
+      for (const b of Bd) { ctx.beginPath(); b.pts.forEach((p, i) => { const q = scr(p.x, p.y + dy, p.z + dz); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+      ctx.restore();
+    }
+    const E = s.mesh && s.mesh.pinEdges; if (!E || !E.length) return;
     ctx.save(); ctx.lineWidth = wire ? 1 : 1.2; ctx.strokeStyle = wire ? 'rgba(255,220,80,0.95)' : 'rgba(20,20,30,0.9)';
     for (const e of E) {
       // verdeckte Trennfläche (zeigt von der Kamera weg): Bohrung gestrichelt als verdeckte Kante
       const hidden = !wire && rot(e.n || [0, 0, e.dir])[2] > 0.02;
-      ctx.setLineDash(hidden ? [3, 3] : []); if (!wire) ctx.strokeStyle = hidden ? 'rgba(255,220,80,0.55)' : 'rgba(20,20,30,0.9)';
+      ctx.setLineDash(hidden && !e.joint ? [3, 3] : []); if (!wire) ctx.strokeStyle = hidden ? 'rgba(255,220,80,0.55)' : 'rgba(20,20,30,0.9)';
+      // Steckung an einer Fuge (Segmentgruppen): immer kräftig zeigen — die Stirnfläche zeigt oft von der Kamera weg
+      if (e.joint) { ctx.strokeStyle = '#3fd0ff'; ctx.lineWidth = 2; } else ctx.lineWidth = wire ? 1 : 1.2;
       const ring = (z, fill, P) => { ctx.beginPath(); (P || e.pts).forEach((p, i) => { const q = scr(p.x, p.y + dy, (p.z == null ? z : p.z) + dz); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.closePath(); if (fill) { ctx.fillStyle = 'rgba(12,12,18,0.85)'; ctx.fill(); } ctx.stroke(); };
       // schattiert: Lochöffnung dunkel füllen (die flache Schattierung würde den Lochgrund sonst nicht abheben)
       ring(e.zb, false, e.pts2 || e.pts); ring(e.zc, !wire && !hidden);
@@ -4420,6 +4511,24 @@
       }
       src.length = 0; for (const q of out) src.push(q);
     }
+    // Alle Bauteile: aktives Teil und die übrigen je Fuge um formGrpGap in Spannweitenrichtung versetzt
+    if (model.others && o.grp && !noSeg) {
+      const gg = Math.max(0, +C('formGrpGap') || 0), half = C('formHalf') || 'both', fg = +C('formGap') || 0;
+      for (const s of src) s.dz = (s.dz || 0) + o.grp.i * gg;
+      const cs = hexHsl(C('formColSurf'), { h: 205, sat: 60, l: 60 }), cr = hexHsl(C('formColRim'), { h: 215, sat: 7, l: 57 });
+      const rim = { h2: cr.h, sat2: cr.sat, l2: cr.l };
+      for (const q of model.others) {
+        const m = q.m, dz = q.i * gg, oq = m.opt;
+        const sep = (mm, d) => mm && mm.rebend ? { mesh: mm.rebend(d), dy: 0 } : { mesh: mm, dy: d };
+        if (oq.target !== 'ur' && m.top && m.bot) {
+          if (half !== 'bot') src.push(Object.assign({ body: 'other', dz }, sep(m.top, fg / 2), cs, rim));
+          if (half !== 'top') src.push(Object.assign({ body: 'other', dz, h: cs.h, sat: cs.sat, l: Math.max(15, cs.l - 6) }, sep(m.bot, -fg / 2), rim));
+        } else if (m.ur && m.ur.wl) {
+          src.push(Object.assign({ mesh: m.ur.wing, body: 'other', dz }, cw));
+          src.push(Object.assign({ mesh: m.ur.wl, body: 'other', dz }, cl));
+        } else if (m.ur) src.push(Object.assign({ mesh: m.ur, body: 'other', dz }, m.ur.isTip ? cl : cw));
+      }
+    }
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (const s of src) { const b = meshBoundsCached(s.mesh); for (let k = 0; k < 3; k++) { const off = k === 1 ? (s.dy || 0) : k === 2 ? (s.dz || 0) : 0; mn[k] = Math.min(mn[k], b.mn[k] + off); mx[k] = Math.max(mx[k], b.mx[k] + off); } }
     model.src = src; model.bounds = { mn, mx };
@@ -4477,13 +4586,13 @@
     drawGizmo();
     drawShowBtns();
     const ntri = model.ntri || 0;
-    let dev = 0; for (const s of model.W.stations) dev = Math.max(dev, s.dev);
+    let dev = 0, devOk = true; for (const s of model.W.stations) { dev = Math.max(dev, s.dev); if (s.ok === false) devOk = false; }
     const dim = k => (mx[k] - mn[k]).toFixed(1);
     const wlPart = o.tipMode === 'winglet' || o.tipMode === 'wldraw';
-    const partTxt = o.part === 'tip' ? T(wlPart ? 'Winglet' : 'Randbogen') + ' · ' : o.part === 'wing' ? T('Tragfläche ohne Randbogen') + ' · ' : '';
+    const partTxt = o.grp ? '<b>' + o.grp.label + '</b> (' + (o.grp.i + 1) + '/' + o.grp.n + ') · ' : o.part === 'tip' ? T(wlPart ? 'Winglet' : 'Randbogen') + ' · ' : o.part === 'wing' ? T('Tragfläche ohne Randbogen') + ' · ' : '';
     let txt = partTxt + (o.target === 'neg' ? T('Negativform (oben + unten)') : o.target === 'split' ? T('Urmodell geteilt (oben + unten)') : T('Urmodell')) + ' · ' + Math.round(ntri) + ' ' + T('Dreiecke')
       + ' · ' + dim(0) + ' × ' + dim(1) + ' × ' + dim(2) + ' mm';
-    if (o.mode !== 'none') txt += '<br>' + T('Glättung: max. Abweichung') + ' ' + dev.toFixed(3) + ' mm';
+    if (o.mode !== 'none') txt += '<br>' + T('Glättung: max. Abweichung') + ' ' + dev.toFixed(3) + ' mm' + tolTxt(o, devOk);
     if (model.preview) txt += '<br><span style="opacity:.7">' + T('Vorschau vergröbert (Export in voller Auflösung)') + '</span>';
     if (glTried && !gl && renderMode() !== '2d') txt += '<br><span style="opacity:.7">' + T('WebGL nicht verfügbar – Darstellung über Canvas 2D') + '</span>';
     if (C('formZebraOn')) txt += '<br><span style="color:#e6e6e6">' + T('Zebra-Analyse:') + ' ' + (glActive() ? T('Streifen = Spiegelung eines Streifenmusters; Knicke oder Wellen in den Streifen zeigen Unstetigkeiten der Fläche, glatte Streifen = glatte Fläche') : T('nur mit WebGL-Darstellung (Darstellung „fein“ oder „schnell“, kein Drahtgitter)')) + '</span>';
@@ -4505,15 +4614,37 @@
         txt += '<br>' + T(head) + ' ' + st.placed;
         if (st.skipped) txt += ' <span style="color:#f88">' + T('– nicht platzierbar:') + ' ' + st.skipped + ' (' + T('Lage x/y und Größe prüfen: der Querschnitt muss mit 0,5 mm Rand in der Profilkontur liegen, die Trennlinie schneiden und darf keinen anderen überlappen') + ')</span>';
       };
-      stkInfo('stk', o.stk && o.stk.on && o.part !== 'tip',
+      stkInfo('stk', o.stk && o.stk.on && o.part !== 'tip' && (!o.grp || o.grp.first),
         'Steckungs-Ausnehmungen: keine — nur mit Überstand an der Wurzel (und nicht bei gespiegeltem Modell).', 'Steckungs-Ausnehmungen je Hälfte:');
-      stkInfo(o.part === 'tip' ? 'stk' : 'stkE', o.stkT && o.stkT.on && o.part !== 'all',
+      stkInfo(o.part === 'tip' ? 'stk' : 'stkE', o.stkT && o.stkT.on && o.part !== 'all' && (!o.grp || o.grp.last),
         'Ausnehmungen der Anschluss-Steckung: keine — nur mit Überstand an dieser Seite (und nicht bei gespiegeltem Modell).', 'Ausnehmungen der Anschluss-Steckung je Hälfte:');
     }
     const bk = (model.top && model.top.back) || (model.bot && model.bot.back);
     if (bk) { const dg = r => (r * 180 / Math.PI).toFixed(1).replace('.', ',') + '°'; txt += '<br>' + T('Ebene Auflagefläche: Winkel zum waagrechten Teil') + ' ' + dg(bk.alpha) + ', ' + T('zum Winglet') + ' ' + dg(bk.phi - bk.alpha) + ' · ' + T('Breite oben / unten') + ' ' + [model.top, model.bot].map(m => m && m.back ? m.back.bedW.toFixed(0) : '–').join(' / ') + ' mm'; }
     const fold = (model.top && model.top.fold) || (model.bot && model.bot.fold);
     if (fold) txt += '<br><span style="color:#f88">' + T('Biegeradius zu klein (ca.') + ' ' + fold + ' mm): ' + T('Das Profil ist an der Innenseite der Biegung dicker als der Radius – die Formfläche wird dort geglättet und weicht vom Urmodell ab. Übergangsradius vergrößern.') + '</span>';
+    if (o.grp && !o.grp.tipOnly) {
+      const jOn = s => !!(s && s.on);
+      if (o.target === 'ur') {
+        // je Fuge melden: gesetzt / nicht platzierbar (rot in der Vorschau) / gar nicht angewandt
+        const jp = model.jPins || {};
+        const one = (on, k, r) => {
+          if (!on) return;
+          const head = T('Steckung Fuge Segment') + ' ' + k + ' / ' + (k + 1) + ': ';
+          if (!r) { txt += '<br><span style="color:#f88">' + head + T('nicht angewandt (Bauteilgrenze nicht gefunden)') + '</span>'; return; }
+          txt += '<br>' + head + r.placed + ' ' + T('von') + ' ' + r.n + ' ' + T('Bohrungen gesetzt');
+          if (r.skipped) txt += ' <span style="color:#f88">– ' + r.skipped + ' ' + T('nicht platzierbar (rot gezeigt): das Loch muss mit 0,5 mm Rand in der Kontur der Fugenrippe liegen und darf kein anderes überlappen — Lage x/y bzw. Durchmesser ändern') + '</span>';
+        };
+        one(!o.grp.first && jOn(o.grp.stkA), o.grp.jA, jp.A);
+        one(!o.grp.last && jOn(o.grp.stkB), o.grp.jB, jp.B);
+      } else if (o.target !== 'ur') {
+        const one = (on, key, head) => { if (!on) return; const st = (model.top && model.top[key]) || (model.bot && model.bot[key]);
+          if (!st || (!st.placed && !st.skipped)) { txt += '<br><span style="color:#f88">' + T(head) + ' ' + T('keine — Überstand an den Fugen > 0 nötig (und nicht gespiegelt).') + '</span>'; return; }
+          txt += '<br>' + T(head) + ' ' + st.placed + (st.skipped ? ' <span style="color:#f88">' + T('– nicht platzierbar:') + ' ' + st.skipped + '</span>' : ''); };
+        one(!o.grp.first && jOn(o.grp.stkA), 'stk', 'Fugen-Steckung innen je Hälfte:');
+        one(!o.grp.last && jOn(o.grp.stkB), 'stkE', 'Fugen-Steckung außen je Hälfte:');
+      }
+    }
     if (o.pin && o.pin.on && ((model.parts && model.parts.pins) || model.pins)) {
       const pp = (model.parts && model.parts.pins) || model.pins;
       txt += '<br>' + T('Steckungsbohrungen je Teil:') + ' ' + pp.placed;
@@ -4522,6 +4653,12 @@
     if (co.on) txt += '<br><span style="color:#5fd0dc">' + T('Krümmungsanalyse:') + ' ' + (co.dir === 'span' ? nCurv + ' ' + T('Längslinien (Spannweitenkrümmung)') + ' · ' + T('Linie ⟂ Fläche ∝ Krümmung entlang der Spannweite (Spitzen = Knick an einer Rippenstation), rot = Hüllkurve') : nCurv + ' ' + T('Schnitte alle') + ' ' + co.step + ' mm · ' + T('Linie ⟂ Kontur ∝ Krümmung (außen = konvex), rot = Hüllkurve')) + '</span>';
     if (model.err) txt += '<br><span style="color:#f88">' + model.err + '</span>';
     setInfo(txt);
+  }
+  // Zusatz zur Abweichungsanzeige: Toleranz eingehalten / nicht erreichbar.
+  function tolTxt(o, ok) {
+    if (!o || o.mode === 'none' || !(o.tol > 0)) return '';
+    return ok ? ' (' + T('Toleranz') + ' ' + o.tol + ' mm ' + T('eingehalten') + ')'
+      : ' <span style="color:#f88">(' + T('Toleranz') + ' ' + o.tol + ' mm ' + T('nicht erreicht – Toleranz erhöhen oder Glättung verringern') + ')</span>';
   }
   // 2D-Profilansicht: Rohpunkte, geglättete Kurve, Kontrollpolygon.
   function drawProf() {
@@ -4543,7 +4680,7 @@
     ctx.fillStyle = '#ff7b7b'; for (const p of s.raw) { const q = P(p); ctx.beginPath(); ctx.arc(q.x, q.y, 1.8, 0, Math.PI * 2); ctx.fill(); }
     const M = s.sm.length;
     let txt = T('Station') + ': ' + s.name + ' · z = ' + s.z.toFixed(1) + ' mm · ' + s.raw.length + ' ' + T('Rohpunkte (rot)') + ' → ' + M + ' ' + T('Punkte (blau)');
-    if (s.ctrl) txt += ' · ' + s.ctrl.length + ' ' + T('Kontrollpunkte (orange)') + '<br>' + T('max. Abweichung') + ' ' + s.dev.toFixed(3) + ' mm';
+    if (s.ctrl) txt += ' · ' + s.ctrl.length + ' ' + T('Kontrollpunkte (orange)') + '<br>' + T('max. Abweichung') + ' ' + s.dev.toFixed(3) + ' mm' + tolTxt(model.opt, s.ok !== false);
     if (model.opt.aufmass) txt += ' · ' + T('Aufmaß') + ' ' + model.opt.aufmass + ' mm';
     if (model.opt.teThk) txt += ' · ' + T('Endleiste') + ' ' + model.opt.teThk + ' mm';
     setInfo(txt);
@@ -5716,7 +5853,7 @@
       + '<button id="formCmpRef" style="margin-left:auto;margin-right:8px" title="' + T('Aktuelle geglättete Kurve als graue Referenz einfrieren, dann Parameter ändern und vergleichen') + '">' + T('Als Referenz merken') + '</button>'
       + '<button class="close-x" id="formCmpClose" title="' + T('Schließen') + '">×</button></div>'
       + '<div class="body" style="flex:1 1 auto;display:flex;gap:14px;min-height:0;overflow:hidden;padding-top:10px">'
-      +   '<div style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:6px">'
+      +   '<div id="formCmpLeft" style="flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:6px">'
       +     '<div id="formCmpTop" class="hint" style="flex:0 0 auto"></div>'
       +     '<div style="position:relative;flex:3 1 0;min-height:0;background:var(--panel2,#0e1520);border-radius:8px"><canvas id="cFormCmp" style="width:100%;height:100%;display:block;cursor:grab"></canvas></div>'
       +     '<div class="hint" style="flex:0 0 auto">' + T('Abweichung Rohpunkt → geglättete Kurve (positiv = Kurve liegt außerhalb), über die Kontur von Endleiste oben über die Nase zur Endleiste unten') + '</div>'
@@ -5727,7 +5864,13 @@
       + '</div></div>';
     document.body.appendChild(bd);
     cmp = { el: bd, cvs: bd.querySelector('#cFormCmp'), cvsDev: bd.querySelector('#cFormCmpDev'),
-      nav: { zoom: 1, px: 0, py: 0 }, ref: null, show: { raw: true, rawLine: true, sm: true, ctrl: true, ref: true, ctrlOnly: false }, drag: null };
+      nav: { zoom: 1, px: 0, py: 0 }, ref: null, show: { raw: true, rawLine: true, sm: true, ctrl: true, ref: true, ctrlOnly: false }, drag: null, pp: null };
+    // Polaren (nur mit Funktion „Aerodynamik", fehlt in der freien Fassung): Original-.dat, geglättet, Referenz
+    if (App.profPolarAttach) cmp.pp = App.profPolarAttach({ host: bd.querySelector('#formCmpLeft'), onChange: () => drawCmp(), curves: () => {
+      const st = cmpStation(); if (!st) return [];
+      const out = [{ key: 'raw', name: T('.dat'), color: '#ff7b7b', pts: st.raw, ref: true }, { key: 'sm', name: T('geglättet'), color: '#4fc3f7', pts: st.sm }];
+      if (cmp.ref && cmp.ref.sm) out.push({ key: 'ref', name: T('Referenz'), color: 'rgba(200,200,200,.9)', pts: cmp.ref.sm, dash: true });
+      return out; } });
     bd.querySelector('#formCmpClose').onclick = closeCmp;
     bd.addEventListener('mousedown', e => { if (e.target === bd) closeCmp(); });
     bd.querySelector('#formCmpRef').onclick = () => {
@@ -5843,9 +5986,10 @@
     let ly = 16; g.font = '12px system-ui';
     for (const l of leg) { g.fillStyle = l[0]; g.fillRect(12, ly - 8, 14, 4); g.fillStyle = '#ddd'; g.fillText(l[1], 32, ly); ly += 17; }
     top.innerHTML = '<b>' + st.name + '</b> · z = ' + st.z.toFixed(1) + ' mm · ' + st.raw.length + ' ' + T('Rohpunkte') + ' → ' + M + ' ' + T('Punkte')
-      + ' · <b>' + T('max. Abweichung') + ' ' + st.dev.toFixed(3) + ' mm</b>' + (model.opt.aufmass ? ' · ' + T('Aufmaß') + ' ' + model.opt.aufmass + ' mm' : '')
+      + ' · <b>' + T('max. Abweichung') + ' ' + st.dev.toFixed(3) + ' mm</b>' + tolTxt(model.opt, st.ok !== false) + (model.opt.aufmass ? ' · ' + T('Aufmaß') + ' ' + model.opt.aufmass + ' mm' : '')
       + (model.opt.teThk ? ' · ' + T('Endleiste') + ' ' + model.opt.teThk + ' mm' : '');
     drawCmpDev(st);
+    if (cmp.pp) cmp.pp.refresh();
   }
   function drawCmpDev(st) {
     const { g, Wc, Hc } = cmpCanvas(cmp.cvsDev);
@@ -5855,7 +5999,7 @@
     let mx = 0; for (const d of dev) mx = Math.max(mx, Math.abs(d)); if (refDev) for (const d of refDev) mx = Math.max(mx, Math.abs(d));
     mx = Math.max(mx, 0.01);
     const L = 44, R = 10, Tp = 10, B = 18, w = Wc - L - R, h = Hc - Tp - B, y0 = Tp + h / 2;
-    const u = chordParam(raw), iLE = Math.ceil(raw.length / 2) - 1;
+    const u = chordParam(raw), iLE = noseIndex(raw);
     const px = i => L + u[i] * w, py = d => y0 - d / mx * (h / 2);
     g.strokeStyle = 'rgba(255,255,255,.15)'; g.lineWidth = 1;
     g.beginPath(); g.moveTo(L, y0); g.lineTo(L + w, y0); g.stroke();
@@ -5874,10 +6018,12 @@
     const rrLite = () => { build(); drawCmp(); };
     const st = model && model.W ? model.W.stations : [];
     const g1 = grp('Glättung', true, null, { alwaysOpen: true, key: 'formCmpSmooth' });
-    selectRow(g1.body, 'Methode', [['bspline', 'Bezier / B-Spline (Ausgleich)'], ['none', 'keine (nur neu abtasten)']], () => C('formSmooth'), v => { S('formSmooth', v); rr(); });
-    if (C('formSmooth') !== 'none') {
+    selectRow(g1.body, 'Methode', [['bspline', 'Bezier / B-Spline (Ausgleich)'], ['interp', 'exakt durch die Punkte (Interpolation)'], ['none', 'keine (nur neu abtasten)']], () => C('formSmooth'), v => { S('formSmooth', v); rr(); });
+    if (C('formSmooth') === 'bspline') {
+      boolRow(g1.body, 'Nase fest (Nasenpunkt + Tangente)', () => C('formNoseFix') === true, v => { S('formNoseFix', v); rrLite(); });
       numRow(g1.body, 'Kontrollpunkte je Seite', () => C('formCtrl'), v => { S('formCtrl', v); rrLite(); }, { int: true, min: 4, max: 60, norender: true });
       numRow(g1.body, 'Glättung (0 = keine Strafe)', () => C('formLambda'), v => { S('formLambda', v); rrLite(); }, { step: 0.5, min: 0, norender: true });
+      numRow(g1.body, 'Toleranz zur .dat (mm, 0 = aus)', () => C('formTol'), v => { S('formTol', v); rrLite(); }, { step: 0.01, min: 0, norender: true });
     }
     numRow(g1.body, 'Punkte je Rippe', () => C('formPts'), v => { S('formPts', v); rrLite(); }, { int: true, min: 40, max: 1200, norender: true });
     numRow(g1.body, 'Aufmaß (mm)', () => C('formAufmass'), v => { S('formAufmass', v); rrLite(); }, { step: 0.1, norender: true });
@@ -5902,6 +6048,9 @@
     g3.body.appendChild(tbl);
     hint(g3.body, 'Klick auf eine Zeile wählt die Station. Die Abweichung ist der größte Abstand eines Rohpunkts zur geglätteten Kurve.');
     side.appendChild(g3.g);
+    if (cmp.pp) { const gp = grp('Polaren', true, null, { alwaysOpen: true, key: 'formCmpPolar' }); cmp.pp.controls(gp.body, true); side.appendChild(gp.g); }
+    // Gruppen nicht stauchen (sonst schneidet die Flex-Spalte sie ab statt zu scrollen)
+    for (const ch of side.children) ch.style.flexShrink = '0';
   }
   function openCmp() {
     cmpDom(); build();
@@ -5980,7 +6129,34 @@
       else hint(g.body, T('Grundriss-Quelle: ') + pl.name + ' (' + (pl.st.length - 1) + ' ' + T('Trapeze') + ')');
     }
     const part = partMode(), tipIsWl = C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw';
-    selectRow(g.body, 'Bauteil', [['all', 'Tragfläche mit Randbogen / Winglet'], ['wing', 'nur Tragfläche (bis zur letzten Rippe)'], ['tip', 'nur Randbogen / Winglet (eigene Form)']], () => part, v => { S('formPart', v); rb(); },
+    // Bauteile aus Segmentgruppen (Fugen zwischen Segmenten, je Bauteil ein Urmodell / eine Form)
+    const grpOn = !!grpOpt(), Jn = segJoints();
+    if (Jn.length) {
+      boolRow(g.body, 'In Bauteile teilen (Segmentgruppen)', () => C('formGrpOn'), v => { S('formGrpOn', v); if (v && !grpCuts().length) S('formGrpCuts', [Jn[Jn.length - 1].k]); rb(); },
+        'Teilt die Tragfläche an gewählten Fugen zwischen den Segmenten in mehrere Bauteile. Jedes Bauteil wird als eigenes Urmodell bzw. eigene Form (oben + unten) gebaut; die Fugenrippe ist in beiden Nachbarteilen identisch. An jeder Fuge können Steckungen eingebaut werden (Negativform / geteiltes Urmodell: Ausnehmungen im Überstand an der Fuge; Urmodell: Sacklöcher in beiden Teilen). Randbogen bzw. Winglet gehört wahlweise zum letzten Bauteil oder ist ein eigenes.');
+      if (C('formGrpOn')) {
+        subhead(g.body, 'Fugen (Teilung nach Segment …)');
+        Jn.forEach(j => boolRow(g.body, T('Fuge nach Segment') + ' ' + j.k + ' (z = ' + j.z.toFixed(0) + ' mm)', () => grpCuts().includes(j.k), v => {
+          const a = grpCuts().filter(k => k !== j.k); if (v) a.push(j.k); S('formGrpCuts', a.sort((p, q) => p - q)); rb();
+        }));
+        if (C('formTipMode') !== 'flat')
+          selectRow(g.body, 'Randbogen / Winglet', [['join', 'gehört zum letzten Bauteil'], ['sep', 'eigenes Bauteil']], () => C('formGrpTip') === 'sep' ? 'sep' : 'join', v => { S('formGrpTip', v); rb(); },
+            'Gehört zum letzten Bauteil: das äußerste Bauteil endet mit dem Randbogen bzw. Winglet (ein Teil, z. B. letztes Segment + Winglet). Eigenes Bauteil: Randbogen bzw. Winglet als eigenes Formteil (wie „nur Randbogen / Winglet“); die Steckung dazu ist die Anschluss-Steckung. Winglets in Negativform / geteiltem Urmodell nur als eigenes Bauteil (sonst hinterschnitten -> flach).');
+        const L = grpList();
+        if (L.length > 1) {
+          selectRow(g.body, 'Aktives Bauteil', L.map(q => [String(q.i), grpLabel(q)]), () => String(grpOpt().i), v => { S('formGrpSel', +v); rb(); },
+            'Dieses Bauteil wird angezeigt und mit den Export-Knöpfen gespeichert. „Alle Bauteile als STL…“ (Export) schreibt alle in einen Ordner.');
+          boolRow(g.body, 'Alle Bauteile zeigen', () => C('formGrpAll'), v => { S('formGrpAll', v); rb(); },
+            'Vorschau: alle Bauteile gleichzeitig, an jeder Fuge um den Abstand unten auseinandergezogen (Steckungen an den Fugen sind eingezeichnet). Eingestellt und exportiert wird weiter das aktive Bauteil.');
+          if (C('formGrpAll'))
+            numRow(g.body, 'Abstand der Bauteile (mm)', () => C('formGrpGap'), v => { S('formGrpGap', v); prepSources(); draw(); }, { step: 5, min: 0, norender: true,
+              hint: 'Nur Darstellung: Abstand je Fuge in Spannweitenrichtung (0 = zusammengesetzt wie verbaut).' });
+          if (C('formTarget') !== 'ur' && grpTipSep() === false && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw'))
+            hint(g.body, 'Hinweis: Das Winglet ist bei Negativform / geteiltem Urmodell im letzten Bauteil hinterschnitten und wird dort flach abgeschlossen — „eigenes Bauteil“ wählen.');
+        } else hint(g.body, 'Mindestens eine Fuge wählen.');
+      }
+    }
+    if (!grpOn) selectRow(g.body, 'Bauteil', [['all', 'Tragfläche mit Randbogen / Winglet'], ['wing', 'nur Tragfläche (bis zur letzten Rippe)'], ['tip', 'nur Randbogen / Winglet (eigene Form)']], () => part, v => { S('formPart', v); rb(); },
       'Tragfläche mit Randbogen / Winglet: ein Teil wie bisher. Nur Tragfläche: bis zur letzten Rippe, dort eben (der Randbogen bzw. das Winglet wird separat gebaut). Nur Randbogen / Winglet: eigenes Formteil ab der letzten Rippe — als Urmodell, geteiltes Urmodell oder Negativform. Die Trennfläche liegt in der Sehnenfläche: in Verlängerung von Nase und Endleiste und durch die Mitte des Randbogens bzw. der Winglet-Spitze. Beim Winglet folgt sie der Biegung des Übergangs (Platte, Flansch und Rückseite werden mitgebogen, Passlöcher stehen senkrecht auf der Trennfläche); entformt wird schräg zwischen „nach oben“ und „nach außen“.');
     if (part === 'tip' && tipIsWl && C('formTarget') !== 'ur')
       hint(g.body, 'Winglet-Form: Ober- und Unterhälfte teilen sich an der Sehnenfläche des Winglets (innen / außen). Ist die Form an der Innenseite der Biegung dicker als der Übergangsradius, wird ihre Rückseite dort ausgerundet; Kavität und Trennfläche bleiben exakt.');
@@ -6000,7 +6176,7 @@
       hint: 'Parallelversatz der Außenkontur, positiv = größer (z. B. Lack-/Gelcoat-Aufbau beim Urmodell), negativ = kleiner.' });
     numRow(g.body, 'Endleistendicke (mm)', () => C('formTeThk'), v => { S('formTeThk', v); rr(); }, { step: 0.1, min: 0, norender: true,
       hint: 'Globale Endleistendicke für Tragfläche, Randbogen und Winglet (0 = Profil unverändert). Die Endleiste jeder Rippe wird symmetrisch zur Sehne auf dieses Maß gebracht; die Änderung wächst quadratisch von der Nase zur Endleiste, das vordere Profil bleibt gleich. Wichtig für die spätere Bearbeitung (Fräsen, Schleifen, Beplankung): keine Null-Kante. Wird nach dem Aufmaß angewandt; an sehr dünnen Ringen (Randbogen-/Wingletende) höchstens halbe Profildicke.' });
-    if ((C('formTarget') === 'ur' || C('formTarget') === 'split') && part !== 'tip')
+    if ((C('formTarget') === 'ur' || C('formTarget') === 'split') && part !== 'tip' && (!grpOn || grpOpt().first))
       boolRow(g.body, 'Beide Hälften (an der Wurzel gespiegelt)', () => C('formMirror'), v => { S('formMirror', v); rb(); },
         'Ein: ganze Tragfläche (linke + rechte Hälfte als ein Körper). Aus: nur die entworfene Hälfte, Wurzel eben verschlossen.');
     selectRow(e.body, 'Achsen im STL', [['z', 'Z hoch (Druck / Fräse)'], ['y', 'Y hoch (wie im Programm)']], () => C('formUp'), v => { S('formUp', v); },
@@ -6017,6 +6193,11 @@
       const b = document.createElement('button'); b.className = 'primary'; b.textContent = T('Urmodell als STL…'); b.onclick = exportUr; demoBtn(b); row.appendChild(b);
     }
     exportRows.push(row);
+    if (grpOn) {   // Segmentgruppen: alle Bauteile in einen Ordner
+      const ra = document.createElement('div'); ra.className = 'row full';
+      const ba = document.createElement('button'); ba.textContent = T('Alle Bauteile als STL…'); ba.onclick = exportAllGroups; demoBtn(ba);
+      ra.appendChild(ba); exportRows.push(ra);
+    }
     // STEP-Export (Variante C): echter, glatter B-Spline-Volumenkörper (ADVANCED_BREP), im CAD editierbar.
     {
       const sr = document.createElement('div'); sr.className = 'row full'; sr.style.display = 'grid'; sr.style.gap = '6px';
@@ -6031,12 +6212,17 @@
         const lbl = part === 'tip' ? (wl ? 'Nur Winglet als STEP…' : 'Nur Randbogen als STEP…')
           : part === 'wing' ? 'Nur Tragfläche als STEP…' : 'Urmodell als STEP…';
         const bs = document.createElement('button'); bs.textContent = T(lbl); bs.onclick = exportUrStep; demoBtn(bs); sr.appendChild(bs);
+        const sm = document.createElement('div');
+        selectRow(sm, 'STEP-Querschnitte', [['spline', 'B-Spline-Kurven (genau, kleine Datei)'], ['points', 'Bézier durch die Rippenpunkte (bisher)']], () => C('formStepMode') === 'points' ? 'points' : 'spline', v => { S('formStepMode', v); },
+          'B-Spline-Kurven: jeder Querschnitt wird als B-Spline mit gemeinsamem Knotenvektor geschrieben — die Profilkurven der Rippen werden exakt übernommen (gemessen ≤ 0,001 mm), die Datei ist rund 7× kleiner. Trifft das Kurvennetz die Ringe nicht (ungewöhnliche Geometrie), wird automatisch der bisherige Weg genommen. Bézier durch die Rippenpunkte: bisheriges Verfahren (Fläche durch die abgetasteten Punkte).');
+        Array.from(sm.children).forEach(ch => exportRows.push(ch));
       }
       exportRows.push(sr);
       const hr = document.createElement('div'); hr.className = 'row full';
       hint(hr, (C('formTarget') === 'neg' || C('formTarget') === 'split')
         ? 'STEP: die Formhälften als echte, glatte B-Spline-Volumenkörper (ADVANCED_BREP) zum Weiterbearbeiten in CAD (Fusion, SolidWorks, FreeCAD …), inkl. Passbohrungen als echte Zylinderbohrungen (außer bei gebogenen Winglet-Formen). Höhere „Punkte je Rippe" = glatter, aber größere Datei.'
-        : 'Als echter B-Spline-Volumenkörper (ADVANCED_BREP) zum Weiterbearbeiten in CAD (Fusion, SolidWorks, FreeCAD …), glatt in Spannweite. Höhere „Punkte je Rippe" = glatter, aber größere Datei.');
+        : (C('formStepMode') === 'points' ? 'Als echter B-Spline-Volumenkörper (ADVANCED_BREP) zum Weiterbearbeiten in CAD (Fusion, SolidWorks, FreeCAD …), glatt in Spannweite. Höhere „Punkte je Rippe" = glatter, aber größere Datei.'
+          : 'Als echter B-Spline-Volumenkörper (ADVANCED_BREP) zum Weiterbearbeiten in CAD (Fusion, SolidWorks, FreeCAD …): Querschnitte = die Profilkurven selbst, glatt in Spannweite. Die „Punkte je Rippe" beeinflussen das STEP nicht (nur das STL).'));
       exportRows.push(hr);
     }
     // Winglets gibt es nur beim Ziel Urmodell (sonst eben); der runde Randbogen bei allen Zielen.
@@ -6047,7 +6233,7 @@
       const row2 = document.createElement('div'); row2.className = 'row full'; row2.style.display = 'grid'; row2.style.gap = '6px'; row2.style.gridTemplateColumns = '1fr 1fr';
       const c1 = document.createElement('button'); c1.textContent = T('Nur Tragfläche als STL…'); c1.onclick = exportWingOnly; demoBtn(c1);
       const c2 = document.createElement('button'); c2.textContent = T(wl ? 'Nur Winglet als STL…' : 'Nur Randbogen als STL…'); c2.onclick = exportTipOnly; demoBtn(c2);
-      row2.appendChild(c1); row2.appendChild(c2); exportRows.push(row2);
+      row2.appendChild(c1); row2.appendChild(c2); if (!grpOn) exportRows.push(row2);
       exportHint = C('formTarget') === 'ur'
         ? 'Getrennter Export: Tragfläche bis zur letzten Rippe (dort eben verschlossen) und Randbogen bzw. Winglet als eigener, geschlossener Körper. Beide Teile passen an der Trennebene exakt aneinander (z. B. getrennt drucken und kleben).'
         : 'Getrennter Export als Positiv (Urmodell): Tragfläche bis zur letzten Rippe (dort eben verschlossen) und Randbogen als eigener, geschlossener Körper, z. B. um den Randbogen separat zu drucken und an den geschäumten Flügel zu kleben.';
@@ -6072,7 +6258,8 @@
             numRow(gp.body, T('Loch') + ' ' + (k + 1) + ': ' + T('x ab Nase (mm)'), () => pinPts()[k][0], v => setP(0, v), { step: 1, norender: true });
             numRow(gp.body, T('Loch') + ' ' + (k + 1) + ': ' + T('y ab Nase (mm)'), () => pinPts()[k][1], v => setP(1, v), { step: 0.5, norender: true });
           }
-          numRow(v.body, 'Vorschau: Teile auseinander (mm)', () => C('formPinGap'), v => { S('formPinGap', v); build(); draw(); }, { step: 5, min: 0, norender: true });
+          numRow(gp.body, 'Vorschau: Abstand Tragfläche ↔ Abschluss (mm)', () => C('formPinGap'), v => { S('formPinGap', v); prepSources(); draw(); }, { step: 5, min: 0, norender: true,
+            hint: 'Nur Darstellung: Tragfläche und Randbogen bzw. Winglet um diesen Abstand in Spannweitenrichtung auseinandergezogen zeigen (0 = zusammen, wie verbaut). Die Bohrungen sind immer eingezeichnet. Der Export ist davon unberührt.' });
         }
         return gp;
       })();
@@ -6080,13 +6267,17 @@
     side.appendChild(g.g);
 
     const s = grp('Profil-Glättung', true, 'form');
-    selectRow(s.body, 'Methode', [['bspline', 'Bezier / B-Spline (Ausgleich)'], ['none', 'keine (nur neu abtasten)']], () => C('formSmooth'), v => { S('formSmooth', v); rb(); },
-      'Bezier/B-Spline: kubische Ausgleichskurve durch die Profilpunkte (Least Squares mit Krümmungsstrafe) — glättet Treppen und Ausreißer aus .dat-Dateien. Die Endleistenpunkte bleiben exakt. Die Abweichung zur Rohkontur wird in der Ansicht angezeigt.');
-    if (C('formSmooth') !== 'none') {
+    selectRow(s.body, 'Methode', [['bspline', 'Bezier / B-Spline (Ausgleich)'], ['interp', 'exakt durch die Punkte (Interpolation)'], ['none', 'keine (nur neu abtasten)']], () => C('formSmooth'), v => { S('formSmooth', v); rb(); },
+      'Bezier/B-Spline: kubische Ausgleichskurve durch die Profilpunkte (Least Squares mit Krümmungsstrafe) — glättet Treppen und Ausreißer aus .dat-Dateien. Die Endleistenpunkte bleiben exakt. Die Abweichung zur Rohkontur wird in der Ansicht angezeigt. Exakt durch die Punkte: kubischer Spline ohne jede Abweichung zur .dat (wie Wingdesigner) — übernimmt aber auch Rundungsfehler der Datei als Welligkeit; sinnvoll für saubere, dicht erzeugte Profile.');
+    if (C('formSmooth') === 'bspline') {
+      boolRow(s.body, 'Nase fest (Nasenpunkt + Tangente)', () => C('formNoseFix') === true, v => { S('formNoseFix', v); rr(); },
+        'Die Kurve geht exakt durch den Nasenpunkt der .dat (Punkt am weitesten von der Endleiste), die Tangente steht dort senkrecht zur Sehne. Gemessen an mehreren Profilen verbessert das den Nasenradius meist nicht; weil der Nasenpunkt der Datei nicht genau der Scheitel der Kurve ist, kann es kleine Wellen hinter der Nase erzeugen. Daher Standard aus.');
       numRow(s.body, 'Kontrollpunkte je Seite', () => C('formCtrl'), v => { S('formCtrl', v); rr(); }, { int: true, min: 4, max: 60, norender: true,
         hint: 'Weniger Kontrollpunkte = glatter, aber größere Abweichung; mehr = folgt den Punkten genauer. 12–25 sind für die meisten Profile passend.' });
       numRow(s.body, 'Glättung (0 = keine Strafe)', () => C('formLambda'), v => { S('formLambda', v); rr(); }, { step: 0.5, min: 0, norender: true,
         hint: 'Gewicht der Krümmungsstrafe. Höhere Werte bügeln Welligkeit stärker weg, erhöhen aber die Abweichung an der Nase.' });
+      numRow(s.body, 'Toleranz zur .dat (mm, 0 = aus)', () => C('formTol'), v => { S('formTol', v); rr(); }, { step: 0.01, min: 0, norender: true,
+        hint: 'Größte erlaubte Abweichung der geglätteten Kurve von den Punkten der Original-.dat (in mm an der jeweiligen Rippe). Die Kurve wird nur dort verfeinert, wo sie die Toleranz überschreitet (meist Nase und Klappenknick); der Rest bleibt so glatt wie mit den eingestellten Kontrollpunkten. 0,02 mm (Standard) passt für Formen; ab etwa 0,05 mm kann die Nasenrundung ungleichmäßig werden, kleiner bildet auch Rundungsfehler der .dat mit ab. 0 = aus (feste Kontrollpunktzahl, Anpassung an die neu abgetasteten Rippenpunkte).' });
     }
     numRow(s.body, 'Punkte je Rippe', () => C('formPts'), v => { S('formPts', v); rr(); }, { int: true, min: 40, max: 1200, norender: true,
       hint: 'Auflösung der Kontur im STL (Kosinus-verteilt, dicht an Nase und Endleiste).' });
@@ -6294,8 +6485,17 @@
      * „nur Tragfläche“ am äußeren Ende — die Lage ist auf die Nase der letzten Tragflächenrippe
      * bezogen und damit in beiden Formen deckungsgleich. */
     const stkRows = (body, P) => {
-      const tipStk = P === 'formStkT', pmS = partMode();
-      if (tipStk) {
+      const tipStk = P === 'formStkT', pmS = partMode(), jm = /^formStkJ(\d+)$/.exec(P);
+      if (jm) {
+        // Fuge zwischen zwei Bauteilen (Segmentgruppen): eine Liste für beide Nachbarteile
+        const k = +jm[1], ur = C('formTarget') === 'ur';
+        subhead(body, T('Steckung an der Fuge Segment') + ' ' + k + ' / ' + (k + 1));
+        boolRow(body, ur ? 'Steckungsbohrungen an dieser Fuge' : 'Ausnehmungen für die Steckung', () => C(P), v => { S(P, v); rb(); },
+          ur ? 'Sacklöcher senkrecht zur Fugenrippe in beiden angrenzenden Bauteilen, deckungsgleich — für Steckstifte, Rohr oder Flachprofil. Tiefe je Teil = „Länge“ der Ausnehmung (Stiftlänge = 2 × Länge). Lage ab Profilnase der Fugenrippe.'
+            : 'Ausnehmungen parallel zur Spannweite im Überstand an der Fuge — in beiden angrenzenden Bauteilen deckungsgleich (Lage ab Profilnase der Fugenrippe). Für Steckstifte, Rohr oder Flachprofil, mit denen die Teile später zusammengesteckt werden.');
+        if (!C(P)) return;
+        if (!ur && !(+C('formOvJ') > 0)) hint(body, 'Nur wirksam, wenn der Überstand an den Fugen größer als 0 ist.');
+      } else if (tipStk) {
         subhead(body, pmS === 'tip' ? 'Steckung zur Tragfläche (Anschluss)' : 'Steckung zum Randbogen / Winglet (Anschluss)');
         boolRow(body, 'Ausnehmungen für die Steckung', () => C('formStkT'), v => { S('formStkT', v); rb(); },
           'Ausnehmungen parallel zur Spannweite am Anschluss Tragfläche ↔ Randbogen / Winglet — für Steckstifte, Rohr oder Flachprofil, mit denen das Abschlussteil an die Tragfläche gesteckt wird. Dieselbe Liste wirkt auf beide Bauteile: beim Bauteil „nur Randbogen / Winglet“ im Überstand an dessen Wurzel, beim Bauteil „nur Tragfläche“ im Überstand hinter der letzten Rippe. Die Lage ist auf die Profilnase der letzten Tragflächenrippe bezogen — beide Formen bekommen damit deckungsgleiche Ausnehmungen.');
@@ -6309,8 +6509,10 @@
         if (!C('formStk')) return;
         if (!(+C('formOvRoot') > 0)) hint(body, 'Nur wirksam, wenn der Überstand an der Wurzel größer als 0 ist.');
       }
-      hint(body, tipStk
-        ? 'Ausnehmung anklicken zum Aufklappen — jede hat ihre eigenen Werte (Querschnitt, Maße, Lage, Länge). Lage bezogen auf die Profilnase der letzten Tragflächenrippe (= Trennebene zum Randbogen / Winglet): x entlang der Sehne nach hinten (Endleiste), y nach oben (Oberseite), jeweils in mm — Mitte des Querschnitts. y = 0 = auf der Trennlinie (jede Hälfte bekommt die Hälfte).'
+      hint(body, jm
+        ? 'Ausnehmung anklicken zum Aufklappen — jede hat ihre eigenen Werte (Querschnitt, Maße, Lage, Länge). Lage bezogen auf die Profilnase der Fugenrippe: x entlang der Sehne nach hinten (Endleiste), y nach oben (Oberseite), jeweils in mm — Mitte des Querschnitts.'
+        : tipStk
+        ?'Ausnehmung anklicken zum Aufklappen — jede hat ihre eigenen Werte (Querschnitt, Maße, Lage, Länge). Lage bezogen auf die Profilnase der letzten Tragflächenrippe (= Trennebene zum Randbogen / Winglet): x entlang der Sehne nach hinten (Endleiste), y nach oben (Oberseite), jeweils in mm — Mitte des Querschnitts. y = 0 = auf der Trennlinie (jede Hälfte bekommt die Hälfte).'
         : 'Ausnehmung anklicken zum Aufklappen — jede hat ihre eigenen Werte (Querschnitt, Maße, Lage, Länge). Lage bezogen auf die Profilnase der Wurzelrippe: x entlang der Sehne nach hinten (Endleiste), y nach oben (Oberseite), jeweils in mm — Mitte des Querschnitts. y = 0 = auf der Trennlinie (jede Hälfte bekommt die Hälfte).');
       const list = stkPts(P);
       if (stkActive[P] != null && stkActive[P] >= list.length) stkActive[P] = null;
@@ -6346,7 +6548,8 @@
         numRow(sb, 'x ab Nase (mm)', () => cur().x, v => { set('x', v); rr(); }, { step: 1, norender: true });
         numRow(sb, 'y ab Nase (mm)', () => cur().y, v => { set('y', v); rr(); }, { step: 0.5, norender: true });
         numRow(sb, 'Länge in der Trennebene (mm)', () => cur().len, v => { set('len', v, 'Len'); rr(); }, { step: 5, min: 0.5, norender: true,
-          hint: tipStk ? 'Länge dieser Ausnehmung ab der letzten Tragflächenrippe in den Überstand hinein (Spannweitenrichtung) — in beiden Bauteilen gleich, also Stiftlänge = 2 × dieser Wert. Größer als der Überstand: sie läuft bis zum Ende der Form; sonst endet sie mit einer senkrechten Stirnwand.'
+          hint: jm ? 'Länge ab der Fugenrippe in jedes der beiden Bauteile hinein (Spannweitenrichtung) — Stiftlänge = 2 × dieser Wert. In der Form höchstens bis zum Ende des Überstands an der Fuge.'
+            : tipStk ? 'Länge dieser Ausnehmung ab der letzten Tragflächenrippe in den Überstand hinein (Spannweitenrichtung) — in beiden Bauteilen gleich, also Stiftlänge = 2 × dieser Wert. Größer als der Überstand: sie läuft bis zum Ende der Form; sonst endet sie mit einer senkrechten Stirnwand.'
             : 'Länge dieser Ausnehmung ab der Wurzelrippe nach innen (Spannweitenrichtung). Größer als der Überstand an der Wurzel: sie läuft durch bis zum Ende der Form; sonst endet sie mit einer senkrechten Stirnwand. Ausnehmungen mit unterschiedlicher Länge enden jede an ihrer eigenen Stufe.' });
       });
       const addB = document.createElement('button'); addB.className = 'primary'; addB.textContent = T('+ Ausnehmung hinzufügen');
@@ -6354,10 +6557,24 @@
     };
     // Tragflächensteckung nur bei Bauteilen mit Wurzelrippe, Anschluss-Steckung nur bei getrennten Bauteilen
     const stkSection = body => {
-      const pmS = partMode();
+      const pmS = partMode(), gq = grpOpt();
+      if (gq && !gq.tipOnly) {   // Bauteil einer Segmentgruppe: Wurzel- bzw. Fugen-Steckung an beiden Enden
+        stkRows(body, gq.first ? 'formStk' : 'formStkJ' + gq.jA);
+        if (!gq.last) stkRows(body, 'formStkJ' + gq.jB);
+        else if (pmS === 'wing') stkRows(body, 'formStkT');
+        return;
+      }
       if (pmS !== 'tip') stkRows(body, 'formStk');
       if (pmS !== 'all') stkRows(body, 'formStkT');
     };
+    // Urmodell mit Segmentgruppen: Steckungsbohrungen an den Fugen des aktiven Bauteils
+    let jStkGrp = null;
+    { const gq = grpOpt();
+      if (gq && !gq.tipOnly && C('formTarget') === 'ur' && (gq.jA != null || gq.jB != null)) {
+        jStkGrp = grp('Steckung an den Fugen', true, 'form');
+        if (gq.jA != null) stkRows(jStkGrp.body, 'formStkJ' + gq.jA);
+        if (gq.jB != null) stkRows(jStkGrp.body, 'formStkJ' + gq.jB);
+      } }
     const pm = partMode(), pmWl = pm === 'tip' && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw');
     const lblRoot = pm === 'tip' ? 'Überstand am Anschluss zur Tragfläche (mm)' : 'Überstand Wurzel (mm)';
     const lblTip = pmWl ? 'Überstand hinter der Winglet-Spitze (mm)' : pm === 'wing' ? 'Überstand hinter der letzten Rippe (mm)' : 'Überstand hinter Randbogen (mm)';
@@ -6380,6 +6597,8 @@
       if (C('formEdge') !== 'offset')
         numRow(tf.body, lblTip, () => C('formOvTip'), v => { S('formOvTip', v); rr(); }, { step: 5, min: 0, norender: true,
           hint: C('formMirror') && tg === 'split' && pm !== 'tip' ? 'Gilt für beide Außenenden.' : undefined });
+      if (grpOpt()) numRow(tf.body, 'Überstand an den Fugen (mm)', () => C('formOvJ'), v => { S('formOvJ', v); rr(); }, { step: 5, min: 0, norender: true,
+        hint: 'Bauteile aus Segmentgruppen: Überstand der Form an jeder Fuge zwischen zwei Bauteilen (beide Seiten gleich). Darin liegen die Ausnehmungen der Fugen-Steckung. 0 = die Form endet an der Fugenrippe (Kavität offen).' });
       edgeRows(tf.body);
       subhead(tf.body, 'Verlauf vor der Nase / hinter der Endleiste');
       numRow(tf.body, 'Neigung vor der Nase (°)', () => C('formPsAngF') || 0, v => { S('formPsAngF', v); rr(); }, { step: 1, min: -60, max: 60, norender: true,
@@ -6629,7 +6848,8 @@
     selectRow(v.body, 'Darstellung', [['fine', 'fein (glatt, volle Auflösung)'], ['fast', 'schnell (flach, geringere Auflösung)'], ['2d', 'kompatibel (ohne WebGL)']], () => renderMode(), v => { S('formRender', v); draw(); },
       'Fein: glatt schattiert mit Glanzlicht in Geräteauflösung. Schnell: flache Schattierung in Bildschirmauflösung, beim Drehen halbiert – für schwache Grafik. Kompatibel: alter Zeichenpfad ohne WebGL (langsam, Sortierfehler möglich; wird automatisch benutzt, wenn WebGL fehlt).');
     side.appendChild(t.g);
-    if (pinGrp) side.appendChild(pinGrp.g);
+    if (pinGrp && (!grpOpt() || grpTipSep())) side.appendChild(pinGrp.g);
+    if (jStkGrp) side.appendChild(jStkGrp.g);
     if (psGrp) side.appendChild(psGrp.g);
     if (nGrp) side.appendChild(nGrp.g);
     if (scrGrp) side.appendChild(scrGrp.g);
@@ -6645,5 +6865,5 @@
   Object.assign(App, { formSidebar });
   window.Formenbau = { show, refresh, resize, draw, build, exportUr, exportTop, exportBot, exportWingOnly, exportTipOnly, exportUrStep, exportMoldStep, formStepText, moldStepText, openCmp, closeCmp,
     _dbgModel: () => model,   // Test-Hook (STEP-Validierung gegen echte Ringe)
-    _test: { bendMap, backPlane, segSpine, segPlane3, splitMeshPlane, planOf, planRings, planCheck, fitBSpline, smoothRib, teThickRing, earClip, splitMeshZ, splitMeshAll, pinSpots, segPlanes, segOpts, segPinAt, segPinPts, segPinSetPts, segPinClick, segPinEditStart, segPinEditStop, segPinEdit: () => segPinEdit, segNoseAt, holeSpots, segLengths, capPins, mergeHoles, wingRings, buildUrParts, tipSpine, partW, bendMesh, buildWith, moldRings, splitRings, partingReparam, partingSheet, partingSection, holeSpots, loftHoles, zipper, buildMold, buildSplit, opts, cutTri, chainSegs, sectionLoops, stationsAbs, exportTransform, toBinarySTL, railCurve, wingletDrawRings, wlXf: () => wlXf, wlHit, wlSel: () => wlSel, urmodellRingStack, stepClean, meas: () => meas, measHit, measThick, measCalc, circle3, measClick, view: () => ({ W, H, cam, center, radius }) } };
+    _test: { grpList, grpOpt, grpCrop, segJoints, exportAllGroups, bendMap, backPlane, segSpine, segPlane3, splitMeshPlane, planOf, planRings, planCheck, fitBSpline, fitTolerance, smoothRib, teThickRing, earClip, splitMeshZ, splitMeshAll, pinSpots, segPlanes, segOpts, segPinAt, segPinPts, segPinSetPts, segPinClick, segPinEditStart, segPinEditStop, segPinEdit: () => segPinEdit, segNoseAt, holeSpots, segLengths, capPins, mergeHoles, wingRings, buildUrParts, tipSpine, partW, bendMesh, buildWith, moldRings, splitRings, partingReparam, partingSheet, partingSection, holeSpots, loftHoles, zipper, buildMold, buildSplit, opts, cutTri, chainSegs, sectionLoops, stationsAbs, exportTransform, toBinarySTL, railCurve, wingletDrawRings, wlXf: () => wlXf, wlHit, wlSel: () => wlSel, urmodellRingStack, stepClean, meas: () => meas, measHit, measThick, measCalc, circle3, measClick, view: () => ({ W, H, cam, center, radius }) } };
 })();

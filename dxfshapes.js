@@ -2869,7 +2869,7 @@
     };
     const ext = ribs.map(extOf);
     if (ribs.length < 2 || !d.layers || ext.every(e => !e)) {
-      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted') || '#8a97a6';
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted') || '#8a97a6';
       ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(T('Ansicht erscheint nach Import (2+ Rippen).'), w / 2, h / 2);
       ctx.textAlign = 'left'; dxfPlanHit = null; return;
@@ -2952,7 +2952,7 @@
     }
     dxfPlanHit = null;
     if (!paths.length) {
-      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--muted') || '#8a97a6';
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted') || '#8a97a6';
       ctx.font = '12px system-ui'; ctx.textAlign = 'center';
       ctx.fillText(T('Ansicht erscheint nach Import (2+ Rippen).'), w / 2, h / 2);
       ctx.textAlign = 'left'; return;

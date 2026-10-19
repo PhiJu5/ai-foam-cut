@@ -4,6 +4,39 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.93] — 2026-10-19
+### Neuer Reiter „Holmauslegung“ (Menü Tragflächen)
+- Vorbemessung des Holms der aktiven Tragfläche gegen Biegung und Torsion (Halbspannweite, an der Wurzel eingespannt), neues Modul `holm.js` (im Build-Tool als Funktion `holm` abwählbar).
+- **Berechnungsvorgabe** für alle Bauteile: **Auslegen** (Gurtlagen, Stege, Schalenlagen aus dem Lastfall), **Nachrechnen** (eigene Lagen-/Steglisten wie `2×1415, 900` gegen die Bruchlast) oder **gemischt**.
+- **Lastfall** aus Lastvielfachem n oder aus ca_max · V (nach Ch. Baron 2013), Sicherheitsfaktor j, Abminderung für die Laminatqualität, V_NE und c_m0. Lastverteilung nach Schrenk oder elliptisch; ca_max und c_m0 werden in der freien Fassung von Hand angegeben (die automatische Bestimmung braucht den Reiter „Aerodynamik“, der hier fehlt).
+- **Holmgurte** (UD-Gelege, Gewebe oder **Rovings** mit tex-Angabe), Ober-/Untergurt getrennt bemessen, Lagenplan mit Abstufung und Zuschnittliste; **Holmstege** abgestuft (Balsa, Herex, Rohacell, Sperrholz, optional ±45°-Beschichtung); **Torsionsschale** (ganzes Profil oder D-Box) nach Bredt.
+- **Durchbiegungsgrenze** an der Flächenspitze, **theoretische Bruchgrenze** und **Bruchgeschwindigkeit**, Abschnitt **Lastvielfaches beim Abfangen** (n über V für mehrere Bogendurchmesser, Rechner „hält/bricht“), Lastfall **Schnellflug** mit elastischer Biegung und Verdrehung inkl. Divergenzgeschwindigkeit.
+- **3D-Ansicht unter Last** (Überhöhung, Heatmap für Gurt, Steg, Schale, Moment, Querkraft, Verdrehwinkel), Diagramme, Stationstabelle und Strukturmasse; Ergebnis in einklappbaren Gruppen. Werkstoffliste mit Standardwerkstoffen, editierbar, gehört zum Projekt.
+
+### 3D-Modell: Segmente zusammensetzen, STEP-Import
+- Neuer Block **Segmente zusammensetzen**: mehrere Teile (STL, OBJ, STEP; Mehrfachauswahl) zu einem Modell vereinen, automatisch entlang X/Y/Z aneinanderreihen (optional mit Fugenabstand), je Teil verschieben und drehen. **Stirnkappen an den Fugen entfernen**, **Schnittebenen an die Fugen setzen**, als STL exportieren, Baugruppe auflösen.
+- **Farben selbst wählen** je Teil und je zerlegtem Segment. Das Projekt speichert Teile, Lage und Farben.
+- **STEP laden**: OpenCascade als WebAssembly (occt-import-js 0.0.23, LGPL-2.1), eingebettet in `occt_wasm.js`, im Build-Tool als Funktion `stepimport` abwählbar (ca. 4 MB). Lizenzhinweis in `THIRD_PARTY_LICENSES.md` (Nr. 6).
+
+### Formenbau
+- **In Bauteile teilen (Segmentgruppen)**: je Segmentgrenze eine Fuge wählen; jede Gruppe wird ein eigenes Bauteil (Urmodell bzw. Form oben + unten). Randbogen/Winglet gehört zum letzten Bauteil oder ist eigenständig. **Steckung an jeder Fuge** (Kreis/Rechteck) als Ausnehmung bzw. Sackloch in beiden Nachbarteilen, **Alle Bauteile als STL…**, **Alle Bauteile zeigen** mit einstellbarem Abstand. Alle Teile geprüft wasserdicht.
+- **Profil-Glättung mit Toleranz zur Original-.dat** (Standard 0,02 mm): die B-Spline-Kurve wird direkt an die .dat-Punkte angepasst und nur dort verfeinert, wo nötig — Nasenradius jetzt nahe am Original. Neue Methode „exakt durch die Punkte (Interpolation)“.
+- Formenbau bezieht sich immer auf die Original-.dat und ist strikt von den Heißdraht-Rippen getrennt.
+- **STEP-Export Urmodell: Querschnitte als B-Spline-Kurven** (neuer Standard) — Stationskurven exakt, Datei rund 7× kleiner.
+
+### Tragflächendesign: Profilkontur der Schnittrippen + Profilvergleich
+- Neue Auswahl, wie aus den .dat-Punkten die Schnittkontur entsteht: Spline neu abtasten (wie bisher, Standard), B-Spline geglättet (Toleranz) oder exakt durch die Punkte; je Tragfläche gespeichert, wirkt auf Kern-, Negativ-, Holmschnitt und G-Code. Gemeinsames Kernmodul `profilfit.js`.
+- Neues Fenster **„Profilvergleich …“**: je Rippe .dat-Punkte gegen Schnittkontur, Abweichung entlang des Profils, optional eine zweite Methode zum Vergleich.
+
+### Heller Modus
+- Einstellungen → Farben → **Erscheinungsbild**: **Dunkel** (wie bisher), **Hell** oder **Hell, Zeichenflächen dunkel**. Zeichnungsfarben werden zentral umgerechnet (`theme.js`), eigene Farbwahl gilt weiter.
+
+### Weiteres
+- **Reiterleiste**: neue Standard-Gliederung der Menüs (eigene Gliederungen bleiben erhalten; „Standard wiederherstellen“ setzt zurück).
+- **Re-Zahl-Eingabe** überall mit k/M (`50k`, `1,5M`).
+- Fix: winzige Schlaufen an der Profilnase nach FLZ-/XFLR5-Import werden beim Einlesen entfernt.
+- Fix: Scrollleiste in den Vergleichsfenstern (Profilglättung, Profilvergleich).
+
 ## [1.92] — 2026-10-16
 ### Speichern auf NAS-/Netzlaufwerken
 - Der Browser-Dateizugriff schreibt über eine Zwischendatei (`.crswap`) neben dem Ziel und benennt sie danach um — auf NAS/SMB-Freigaben scheitert das oft. Scheitert das Schreiben, öffnet das Programm jetzt seinen **eigenen Windows-Speichern-Dialog** (lokaler Server der exe bzw. des Programmfensters) und schreibt die Datei direkt; für den Rest der Sitzung geht jedes Speichern gleich diesen Weg.

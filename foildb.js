@@ -340,7 +340,7 @@
     cv.style.width = W + 'px'; cv.style.height = H + 'px';
     const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, W, H);
-    const cssVar = (n, fb) => (getComputedStyle(document.body).getPropertyValue(n) || '').trim() || fb;
+    const cssVar = (n, fb) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim() || fb;
     const txtCol = cssVar('--txt', '#ddd'), accCol = cssVar('--accent2', '#ff8c42');
     const items = [];
     [...U.cmp].forEach((id, i) => { const r = get(id); if (r) items.push({ pts: toProf(r), col: COLORS[i % COLORS.length], name: r.name, w: 1.4 }); });
@@ -353,7 +353,7 @@
     // Sehne + Raster
     g.strokeStyle = 'rgba(128,128,128,.35)'; g.lineWidth = 1; g.setLineDash([4, 4]);
     g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(1), Y(0)); g.stroke(); g.setLineDash([]);
-    g.fillStyle = 'rgba(128,128,128,.7)'; g.font = '10px ' + (getComputedStyle(document.body).getPropertyValue('--mono') || 'monospace');
+    g.fillStyle = 'rgba(128,128,128,.7)'; g.font = '10px ' + (getComputedStyle(document.documentElement).getPropertyValue('--mono') || 'monospace');
     for (let i = 0; i <= 10; i++) {
       const x = X(i / 10); g.fillRect(x, Y(0) - 3, 1, 6);
       if (i % 2 === 0) g.fillText((i * 10) + '%', x - 8, Y(0) + 14);
@@ -489,7 +489,7 @@
 
     // Polaren (Rechenkern des Reiters „Aerodynamik“: NeuralFoil / 2D-Windkanal)
     box.appendChild(mk('div', 'gh', T('Polaren')));
-    if (window.Aero && Aero.openFoilView && (window.Foil2D || window.NeuralFoil)) {
+    if (window.Aero && Aero.openFoilView && (window.NeuralFoil || (App.aeroXfoil && App.aeroXfoil.ready()))) {
       const row = mk('div', 'fdb-btns');
       const ids = [...U.cmp]; if (ids.indexOf(r.id) < 0) ids.unshift(r.id);
       const b = mk('button', 'primary', T('▶ Profilpolaren rechnen …'));
@@ -537,10 +537,39 @@
   // jeder Änderung kurz verzögert mit; die vorige Kurve bleibt gestrichelt zum
   // Vergleich stehen. Ohne NeuralFoil im Build bleibt der Abschnitt weg.
   const kfmNF = () => !!(window.NeuralFoil && NeuralFoil.ready && NeuralFoil.ready());
-  let kfmPolT = 0;
+  const kfmXF = () => (App.aeroXfoil && App.aeroXfoil.ready()) ? App.aeroXfoil : null;
+  let kfmPolT = 0, kfmPolRun = 0;
+  // Rechner der Live-Polare: K.calc 'nf' (NeuralFoil, sofort) oder 'xfoil'
+  // (echtes xfoil.exe, einige Sekunden — asynchron, veraltete Ergebnisse verworfen)
   function kfmPolarSoon() {
-    const K = U.kfm; if (!K || !kfmNF()) return;
+    const K = U.kfm; if (!K || !(kfmNF() || kfmXF())) return;
     clearTimeout(kfmPolT);
+    if (K.calc === 'xfoil' && kfmXF()) {
+      kfmPolT = setTimeout(async () => {
+        if (U.kfm !== K || !K.preview) return;
+        const id = ++kfmPolRun, Re = K.re || 1e5;
+        const a0 = K.a0 != null ? K.a0 : -6, a1 = K.a1 != null ? K.a1 : 16;
+        K.polBusy = true; kfmPolarDraw();
+        const X = kfmXF();
+        const res = await X.run([{ prof: K.preview, name: 'KFm', Re, ncrit: 9, a0: Math.min(a0, a1), a1: Math.max(a0, a1), da: K.da || 0.5 }]);
+        if (id !== kfmPolRun || U.kfm !== K) return;
+        const r = res && res[0] ? X.polarOf(res[0]) : null;
+        K.opPt = null;
+        if (r && isFinite(K.aOp)) {           // Betriebspunkt: zwischen den Polarpunkten über α
+          const P = r.pts;
+          for (let i = 0; i < P.length - 1; i++) if (K.aOp >= P[i].alpha && K.aOp <= P[i + 1].alpha) {
+            const t = (K.aOp - P[i].alpha) / ((P[i + 1].alpha - P[i].alpha) || 1), L = (k) => P[i][k] + (P[i + 1][k] - P[i][k]) * t;
+            K.opPt = { alpha: K.aOp, cl: L('cl'), cd: L('cd'), cm: L('cm'), xtrU: L('xtrU'), xtrL: L('xtrL') }; break;
+          }
+        }
+        K.polBusy = false;
+        if (K.pol && K.pol.pts && K.pol.pts.length) K.polPrev = K.pol;
+        K.pol = r && r.pts && r.pts.length ? r : null;
+        kfmPolarDraw(); kfmCmp(K);
+      }, 600);
+      return;
+    }
+    if (!kfmNF()) return;
     kfmPolT = setTimeout(() => {
       if (U.kfm !== K || !K.preview) return;
       // α bezieht sich auf die waagrechte Grundplatte (NeuralFoil rechnet intern zur Sehne gedreht)
@@ -556,8 +585,28 @@
       } catch (e) { r = null; }
       if (K.pol && K.pol.pts && K.pol.pts.length) K.polPrev = K.pol;
       K.pol = r && r.pts && r.pts.length ? r : null;
-      kfmPolarDraw();
+      kfmPolarDraw(); kfmCmp(K);
     }, 150);
+  }
+  // Vergleich NeuralFoil ↔ XFOIL (K.cmp): derselbe Entwurf mit der anderen
+  // Methode als K.polCmp (gestrichelt in der Entwurfsfarbe)
+  let kfmCmpRun = 0;
+  async function kfmCmp(K) {
+    const id = ++kfmCmpRun;
+    if (!K.cmp || !K.preview || !K.pol) { K.polCmp = null; return; }
+    const other = K.calc === 'xfoil' && kfmXF() ? 'nf' : 'xfoil';
+    const Re = K.re || 1e5, a0 = K.a0 != null ? K.a0 : -6, a1 = K.a1 != null ? K.a1 : 16;
+    let r = null;
+    if (other === 'nf') {
+      try { const m = kfmNF() ? NeuralFoil.build(K.preview) : null; r = m ? m.polar({ Re, a0: Math.min(a0, a1), a1: Math.max(a0, a1), da: K.da || 0.5 }) : null; } catch (e) { r = null; }
+    } else {
+      const X = kfmXF(); if (!X) { K.polCmp = null; K.polCmpWhy = App.aeroXfoil ? App.aeroXfoil.why() : ''; kfmPolarDraw(); return; }
+      const res = await X.run([{ prof: K.preview, name: 'KFm', Re, ncrit: 9, a0: Math.min(a0, a1), a1: Math.max(a0, a1), da: K.da || 0.5 }]);
+      if (id !== kfmCmpRun || U.kfm !== K) return;
+      r = res && res[0] ? X.polarOf(res[0]) : null;
+    }
+    K.polCmp = r && r.pts && r.pts.length ? r : null; K.polCmpName = other === 'nf' ? 'NeuralFoil' : 'XFOIL'; K.polCmpWhy = '';
+    kfmPolarDraw();
   }
   // Polaren-Feld rechts neben der Eingabemaske (statt der Kennwert-Tabelle).
   // Polaren-Feld rechts neben der Eingabemaske (statt der Kennwert-Tabelle).
@@ -580,7 +629,7 @@
   function kfmPolarPanel() {
     const box = $('fdbTable'), K = U.kfm; if (!box || !K) return;
     box.textContent = ''; K.polSlots = null;
-    if (!kfmNF() || !kfmCharts()) return;
+    if (!(kfmNF() || kfmXF()) || !kfmCharts()) return;
     if (!Array.isArray(K.polCh)) K.polCh = ['pol', 'cla', 'gz', 'cm'];
     if (!K.polN) K.polN = 2;
     if (!K.polHide) K.polHide = new Set();
@@ -590,9 +639,23 @@
     const head = mk('div', 'fdb-btns'); head.style.alignItems = 'center';
     head.appendChild(mk('b', null, T('Polare (live)')));
     head.appendChild(mk('span', 'fdb-hint', T('Re-Zahl')));
-    const re = document.createElement('input'); re.type = 'number'; re.step = 10000; re.min = 20000; re.max = 3e6; re.value = K.re || 1e5; re.style.width = '96px';
-    re.onchange = () => { const v = Math.max(20000, Math.min(3e6, +re.value || 1e5)); re.value = v; K.re = v; K.polPrev = null; kfmPolarSoon(); };
+    const re = document.createElement('input'); re.type = 'text'; re.value = fmtRe(K.re || 1e5); re.style.width = '96px'; re.title = T('k = Tausend, M = Million (z. B. 150k)');
+    re.onchange = () => { const v = Math.max(20000, Math.min(3e6, parseRe(re.value) || 1e5)); re.value = fmtRe(v); K.re = v; K.polPrev = null; kfmPolarSoon(); };
     head.appendChild(re);
+    if (App.aeroXfoil) {                      // Rechner wählbar; fehlt XFOIL, rechnet NeuralFoil (Grund im Tooltip)
+      const sc = document.createElement('select'); sc.style.cssText = selStyle;
+      [['nf', 'NeuralFoil'], ['xfoil', kfmXF() ? 'XFOIL' : T('XFOIL (nicht verfügbar)')]].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sc.appendChild(o); });
+      sc.value = K.calc === 'xfoil' ? 'xfoil' : 'nf';
+      sc.title = T('Rechner der Live-Polare: NeuralFoil sofort, XFOIL braucht einige Sekunden je Änderung') + (kfmXF() || !App.aeroXfoil ? '' : ' — ' + App.aeroXfoil.why());
+      sc.onchange = () => { K.calc = sc.value; K.polPrev = null; kfmPolarSoon(); };
+      head.appendChild(sc);
+      const cl = document.createElement('label'); cl.style.cssText = 'display:inline-flex;align-items:center;gap:3px;font-size:12px;cursor:pointer';
+      const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!K.cmp;
+      cb.onchange = () => { K.cmp = cb.checked; if (!K.cmp) { K.polCmp = null; kfmPolarDraw(); } else kfmCmp(K); };
+      cl.title = T('Den Entwurf zusätzlich mit der anderen Methode rechnen (NeuralFoil ↔ XFOIL) — gestrichelt in der Entwurfsfarbe');
+      cl.appendChild(cb); cl.appendChild(document.createTextNode(T('Vergleich')));
+      head.appendChild(cl);
+    }
     // α-Bereich der Polare (von/bis/Schritt) und ein einzelner Betriebspunkt
     const aNum = (val, step, w, set, ph) => { const i = document.createElement('input'); i.type = 'number'; i.step = step; i.style.width = w;
       if (val != null && isFinite(val)) i.value = val; if (ph) i.placeholder = ph;
@@ -679,13 +742,14 @@
   // Kurven eines Diagramms: aktueller Entwurf + gestrichelt der vorige Stand.
   function kfmSeries(D) {
     const K = U.kfm;
-    const acc = (getComputedStyle(document.body).getPropertyValue('--accent2') || '').trim() || '#ff8c42', out = [];
+    const acc = (getComputedStyle(document.documentElement).getPropertyValue('--accent2') || '').trim() || '#ff8c42', out = [];
     const add = (r, name, color, dash) => {
       if (!r || !r.pts) return;
       out.push({ name: D.fy2 ? name + ' ' + T('oben') : name, color, dash, pts: r.pts.map(q => [D.fx(q), D.fy(q)]) });
       if (D.fy2) out.push({ name: name + ' ' + T('unten'), color, dash: 'dot', pts: r.pts.map(q => [D.fx(q), D.fy2(q)]) });
     };
-    add(K.pol, T('Entwurf'), acc, null);
+    add(K.pol, T('Entwurf') + (K.polCmp ? ' · ' + (K.calc === 'xfoil' && kfmXF() ? 'XFOIL' : 'NeuralFoil') : ''), acc, null);
+    if (K.cmp && K.polCmp) add(K.polCmp, T('Entwurf') + ' · ' + K.polCmpName, acc, [7, 4]);
     add(K.polPrev, T('vorher'), '#8a8f98', true);
     (K.polSnaps || []).forEach((sn, j) => { if (sn.on !== false) add(sn.pol, (j + 1) + ': ' + sn.name, sn.color, null); });
     out.forEach(s => { if (K.polHide.has(D.id + '|' + s.name)) s.hidden = true; });
@@ -715,14 +779,14 @@
       ys.forEach(vy => {
         const py = m.H - m.mB - (vy - m.y0) / (m.y1 - m.y0) * (m.H - m.mT - m.mB);
         if (!isFinite(px) || !isFinite(py) || px < m.mL || px > m.W - m.mR || py < m.mT || py > m.H - m.mB) return;
-        g.strokeStyle = (getComputedStyle(document.body).getPropertyValue('--txt') || '').trim() || '#fff'; g.lineWidth = 2;
+        g.strokeStyle = (getComputedStyle(document.documentElement).getPropertyValue('--txt') || '').trim() || '#fff'; g.lineWidth = 2;
         g.beginPath(); g.arc(px, py, 5, 0, 2 * Math.PI); g.stroke(); g.lineWidth = 1;
       });
     }
     if (!m || !cur || cur.mx < m.mL || cur.mx > m.W - m.mR || cur.my < m.mT || cur.my > m.H - m.mB) return;
     const fx = m.x0 + (cur.mx - m.mL) / (m.W - m.mL - m.mR) * (m.x1 - m.x0), fy = m.y0 + (m.H - m.mB - cur.my) / (m.H - m.mT - m.mB) * (m.y1 - m.y0);
     const f = v => { const a = Math.abs(v); return a >= 100 ? v.toFixed(0) : a >= 1 ? v.toFixed(2) : v.toFixed(4); };
-    const txt = (getComputedStyle(document.body).getPropertyValue('--txt') || '').trim() || '#ccc';
+    const txt = (getComputedStyle(document.documentElement).getPropertyValue('--txt') || '').trim() || '#ccc';
     g.strokeStyle = txt; g.globalAlpha = 0.4; g.setLineDash([3, 3]);
     g.beginPath(); g.moveTo(cur.mx, m.mT); g.lineTo(cur.mx, m.H - m.mB); g.stroke();
     g.beginPath(); g.moveTo(m.mL, cur.my); g.lineTo(m.W - m.mR, cur.my); g.stroke();
@@ -791,7 +855,10 @@
       K.pol.pts.forEach(q => { if (q.cl / q.cd > best.cl / best.cd) best = q; cdMin = Math.min(cdMin, q.cd); });
       K.polInfo.textContent = 'Re ' + Math.round(K.pol.Re) + ' · cl max ' + (isFinite(K.pol.clmax) ? K.pol.clmax.toFixed(2) : '–') + ' (α ' + (+K.pol.alphaMax).toFixed(1) + '°) · '
         + T('beste Gleitzahl ') + (best.cl / best.cd).toFixed(1) + ' (cl ' + best.cl.toFixed(2) + ', α ' + best.alpha.toFixed(1) + '°) · cd min ' + cdMin.toFixed(4)
-        + (K.polPrev ? ' — ' + T('gestrichelt: vorheriger Stand') : '');
+        + (K.polPrev ? ' — ' + T('gestrichelt: vorheriger Stand') : '')
+        + (K.cmp && K.polCmp ? ' — ' + T('lang gestrichelt (Entwurfsfarbe):') + ' ' + K.polCmpName
+          + ' · cl max ' + (isFinite(K.polCmp.clmax) ? K.polCmp.clmax.toFixed(2) : '–') : '')
+        + (K.cmp && K.polCmpWhy ? ' — ' + K.polCmpWhy : '');
       const o = K.opPt;
       if (o && isFinite(o.cl)) K.polInfo.textContent += ' ' + T('bei α ') + (+o.alpha).toFixed(1) + '°: cl ' + o.cl.toFixed(3) + ' · cd ' + o.cd.toFixed(4)
         + ' · cl/cd ' + (o.cl / o.cd).toFixed(1) + ' · cm ' + o.cm.toFixed(3) + (o.conf < 0.6 ? ' (' + T('unsicher') + ')' : '');

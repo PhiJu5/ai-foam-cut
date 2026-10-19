@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Foam Cut</title>
+<script>try{var t=localStorage.getItem('hw_theme');if(t==='light'||t==='lightui')document.documentElement.setAttribute('data-theme','light');if(t==='light')document.documentElement.setAttribute('data-draw','light')}catch(e){}</script>
 <style>
   :root{
     --bg:#0f1216; --panel:#171b21; --panel2:#1e242c; --line:#2a323c;
@@ -92,7 +93,7 @@
   .row{display:grid;grid-template-columns:1fr 92px;align-items:center;gap:8px}
   .row.full{grid-template-columns:1fr}
   .row label{color:var(--txt);font-size:12px}
-  .row input,.row select{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+  .row input,.row select{background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);
     border-radius:5px;padding:5px 7px;font-size:12px;width:100%}
   .row input[type=checkbox]{width:auto;justify-self:start}
   .hint{color:var(--muted);font-size:11px;margin:-2px 0 2px}
@@ -121,7 +122,7 @@
   .note-pop.open{display:flex}
   .note-pop .np-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
     white-space:normal;line-height:1.35}
-  .note-pop textarea{background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:6px;
+  .note-pop textarea{background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:6px;
     padding:7px 8px;font:12px/1.4 "Segoe UI",system-ui,sans-serif;resize:vertical;min-height:84px;width:100%}
   .note-pop .np-scope{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
   .note-pop .np-scope label{display:flex;align-items:center;gap:6px;cursor:pointer}
@@ -288,7 +289,7 @@
   .simlegend .hint{display:block;margin-top:6px;line-height:1.35}
   .simbar{flex:0 0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:7px 10px;
     border-top:1px solid var(--line);background:var(--panel)}
-  .simbar select,.simbar input[type=range]{background:#0c0f13;color:var(--txt);
+  .simbar select,.simbar input[type=range]{background:var(--field,#0c0f13);color:var(--txt);
     border:1px solid var(--line);border-radius:5px;padding:3px 5px;font-size:12px}
   .simbar input[type=range]{padding:0;accent-color:var(--accent2)}
   .simbar .ck{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:11px}
@@ -334,7 +335,7 @@
   /* Reiter „Fräse": gleiche Aufteilung wie „Schneiden" (Vorschau links, Bedienung rechts) */
   #fraeseView{overflow:auto;padding:12px}
   #fraeseView input[type=text],#fraeseView input[type=number],#fraeseView select{
-    background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
+    background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
   #fraeseView .msim>canvas{cursor:grab}
   #fraeseView .dro.fr-dro{grid-template-columns:repeat(3,1fr)}
   .frjog-wrap{display:grid;grid-template-columns:auto auto;gap:18px;justify-content:start;align-items:start}
@@ -361,17 +362,17 @@
   .frjob input[type=checkbox]{width:auto;margin:0}
   .frjob .frjob-name{cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--txt)}
   .frjob .frjob-name:hover{color:var(--accent)}
-  .frjob select{font-size:11px;padding:2px 3px;max-width:96px;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
-  .frjob input[type=text]{font-size:11px;padding:2px 4px;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frjob select{font-size:11px;padding:2px 3px;max-width:96px;background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frjob input[type=text]{font-size:11px;padding:2px 4px;background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:4px}
   .frjob button{padding:1px 5px;font-size:10px;margin:0}
   .frpart{display:grid;grid-template-columns:1fr auto auto auto;gap:3px;align-items:center;padding:2px 4px;border:1px solid var(--line);border-radius:4px}
   .frpart.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
   .frpart.frpart-all{grid-template-columns:1fr auto auto;border-style:dashed}
-  .frpart select,.frpart input[type=text]{font-size:11px;padding:2px 3px;max-width:96px;min-width:0;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frpart select,.frpart input[type=text]{font-size:11px;padding:2px 3px;max-width:96px;min-width:0;background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:4px}
   .frpart .frpart-name{grid-column:1 / -1;max-width:none;width:100%;box-sizing:border-box}
   .frpart button{padding:1px 5px;font-size:10px;margin:0}
   .frjob-tool{display:flex;justify-content:flex-end;margin:-2px 0 2px 22px}
-  .frjob-tool select{font-size:11px;padding:2px 3px;max-width:100%;background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:4px}
+  .frjob-tool select{font-size:11px;padding:2px 3px;max-width:100%;background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:4px}
   .mwrap{max-width:900px;margin:0 auto;display:grid;gap:10px}
   /* Reiter „Schneiden": nutzt die volle Bildschirmbreite — 3D-Simulation links
      groß, Bedienung (Programm/Konsole) rechts. */
@@ -401,14 +402,14 @@
   .mrow .sp{flex:1}
   .mfield{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--txt)}
   #machineView input[type=text],#machineView input[type=number],#machineView select{
-    background:#0c0f13;color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
+    background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);border-radius:5px;padding:5px 7px;font-size:12px}
   .mhead{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
     letter-spacing:.1em;text-transform:uppercase}
   .hset{display:flex;flex-direction:column;gap:9px;margin-top:8px}
   .hset-row{display:grid;grid-template-columns:1fr 120px;gap:6px 10px;align-items:center}
   .hset-row label{font-size:12px;color:var(--txt);font-weight:600}
   .hset-row .hint{grid-column:1/-1;margin:0}
-  .hset-row input[type=number]{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+  .hset-row input[type=number]{background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);
     border-radius:5px;padding:5px 7px;font-size:12px;width:100%}
   .hset-row input[type=checkbox]{justify-self:end;width:auto}
   .hset-row.hset-mask{grid-template-columns:1fr}
@@ -458,7 +459,7 @@
   .ovexp{margin-top:9px;padding:4px 8px;border:1px solid #e8a33d;border-radius:5px;font-size:12px;color:#e8a33d;background:rgba(232,163,61,.08)}
   .ovrt{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:12px;color:var(--muted);cursor:pointer}
   .ovrow .ovnum{font-size:12px;color:var(--muted);white-space:nowrap}
-  .ovrow .ovnum input{width:74px;font:15px Consolas,monospace;color:var(--accent2);text-align:right;background:#0c0f13;border:1px solid var(--line);border-radius:5px;padding:2px 5px}
+  .ovrow .ovnum input{width:74px;font:15px Consolas,monospace;color:var(--accent2);text-align:right;background:var(--field,#0c0f13);border:1px solid var(--line);border-radius:5px;padding:2px 5px}
   #mProg{width:100%;height:11px;accent-color:var(--accent2)}
   .grblConsole{background:#080b0e;border:1px solid var(--line);border-radius:6px;height:170px;
     overflow:auto;padding:7px 9px;font:12px/1.45 Consolas,"Cascadia Code",monospace;
@@ -492,7 +493,7 @@
   .modal .head h2{font-size:12px;letter-spacing:.13em;text-transform:uppercase;margin:0}
   .modal .body{overflow:auto;padding:6px 13px 12px}
   .modal .foot{padding:11px 13px;border-top:1px solid var(--line)}
-  .modal input{background:#0c0f13;color:var(--txt);border:1px solid var(--line);
+  .modal input{background:var(--field,#0c0f13);color:var(--txt);border:1px solid var(--line);
     border-radius:5px;padding:5px 7px;font-size:12px}
   /* Reiter „Projektübersicht": ohne Seitenleiste, mittiges Akkordeon (overview.js) */
   #app.nosidebar{grid-template-columns:0 1fr}
@@ -637,13 +638,26 @@
          tabmenu.js baut die Leiste beim Start nach der Nutzer-Gliederung um
          (Einstellungen → Menüleiste). -->
     <button data-view="material" class="active">Projektübersicht und Werkstoffzuordnung</button>
+    <div class="tab-more" data-group="Aero">
+      <button type="button" class="tab-more-btn">Aero<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="foildb">Profildatenbank</button>
+      </div>
+    </div>
     <div class="tab-more" data-group="Tragflächen">
       <button type="button" class="tab-more-btn">Tragflächen<span class="tab-more-ch">▾</span></button>
       <div class="tab-more-list">
         <button data-view="wing">Tragflächendesigner</button>
-        <button data-view="neg">Negativschalendesign</button>
         <button data-view="core">Kerndesign</button>
-        <button data-view="foildb">Profildatenbank</button>
+        <button data-view="neg">Negativschalendesign</button>
+        <button data-view="form">Formenbau</button>
+        <button data-view="holm">Holmauslegung</button>
+      </div>
+    </div>
+    <div class="tab-more" data-group="Rumpf">
+      <button type="button" class="tab-more-btn">Rumpf<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="rumpf">Rumpf</button>
       </div>
     </div>
     <div class="tab-more" data-group="Komplexe Formen">
@@ -651,23 +665,21 @@
       <div class="tab-more-list">
         <button data-view="dxf">DXF-Formen</button>
         <button data-view="model">3D-Modell</button>
-        <button data-view="schrift">Schriften</button>
-        <button data-view="ausschnitt">Ausschnitte</button>
-      </div>
-    </div>
-    <div class="tab-more" data-group="Spezial Module">
-      <button type="button" class="tab-more-btn">Spezial Module<span class="tab-more-ch">▾</span></button>
-      <div class="tab-more-list">
-        <button data-view="rib">Rippendesigner</button>
-        <button data-view="cad">CAD-Bearbeitung</button>
-        <button data-view="form">Formenbau</button>
-        <button data-view="rumpf">Rumpf</button>
-        <button data-view="fraese">Fräse</button>
       </div>
     </div>
     <button data-view="gcode">G-Code</button>
     <button data-view="cut">Schneiden</button>
     <button data-view="machine">Maschine</button>
+    <div class="tab-more" data-group="Spezial Module">
+      <button type="button" class="tab-more-btn">Spezial Module<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="ausschnitt">Ausschnitte</button>
+        <button data-view="rib">Rippendesigner</button>
+        <button data-view="schrift">Schriften</button>
+        <button data-view="fraese">Fräse</button>
+      </div>
+    </div>
+    <button data-view="cad">CAD-Bearbeitung</button>
   </div>
 
   <aside id="side"></aside>
@@ -1022,6 +1034,8 @@
         </div>
       </div>
 
+      <!-- Reiter „Holmauslegung" (holm.js): Holmgurte, Holmstege, Torsionsschale -->
+      <div class="view" id="holmView"><div class="holm-res" id="holmRes"></div></div>
 
       <div class="view" id="fraeseView">
         <div class="mwrap cutwrap">
@@ -1562,7 +1576,7 @@
 <input type="file" id="fileBgImg" accept="image/*" style="display:none">
 <input type="file" id="fileProj" accept=".json" style="display:none">
 <input type="file" id="fileGcode" accept=".gcode,.nc,.ngc,.tap,.txt" style="display:none">
-<input type="file" id="fileModel3d" accept=".stl,.obj" style="display:none">
+<input type="file" id="fileModel3d" accept=".stl,.obj,.stp,.step,.igs,.iges" style="display:none">
 <input type="file" id="fileFraeseDxf" accept=".dxf" style="display:none">
 <input type="file" id="fileFraeseGcode" accept=".gcode,.nc,.ngc,.tap,.txt" style="display:none">
 <input type="file" id="fileSchriftFont" accept=".ttf,.otf,.ttc" style="display:none">
@@ -1583,14 +1597,17 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261016nas"></script>
+<script src="i18n.js?v=20261019tm1"></script>
+<script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261004gerade2"></script>
-<script src="airfoil.js?v=20261008align"></script>
+<script src="airfoil.js?v=20261010despike"></script>
+<script src="profilfit.js?v=20261011dat"></script>
 <script src="materials.js?v=20261004gerade2"></script>
 <script src="blockprep.js?v=20261004gerade2"></script>
-<script src="wing.js?v=20261004gerade2"></script>
-<script src="flz.js?v=20261004gerade2"></script>
-<script src="xflr5.js?v=20261004gerade2"></script>
+<script src="wing.js?v=20261010prof"></script>
+<script src="ribvergleich.js?v=20261010scr"></script>
+<script src="flz.js?v=20261010xflpos"></script>
+<script src="xflr5.js?v=20261010xflm"></script>
 <script src="pc2.js?v=20261004gerade2"></script>
 <script src="dxf.js?v=20261004gerade2"></script>
 <script src="hotwire.js?v=20261004gerade2"></script>
@@ -1601,31 +1618,33 @@
 <script src="viewcube.js?v=20261005home"></script>
 <script src="sim3d.js?v=20261008trk2"></script>
 <script src="simmodel.js?v=20261004gerade2"></script>
-<script src="model3d.js?v=20261005stlprev"></script>
+<script src="occt-import-js.js?v=20261018asm"></script>
+<script src="occt_wasm.js?v=20261018asm"></script>
+<script src="model3d.js?v=20261019me1"></script>
 <script src="model3d_gcode.js?v=20261006schale7"></script>
-<script src="core.js?v=20261008bcl"></script>
+<script src="core.js?v=20261012re"></script>
 <script src="cad.js?v=20261004gerade2"></script>
-<script src="gcode.js?v=20261016nas"></script>
+<script src="gcode.js?v=20261017theme3"></script>
 <script src="spars.js?v=20261004gerade2"></script>
-<script src="ribs.js?v=20261005home"></script>
-<script src="dxfshapes.js?v=20261008bcl2"></script>
-<script src="wingimport.js?v=20261004gerade2"></script>
-<script src="filesys.js?v=20261016nas"></script>
-<script src="stlpreview.js?v=20261005stlprev2"></script>
+<script src="ribs.js?v=20261017theme2"></script>
+<script src="dxfshapes.js?v=20261017theme2"></script>
+<script src="wingimport.js?v=20261010xflm"></script>
+<script src="filesys.js?v=20261019me1"></script>
+<script src="stlpreview.js?v=20261017theme2"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
-<script src="gmfc.js?v=20261004gerade2"></script>
+<script src="gmfc.js?v=20261017theme2"></script>
 <script src="render.js?v=20261005home"></script>
-<script src="measure2d.js?v=20261004gerade2"></script>
-<script src="sidebar.js?v=20261008bcl2"></script>
+<script src="measure2d.js?v=20261011dat"></script>
+<script src="sidebar.js?v=20261019me1"></script>
 <script src="pathpreview.js?v=20261008bcl"></script>
 <script src="gcodegen.js?v=20261008bcl"></script>
 <script src="cutpanel.js?v=20261008abl"></script>
 <script src="stege.js?v=20261004gerade2"></script>
 <script src="kernteile.js?v=20261004gerade2"></script>
-<script src="pc2wing.js?v=20261004gerade2"></script>
-<script src="stepexport.js?v=20261004gerade2"></script>
-<script src="formenbau.js?v=20261005stlprev"></script>
-<script src="rumpf.js?v=20261005home"></script>
+<script src="pc2wing.js?v=20261010tol"></script>
+<script src="stepexport.js?v=20261010prof"></script>
+<script src="formenbau.js?v=20261018grp4"></script>
+<script src="rumpf.js?v=20261017theme2"></script>
 <script src="fraese.js?v=20261004gerade2"></script>
 <script src="schrift_fonts.js?v=20261004gerade2"></script>
 <script src="schrift.js?v=20261004gerade2"></script>
@@ -1633,15 +1652,16 @@
 <script src="schrift_gcode.js?v=20261006schale7"></script>
 <script src="ausschnitt_gcode.js?v=20261006schale7"></script>
 <script src="kfm.js?v=20261008align"></script>
-<script src="foildb.js?v=20261009win7im"></script>
-<script src="compute.js?v=20261004gerade2"></script>
-<script src="wings.js?v=20261006schale7"></script>
+<script src="foildb.js?v=20261017theme2"></script>
+<script src="compute.js?v=20261010prof"></script>
+<script src="wings.js?v=20261011dat"></script>
 <script src="overview_bg.js?v=20261004gerade2"></script>
 <script src="overview.js?v=20261004gerade2"></script>
-<script src="ptedit.js?v=20261004gerade2"></script>
+<script src="ptedit.js?v=20261011dat"></script>
 <script src="profedit.js?v=20261004gerade2"></script>
-<script src="tabmenu.js?v=20261004gerade2"></script>
-<script src="app.js?v=20261005cockpit"></script>
+<script src="holm.js?v=20261017calc2"></script>
+<script src="tabmenu.js?v=20261019tm1"></script>
+<script src="app.js?v=20261019me1"></script>
 </body>
 </html>
 

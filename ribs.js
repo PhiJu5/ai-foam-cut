@@ -609,7 +609,7 @@
     faces.forEach(f => {
       const g = Math.round(70 + f.lit * 150);
       ctx.beginPath(); ctx.moveTo(X(f.A), Y(f.A)); ctx.lineTo(X(f.B), Y(f.B)); ctx.lineTo(X(f.C), Y(f.C)); ctx.closePath();
-      ctx.fillStyle = 'rgb(' + Math.round(g * 0.55) + ',' + Math.round(g * 0.72) + ',' + g + ')';
+      ctx.fillStyle = (window.DrawTheme ? DrawTheme.raw('rgb(' + Math.round(g * 0.55) + ',' + Math.round(g * 0.72) + ',' + g + ')') : 'rgb(' + Math.round(g * 0.55) + ',' + Math.round(g * 0.72) + ',' + g + ')');
       ctx.fill();
       ctx.strokeStyle = 'rgba(20,28,38,.55)'; ctx.lineWidth = 0.4; ctx.stroke();
     });

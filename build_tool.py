@@ -358,6 +358,9 @@ def run_build(cfg, log, cancel=None):
         launcher = f.read()
     with open(os.path.join(stage, ENTRY), "w", encoding="utf-8") as f:
         f.write(patch_launcher(launcher, cfg["expiry"]))
+    # XFOIL-Anbindung (Reiter „Aerodynamik“): launcher.py importiert xfoilrun
+    if os.path.isfile(os.path.join(HERE, "xfoilrun.py")):
+        shutil.copy2(os.path.join(HERE, "xfoilrun.py"), stage)
     with open(os.path.join(stage, "build_info.json"), "w", encoding="utf-8") as f:
         json.dump(build_info, f, indent=2, ensure_ascii=False)
 
@@ -377,6 +380,10 @@ def run_build(cfg, log, cancel=None):
            "--workpath", os.path.join(HERE, "build", name), "--specpath", stage]
     for f in files + [HTML]:
         cmd += ["--add-data", "%s;." % os.path.join(stage, f)]
+    # xfoil.exe mitpacken (landet in _MEIPASS/XFOIL, xfoilrun sucht dort)
+    xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
+    if "aero" in selected and os.path.isfile(xf):
+        cmd += ["--add-binary", "%s;XFOIL" % xf]
     cmd.append(os.path.join(stage, ENTRY))
 
     # Die exe erbt Bitbreite und Mindest-Windows vom bauenden Python

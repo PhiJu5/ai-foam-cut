@@ -18,6 +18,20 @@
       ]
     },
     {
+      "id": "stepimport",
+      "name": "STEP-/IGES-Import (OpenCascade)",
+      "description": "Reiter „3D-Modell“: STEP- und IGES-Dateien laden (auch als Teile beim Zusammensetzen von Rumpfsegmenten). OpenCascade als WebAssembly (occt-import-js, LGPL-2.1), ca. 4 MB.",
+      "files": [
+        "occt-import-js.js",
+        "occt_wasm.js"
+      ],
+      "tabs": [],
+      "default": true,
+      "requires": [
+        "model3d"
+      ]
+    },
+    {
       "id": "stege",
       "name": "Kern-Stege (Negativ- und Kerndesign)",
       "description": "Im Negativschalendesign den Kern in einzelne Stege zerlegen (Glasschlauch, Holmgurt, Stegabstand) und im selben Schnitt wie die Schalen fahren; im Kerndesign den Kern ebenso zerteilen, optional mit erhaltener, auseinandergezogener Schale (eigener Schnitt, ein oder getrennte Programme).",
@@ -211,6 +225,21 @@
       ],
       "default": true,
       "kern_bis": "2026-09-13"
+    },
+    {
+      "id": "holm",
+      "name": "Holmauslegung (Holmgurte, Holmstege, Torsionsschale)",
+      "description": "Reiter „Holmauslegung“: Vorbemessung der Tragfläche gegen Biegung und Torsion — Lastverteilung aus dem VLM (Aerodynamik) oder nach Schrenk, Holmgurte aus Kohle-UD-Gelege mit Breite innen/außen, berechneter Lagenzahl und Abstufung (Lagenplan, Zuschnittliste), Anzahl der Holmstege je Stegwerkstoff (Balsa, Herex/Rohacell beschichtet, Sperrholz), Torsionsschale nach Bredt mit Lagenzahl und Verdrehung bei V_NE, Durchbiegung und Strukturmasse; eigene Werkstoffliste mit Standardgeweben und -gelegen.",
+      "files": [
+        "holm.js"
+      ],
+      "tabs": [
+        "holm"
+      ],
+      "default": true,
+      "views": [
+        "holmView"
+      ]
     },
     {
       "id": "foildb",
