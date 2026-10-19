@@ -5,14 +5,6 @@ Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
 ## [1.93] — 2026-10-19
-### Neuer Reiter „Holmauslegung“ (Menü Tragflächen)
-- Vorbemessung des Holms der aktiven Tragfläche gegen Biegung und Torsion (Halbspannweite, an der Wurzel eingespannt), neues Modul `holm.js` (im Build-Tool als Funktion `holm` abwählbar).
-- **Berechnungsvorgabe** für alle Bauteile: **Auslegen** (Gurtlagen, Stege, Schalenlagen aus dem Lastfall), **Nachrechnen** (eigene Lagen-/Steglisten wie `2×1415, 900` gegen die Bruchlast) oder **gemischt**.
-- **Lastfall** aus Lastvielfachem n oder aus ca_max · V (nach Ch. Baron 2013), Sicherheitsfaktor j, Abminderung für die Laminatqualität, V_NE und c_m0. Lastverteilung nach Schrenk oder elliptisch; ca_max und c_m0 werden in der freien Fassung von Hand angegeben (die automatische Bestimmung braucht den Reiter „Aerodynamik“, der hier fehlt).
-- **Holmgurte** (UD-Gelege, Gewebe oder **Rovings** mit tex-Angabe), Ober-/Untergurt getrennt bemessen, Lagenplan mit Abstufung und Zuschnittliste; **Holmstege** abgestuft (Balsa, Herex, Rohacell, Sperrholz, optional ±45°-Beschichtung); **Torsionsschale** (ganzes Profil oder D-Box) nach Bredt.
-- **Durchbiegungsgrenze** an der Flächenspitze, **theoretische Bruchgrenze** und **Bruchgeschwindigkeit**, Abschnitt **Lastvielfaches beim Abfangen** (n über V für mehrere Bogendurchmesser, Rechner „hält/bricht“), Lastfall **Schnellflug** mit elastischer Biegung und Verdrehung inkl. Divergenzgeschwindigkeit.
-- **3D-Ansicht unter Last** (Überhöhung, Heatmap für Gurt, Steg, Schale, Moment, Querkraft, Verdrehwinkel), Diagramme, Stationstabelle und Strukturmasse; Ergebnis in einklappbaren Gruppen. Werkstoffliste mit Standardwerkstoffen, editierbar, gehört zum Projekt.
-
 ### 3D-Modell: Segmente zusammensetzen, STEP-Import
 - Neuer Block **Segmente zusammensetzen**: mehrere Teile (STL, OBJ, STEP; Mehrfachauswahl) zu einem Modell vereinen, automatisch entlang X/Y/Z aneinanderreihen (optional mit Fugenabstand), je Teil verschieben und drehen. **Stirnkappen an den Fugen entfernen**, **Schnittebenen an die Fugen setzen**, als STL exportieren, Baugruppe auflösen.
 - **Farben selbst wählen** je Teil und je zerlegtem Segment. Das Projekt speichert Teile, Lage und Farben.

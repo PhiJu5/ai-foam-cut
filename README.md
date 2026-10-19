@@ -20,7 +20,6 @@ schnell drehenden Werkzeugen. **Betrieb ausschließlich auf eigene Verantwortung
 
 - **Tragflächen**: Mehrsegmentflügel, Profil je Segment (NACA oder `.dat`), Pfeilung, Schränkung,
   Holm- und Spar-Schnitte, Beplankungsabzug, Abbrandkompensation je Designebene
-- **Holmauslegung**: Holmgurte, Stege und Torsionsschale bemessen, Bruchgrenze, 3D-Ansicht unter Last
 - **Kern- und Negativdesign**: Negativschalen, Kern-Stege, Kern zerteilen
 - **Formenbau**: Urmodell und Negativform als STL, B-Spline-Glättung, Trennfläche,
   Krümmungs- und Zebra-Analyse, STEP-Export
