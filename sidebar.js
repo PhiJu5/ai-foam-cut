@@ -2582,7 +2582,20 @@
     if (state.modelGcode.leadIn == null) state.modelGcode.leadIn = 0;
     if (!state.modelGcode.edits) state.modelGcode.edits = {};
     if (!state.modelGcode.kerfMode) state.modelGcode.kerfMode = 'ratio';   // eigene Abbrand-Berechnung (Altprojekte: loadProject)
+    if (!state.modelGcode.segStart) state.modelGcode.segStart = {};      // Anfahrpunkt/Richtung je Segmentpaar
     return state.modelGcode;
+  }
+  // Anfahrpunkt + Richtung je Segmentpaar: segStart[seg] = {start, startAng, startPt,
+  // reverse}. Segmente ohne Eintrag nutzen die gemeinsame Vorgabe (c.start …).
+  const START_KEYS = ['start', 'startAng', 'startPt', 'reverse'];
+  function segStartOwn(seg) { const ss = mgCfg().segStart; return ss[seg] || null; }
+  function segStartVal(seg, k) { const own = segStartOwn(seg); return own && own[k] !== undefined ? own[k] : mgCfg()[k]; }
+  // Wert für EIN Segment setzen; der Eintrag startet als Kopie der gemeinsamen Vorgabe.
+  function segStartSet(seg, k, v) {
+    const c = mgCfg();
+    if (!c.segStart[seg]) { const e = {}; START_KEYS.forEach(q => { e[q] = c[q]; }); c.segStart[seg] = e; }
+    c.segStart[seg][k] = v;
+    c.segStart = Object.assign({}, c.segStart);   // neue Referenz -> Memos der Ansichten erkennen die Änderung
   }
   function mgOpt() {
     const c = mgCfg();
@@ -2590,9 +2603,12 @@
     const mid = App.matIdFor('model');
     const kp = App.kerfPair(mid), fp = App.feedPair(mid);
     const cal = { kerfSlow: kp.slow, kerfFast: kp.fast, feedSlow: fp.slow, feedFast: fp.fast, feed: c.feed, heatVaries: App.heatPair(mid).varies };
+    // Drahtheizung wie in den anderen Quellen: Werkstoff-Heizstrom beim Vorschub,
+    // als S-Wert auf $30 skaliert (fehlte bisher -> kein M3 im 3D-Modell-G-Code).
+    const heat = App.heatForSpeed(mid, c.feed);
     return { axX: state.cfg.axX, axY: state.cfg.axY, axU: state.cfg.axU, axV: state.cfg.axV,
-      feed: c.feed, safe: c.safe, prec: state.cfg.precision || 3, maxFeed: state.cfg.maxFeed || 0,
-      N: c.N, swap: c.swap, flip: c.flip, start: c.start, startPt: c.startPt, startAng: c.startAng, reverse: c.reverse,
+      feed: c.feed, safe: c.safe, heat: heat != null ? heat : 0, heatS: App.wireSFor(heat), prec: state.cfg.precision || 3, maxFeed: state.cfg.maxFeed || 0,
+      N: c.N, swap: c.swap, flip: c.flip, start: c.start, startPt: c.startPt, startAng: c.startAng, reverse: c.reverse, startBySeg: c.segStart,
       edits: c.edits, leadIn: c.leadIn,
       kerfMode: c.kerfMode || 'ratio', kerf: App.kerfForSpeed(mid, c.feed), cal,   // eigene Abbrand-Berechnung des 3D-Modells
       machineWidth: state.cfg.machineWidth,
@@ -2697,21 +2713,31 @@
   // Anfahrpunkt-Auswahl (Segment- und Platten-Menü). „fester Winkel": Strahl vom
   // Profilschwerpunkt → bei jedem Segment dieselbe Stelle am Umfang, der
   // Eindringschlitz dient beim Zusammensetzen (z. B. Rumpf) als Ausrichtmarke.
-  function startRows(body, after) {
+  function startRows(body, after, seg) {
     const c = mgCfg();
+    // seg angegeben: Werte dieses Segmentpaars (eigene Einstellung), sonst gemeinsame Vorgabe.
+    const get = k => (seg == null ? c[k] : segStartVal(seg, k));
+    const set = (k, v) => { if (seg == null) c[k] = v; else segStartSet(seg, k, v); };
     selectRow(body, 'Anfahrpunkt',
-      [['angle', 'fester Winkel vom Schwerpunkt (bei allen Segmenten gleiche Stelle)'],
+      [['custom', 'per Klick am Querschnitt gewählt'],
+       ['angle', 'fester Winkel vom Schwerpunkt (bei allen Segmenten gleiche Stelle)'],
        ['auto', 'automatisch (Konturanfang)'], ['rear', 'hinten (max. waagerecht)'],
        ['front', 'vorne (min. waagerecht)'], ['top', 'oben (max. senkrecht)'], ['bottom', 'unten (min. senkrecht)']],
-      () => c.start, v => { c.start = v; buildSidebar(); after(); },
+      () => get('start'), v => { set('start', v); buildSidebar(); after(); },
       'Legt fest, an welchem Konturpunkt der Schnitt beginnt und endet (Ein-/Austrittsstelle '
       + 'des Drahts). „fester Winkel": Der Eindringpunkt liegt dort, wo ein Strahl vom '
       + 'Profilschwerpunkt unter dem Anfahrwinkel die Kontur trifft — bei jedem Segment an '
       + 'derselben Stelle, sodass der Eindringschlitz beim Zusammensetzen der Segmente als '
-      + 'Ausrichtmarke dient. In der Ansicht „◫ Segmentpaar" auch per Klick auf die Schnittspur '
-      + 'setzbar (übernimmt den Winkel). Für Tragflächenprofile ist „hinten" (Endleiste) üblich.');
-    if (c.start === 'angle')
-      numRow(body, 'Anfahrwinkel (°)', () => c.startAng, v => { c.startAng = ((v % 360) + 360) % 360; after(); },
+      + 'Ausrichtmarke dient. „per Klick am Querschnitt": In der Ansicht „◫ Segmentpaar" auf den '
+      + 'Querschnitt klicken — der Schnitt beginnt genau an diesem Konturpunkt (gilt nur für dieses '
+      + 'Segmentpaar). Für Tragflächenprofile ist „hinten" (Endleiste) üblich.');
+    if (get('start') === 'custom') {
+      const pt = get('startPt');
+      hint(body, pt ? T('Startpunkt per Klick: h ') + (+pt[0]).toFixed(1) + ' / v ' + (+pt[1]).toFixed(1) + ' mm'
+        : T('Noch kein Punkt gewählt — in der Ansicht „◫ Segmentpaar" auf den Querschnitt klicken.'));
+    }
+    if (get('start') === 'angle')
+      numRow(body, 'Anfahrwinkel (°)', () => get('startAng'), v => { set('startAng', ((v % 360) + 360) % 360); after(); },
         { step: 5, norender: true, hint: '0° = hinten (+waagerecht), 90° = oben, 180° = vorne, 270° = unten; gegen den Uhrzeigersinn.' });
   }
   // Menü ganz unten im Reiter „G-Code".
@@ -2733,10 +2759,9 @@
     // Interaktion aus der Segmentpaar-Ansicht (Startpunkt setzen / Punkte verschieben).
     window.__model3dPairApply = (patch) => {
       const cc = mgCfg();
-      if (patch.start !== undefined) cc.start = patch.start;
-      if (patch.startPt !== undefined) cc.startPt = patch.startPt;
-      if (patch.startAng !== undefined) cc.startAng = patch.startAng;
-      if (patch.reverse !== undefined) cc.reverse = patch.reverse;
+      // Klick in der Segmentpaar-Ansicht gilt nur für das angezeigte Segmentpaar.
+      START_KEYS.forEach(k => { if (patch[k] !== undefined) segStartSet(cc.seg, k, patch[k]); });
+      if (START_KEYS.some(k => patch[k] !== undefined)) buildSidebar();
       if (patch.edits !== undefined) cc.edits = patch.edits;
       if (state.cfg.gcodeSource === 'model') render();
       if (window.Model3D) Model3D.refresh();
@@ -2765,7 +2790,7 @@
     const segList = [];
     for (let i = 0; i < nseg; i++) segList.push([String(i), T('Segment ') + (i + 1) + ' / ' + nseg]);
     selectRow(g.body, 'Segment', segList,
-      () => String(c.seg), v => { c.seg = +v; live(); },
+      () => String(c.seg), v => { c.seg = +v; buildSidebar(); live(); },
       'Wähle das Segment. Sein Segmentpaar (zwei Stirnprofile) mit Schnittspur zeigt die Ansicht „◫ Segmentpaar".');
     // „Punkte je Profil" und „Querschnitt-Punktdichte" stehen im Reiter „3D-Modell"
     // unter „Segmentteilung" (Zerlegen), da sie die Auflösung der Querschnitte betreffen.
@@ -2780,9 +2805,23 @@
     boolRow(g.body, 'Achsen tauschen (h ↔ v)', () => c.swap, v => { c.swap = v; live(); },
       'Vertauscht die beiden Ebenenachsen (waagerecht/senkrecht), falls das Profil liegend statt stehend geschnitten werden soll.');
     boolRow(g.body, 'Horizontal spiegeln', () => c.flip, v => { c.flip = v; live(); });
-    startRows(g.body, live);
-    boolRow(g.body, 'Richtung umkehren', () => c.reverse, v => { c.reverse = v; live(); },
-      'Kehrt den Umlaufsinn der Schnittspur um (Pfeil in der Segmentpaar-Ansicht).');
+    // Anfahrpunkt + Richtung gelten je Segmentpaar (eigene Einstellung des gewählten Segments).
+    { const own = !!segStartOwn(c.seg);
+      hint(g.body, T('Anfahrpunkt und Richtung gelten nur für Segment ') + (c.seg + 1) + ' — '
+        + (own ? T('eigene Einstellung.') : T('noch gemeinsame Vorgabe (wird beim Ändern zur eigenen Einstellung).'))
+        + T(' Auch per Klick auf die Schnittspur in der Ansicht „◫ Segmentpaar" setzbar.')); }
+    startRows(g.body, live, c.seg);
+    boolRow(g.body, 'Richtung umkehren', () => segStartVal(c.seg, 'reverse'), v => { segStartSet(c.seg, 'reverse', v); buildSidebar(); live(); },
+      'Kehrt den Umlaufsinn der Schnittspur dieses Segmentpaars um (Pfeil in der Segmentpaar-Ansicht).');
+    { const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px';
+      const b1 = document.createElement('button'); b1.textContent = T('Für alle Segmente übernehmen'); b1.style.flex = '1';
+      b1.title = T('Übernimmt Anfahrpunkt und Richtung dieses Segmentpaars als gemeinsame Vorgabe und löscht die eigenen Einstellungen aller Segmente.');
+      b1.onclick = () => { START_KEYS.forEach(k => { c[k] = segStartVal(c.seg, k); }); c.segStart = {}; buildSidebar(); live(); };
+      const b2 = document.createElement('button'); b2.textContent = T('Gemeinsame Vorgabe'); b2.style.flex = '1';
+      b2.title = T('Verwirft die eigene Einstellung dieses Segmentpaars — es nutzt wieder die gemeinsame Vorgabe.');
+      b2.disabled = !segStartOwn(c.seg);
+      b2.onclick = () => { const ss = Object.assign({}, c.segStart); delete ss[c.seg]; c.segStart = ss; buildSidebar(); live(); };
+      row.appendChild(b1); row.appendChild(b2); g.body.appendChild(row); }
     boolRow(g.body, 'Turmwege anzeigen', () => (window.Model3D && Model3D.isPairTowers()),
       v => { if (window.Model3D) Model3D.setPairTowers(v); },
       'Standard aus: die Ansicht „◫ Segmentpaar" zeigt nur die Querschnitte (Sollkontur) und die '
@@ -2896,6 +2935,8 @@
     // Anfahrpunkt (gleiche Werte wie im Segment-G-Code) — für die Platte besonders
     // wichtig: „fester Winkel" setzt den Eindringschlitz bei allen Stücken gleich.
     startRows(g.body, () => { if (state.cfg.gcodeSource === 'plate') render(); if (window.Model3D) Model3D.refresh(); });
+    { const nOwn = Object.keys(c.segStart || {}).length;
+      if (nOwn) hint(g.body, T('Gemeinsame Vorgabe — ') + nOwn + T(' Segment(e) mit eigenem Anfahrpunkt/Richtung (Menü „Heißdraht-G-Code") behalten ihre Einstellung.')); }
     // Schnittparameter (wie im Segment-G-Code — dieselben Werte, hier direkt erreichbar).
     kerfModeRow(g.body, 'model');   // Abbrand-Berechnung: Verhältnis / lokal (Bahngeschwindigkeit)
     feedRow(g.body, 'Vorschub (mm/min)', () => c.feed, v => { c.feed = Math.max(1, v); if (state.cfg.gcodeSource === 'plate') render(); if (window.Model3D) Model3D.refresh(); },

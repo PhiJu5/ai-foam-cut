@@ -4,6 +4,15 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.94] — 2026-10-20
+### 3D-Modell: Anfahrpunkt und Richtung je Segment
+- Im Menü „Heißdraht-G-Code“ gelten **Anfahrpunkt, Anfahrwinkel und „Richtung umkehren“** jetzt nur für das gewählte Segment; der Klick auf die Schnittspur in der Ansicht „◫ Segmentpaar“ ebenfalls. Segmente ohne eigene Einstellung nutzen die gemeinsame Vorgabe aus „Platte / Stapeln“.
+- Knöpfe **„Für alle Segmente übernehmen“** und **„Gemeinsame Vorgabe“**. Die Platte verwendet pro Stück die Einstellung seines Segments; gespeichert im Projekt (`modelGcode.segStart`).
+- **Startpunkt per Klick am Querschnitt**: setzt den Startpunkt genau auf den angeklickten Konturpunkt (Fadenkreuz + Fangkreis, Fangweite 24 px), auch bei eingebuchteten oder hohlen Querschnitten. Leichtes Verwackeln (bis 4 px) zählt nicht mehr als Verschieben.
+
+### Fix: Drahtheizung bei 3D-Modell-Segmenten und Platte
+- Der G-Code der Quellen „3D-Modell“ (Segment) und „Platte“ enthielt kein `M3` – die Drahtheizung schaltete nicht ein. Jetzt wie bei den anderen Quellen: Heizstrom aus dem Werkstoff, als S-Wert auf `$30` skaliert. Segment: `M3` nach dem Kopf, `M5` vor der Rückfahrt; Platte: `M3` am Anfang, `M5` am Ende.
+
 ## [1.93] — 2026-10-19
 ### 3D-Modell: Segmente zusammensetzen, STEP-Import
 - Neuer Block **Segmente zusammensetzen**: mehrere Teile (STL, OBJ, STEP; Mehrfachauswahl) zu einem Modell vereinen, automatisch entlang X/Y/Z aneinanderreihen (optional mit Fugenabstand), je Teil verschieben und drehen. **Stirnkappen an den Fugen entfernen**, **Schnittebenen an die Fugen setzen**, als STL exportieren, Baugruppe auflösen.

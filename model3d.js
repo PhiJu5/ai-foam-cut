@@ -1526,6 +1526,10 @@
     if (!M.segs || !M.segs[segIndex]) return null;
     const o = Object.assign({ N: 160, kerf: 0, kerfMode: 'ratio', cal: null, feed: 220,
       swap: false, flip: false, start: 'auto', startPt: null, startAng: 90, reverse: false, edits: null }, opt || {});
+    // Anfahrpunkt + Richtung je Segmentpaar (startBySeg[seg]) übersteuern die
+    // gemeinsamen Vorgaben — nur für Segmente mit eigener Einstellung.
+    const ownStart = o.startBySeg && o.startBySeg[segIndex];
+    if (ownStart) ['start', 'startPt', 'startAng', 'reverse'].forEach(k => { if (ownStart[k] !== undefined) o[k] = ownStart[k]; });
     const ax = M.axis, s = M.segs[segIndex];
     const mA = sectionMulti(ax, s.lo), mB = sectionMulti(ax, s.hi);
     if (!mA || !mB) return null;
@@ -1730,7 +1734,7 @@
     // Signatur der geometrie-relevanten Optionen (inkl. Maschinenbreite/Blocklage,
     // da diese die Turm-Extrapolation bestimmen).
     const segSig = JSON.stringify([o.N, o.swap, o.flip, o.start, o.startPt, o.startAng, o.reverse,
-      o.kerfMode, o.kerf, o.cal, o.edits, o.machineWidth, o.blockZ]);
+      o.kerfMode, o.kerf, o.cal, o.edits, o.machineWidth, o.blockZ, o.startBySeg || null]);
     // pro Stück: Profile (Plattenfläche A/B) + extrapolierte Türme. Kontur am
     // Ursprung je Segment gecacht (teure Modell-Schnitte nur einmal).
     const pieces = [];
@@ -2468,15 +2472,20 @@
   }
   // Nächster Punkt auf Schnittspur A (ohne Schwelle) — für „Startpunkt setzen".
   // Nächster Punkt auf der Außenkontur (Eindring-/Startpunkt) → dessen Koordinate.
-  function nearestOuterPt(mx, my) {
+  // tol (px): nur Punkte in Fangweite, sonst null.
+  function nearestOuterPt(mx, my, tol) {
     if (!pairX || !pairX.outer) return null;
     let best = 0, bd = Infinity;
     for (let i = 0; i < pairX.outer.length; i++) {
       const s = pairScreen(pairX.outer[i]); const d = (s.x - mx) ** 2 + (s.y - my) ** 2;
       if (d < bd) { bd = d; best = i; }
     }
+    if (tol != null && bd > tol * tol) return null;
     return pairX.outer[best];
   }
+  const PAIR_PICK_TOL = 24;   // Fangweite (px) für „Startpunkt am Querschnitt setzen"
+  let pairHover = null;       // Vorschau des Startpunkts unter der Maus
+  let pairDown = null;        // Mausposition beim Drücken (Klick vs. Ziehen)
   function pairApply(patch) { if (typeof window !== 'undefined' && window.__model3dPairApply) window.__model3dPairApply(patch); }
   function pairProv() { return (typeof window !== 'undefined' && window.__model3dPairProvider) ? window.__model3dPairProvider() : { seg: 0, opt: {} }; }
   // Einen Schnittspur-Punkt verschieben (friert die Spur beim ersten Mal ein).
@@ -2616,6 +2625,12 @@
     ctx.lineTo(sx + 14 * Math.cos(ang - 0.4), sy + 14 * Math.sin(ang - 0.4));
     ctx.lineTo(sx + 14 * Math.cos(ang + 0.4), sy + 14 * Math.sin(ang + 0.4));
     ctx.closePath(); ctx.fillStyle = col('--good', '#57d38c'); ctx.fill();
+    // Vorschau: hier würde ein Klick den Startpunkt setzen.
+    if (pairHover && !pairEdit) {
+      const hx = tx(pairHover[0]), hy = ty(pairHover[1]);
+      ctx.strokeStyle = col('--good', '#57d38c'); ctx.lineWidth = 1.5; ctx.setLineDash([3, 2]);
+      ctx.beginPath(); ctx.arc(hx, hy, 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]);
+    }
     // Titel + Legende
     ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(T('Segmentpaar ') + (seg + 1) + '/' + nseg + ' — A = ' + sectionName(seg) + ', B = ' + sectionName(seg + 1)
@@ -2632,8 +2647,8 @@
     }
     ctx.fillStyle = col('--muted', '#8b98a8'); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.font = '11px Segoe UI';
     ctx.fillText(pairEdit ? T('Punkt ziehen = verschieben · Doppelklick = zurücksetzen')
-      : (d.hollow ? T('Klick = Eindringpunkt (außen) setzen · Rad = Zoom · Ziehen = Verschieben')
-        : T('Klick = Startpunkt setzen · Rad = Zoom · Ziehen = Verschieben')), W - 12, H - 10);
+      : (d.hollow ? T('Klick auf den Querschnitt = Eindringpunkt (außen) setzen · Rad = Zoom · Ziehen = Verschieben')
+        : T('Klick auf den Querschnitt = Startpunkt setzen · Rad = Zoom · Ziehen = Verschieben')), W - 12, H - 10);
     ctx.textAlign = 'left';
   }
 
@@ -2661,7 +2676,7 @@
     // Schwenken/Zoomen ändert nur die Ansichts-Transformation, nicht die Pfade.
     const memoKey = JSON.stringify(pls.map(p => [p.seg, p.dh, p.dv]))
       + '|' + JSON.stringify([(prov.opt || {}).N, (prov.opt || {}).kerfMode, (prov.opt || {}).kerf, (prov.opt || {}).plateGap, (prov.opt || {}).machineWidth, (prov.opt || {}).blockZ,
-        (prov.opt || {}).start, (prov.opt || {}).startPt, (prov.opt || {}).startAng, (prov.opt || {}).reverse, (prov.opt || {}).swap, (prov.opt || {}).flip, (prov.opt || {}).edits])
+        (prov.opt || {}).start, (prov.opt || {}).startPt, (prov.opt || {}).startAng, (prov.opt || {}).reverse, (prov.opt || {}).startBySeg, (prov.opt || {}).swap, (prov.opt || {}).flip, (prov.opt || {}).edits])
       + '|' + JSON.stringify((prov.opt || {}).plateConnEdits || {});
     let gc = null;
     if (plateGcMemo && plateGcMemo.key === memoKey) gc = plateGcMemo.gc;
@@ -2893,7 +2908,7 @@
       if (M.view === 'pairs') {
         const r = canvas.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
         if (pairEdit) { const hit = pairNearest(mx, my); if (hit) { pairDrag = hit; return; } }
-        pairMoved = false;
+        pairMoved = false; pairDown = [e.clientX, e.clientY];
       }
       // Platten-Ansicht: Stück verschieben oder Verbindungs-Stützpunkt bearbeiten.
       if (M.view === 'plate') {
@@ -2934,10 +2949,23 @@
         }
         return;
       }
-      if (!dragging) return;
+      if (!dragging) {
+        // Segmentpaar: Fangpunkt unter der Maus anzeigen (nur über der Zeichenfläche).
+        if (M.view === 'pairs' && !pairEdit && pairX && e.target === canvas) {
+          const r = canvas.getBoundingClientRect();
+          const h = nearestOuterPt(e.clientX - r.left, e.clientY - r.top, PAIR_PICK_TOL);
+          canvas.style.cursor = h ? 'crosshair' : '';
+          if (h !== pairHover) { pairHover = h; draw(); }
+        } else if (pairHover) { pairHover = null; canvas.style.cursor = ''; if (M.view === 'pairs') draw(); }
+        return;
+      }
       const dx = e.clientX - lastX, dy = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
-      if (M.view === 'profiles' || M.view === 'pairs' || M.view === 'plate') { if (dx || dy) pairMoved = true; p2.px += dx; p2.py += dy; draw(); return; }
+      if (M.view === 'profiles' || M.view === 'pairs' || M.view === 'plate') {
+        // Kleines Zittern beim Klicken zählt nicht als Verschieben.
+        if (pairDown && Math.hypot(e.clientX - pairDown[0], e.clientY - pairDown[1]) > 4) pairMoved = true;
+        else if (!pairDown && (dx || dy)) pairMoved = true;
+        if (pairMoved) { p2.px += dx; p2.py += dy; draw(); } return; }
       if (dragMode === 'pan') { cam.px += dx; cam.py += dy; }
       else {
         cam.yaw -= dx * 0.01 * (Math.cos(cam.pitch) < 0 ? -1 : 1);   // invertiert (wie Simulator-Bedienung)
@@ -2963,11 +2991,14 @@
         dragging = false;
         // Segmentpaar, kein Bearbeiten, echter Klick (kein Ziehen) →
         // Eindring-/Startpunkt auf der Außenkontur setzen.
+        // Genau der angeklickte Konturpunkt (nicht über den Winkel, der bei
+        // eingebuchteten/hohlen Querschnitten woanders landen kann).
         if (M.view === 'pairs' && !pairEdit && !pairMoved && pairX) {
           const r = canvas.getBoundingClientRect();
-          const pt = nearestOuterPt(e.clientX - r.left, e.clientY - r.top);
-          if (pt) pairApply({ start: 'angle', startAng: Math.round(angleOfPoint(pairX.outer, pt) * 10) / 10, startPt: pt.slice() });
+          const pt = nearestOuterPt(e.clientX - r.left, e.clientY - r.top, PAIR_PICK_TOL);
+          if (pt) { pairHover = null; pairApply({ start: 'custom', startPt: pt.slice(), startAng: Math.round(angleOfPoint(pairX.outer, pt) * 10) / 10 }); }
         }
+        pairDown = null;
         draw();
       }
     });

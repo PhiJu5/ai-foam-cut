@@ -38,6 +38,11 @@
     const c = note(o, m);
     return 'G1 ' + parts.join(' ') + ' F' + m.F + (c ? ' ; ' + c : '');
   }
+  // Drahtheizung EIN: S-Wert (auf $30 skaliert) aus mgOpt, sonst roher Prozentwert.
+  function wireOn(o, heat) {
+    const s = o.heatS != null ? o.heatS : Math.round(heat);
+    return 'M3 S' + s + ' ; ' + T('Draht ein') + ' (' + (+heat).toFixed(0) + ' %)';
+  }
   function segmentText(r) {
     const o = r.opt, mt = r.meta, ki = mt.kerfInfo, out = [];
     // Hinweis: NICHT das Muster „Segment <Zahl>" verwenden — die 3D-Simulation
@@ -56,7 +61,7 @@
     out.push('G21 ; mm');
     out.push('G90 ; ' + T('absolut'));
     out.push('; ' + T('Nullpunkt: linke untere Ecke (per Set Home der Maschine setzen)'));
-    if (mt.heat > 0) out.push('M3 S' + mt.heat + ' ; ' + T('Draht ein'));
+    if (mt.heat > 0) out.push(wireOn(o, mt.heat));
     r.moves.forEach(m => {
       if (m.k === 'backX' && mt.heat > 0) out.push('M5 ; ' + T('Draht aus'));
       out.push(line(o, m));
@@ -70,7 +75,11 @@
       + bb[0].toFixed(1) + '…' + bb[2].toFixed(1) + ' / v ' + bb[1].toFixed(1) + '…' + bb[3].toFixed(1));
     out.push('; ' + T('Verbindungswege kollisionsfrei (nur durch Freiraum zwischen den Teilen)'));
     out.push('G21 ; mm'); out.push('G90 ; ' + T('absolut'));
+    // Verbindungen laufen durch den Schaum der Platte -> Draht bleibt bis zum Ende heiß.
+    const heat = o.heat > 0;
+    if (heat) out.push(wireOn(o, o.heat));
     r.moves.forEach(m => out.push(line(o, m)));
+    if (heat) out.push('M5 ; ' + T('Draht aus'));
     return out.join('\n') + '\n';
   }
   Model3D.buildSegmentGcode = function (seg, opt) {
