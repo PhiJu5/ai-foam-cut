@@ -4,6 +4,27 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.95] — 2026-10-21
+### 3D-Modell: Synchronpunkte von Hand, Punktnummern, Menüs wie DXF-Formen
+- Neuer Abschnitt **Synchronpunkte** im 3D-Modell: in der Ansicht „◫ Segmentpaar“ erst einen Punkt auf Sollkontur A, dann den zugehörigen auf B anklicken (Fang an Stützpunkten, sonst an der Kante; Esc verwirft). Zwischen den Paaren laufen A und B gleichmäßig nach Bogenlänge — so liegen Ecken, Kanten und Nasen aufeinander und der Draht verdrillt nicht. Paare gelten je Segmentpaar, auch auf Löchern, und werden im Projekt gespeichert (`modelGcode.segSync`). Überkreuzte Paare werden rot markiert und ignoriert.
+- **⟳ Synchronpunkte automatisch** (bzw. für alle Segmente) mit derselben Automatik wie bei den DXF-Formen, Paarliste mit **◎ als Startpaar**, **Pkt je Intervall** und ✕; **Punktverteilung**: Punkte gesamt oder Punktdichte (Pkt/mm).
+- **Punktnummern alle n Punkte**: jeder n-te Punkt der Schnittbahn auf A und B mit Nummer und Drahtlinie.
+- Geprüft: Quader → um 45° gedrehte Raute: automatische Zuordnung verfehlt die Ecken um 26–39 mm, mit 4 Paaren unter 1 mm.
+- Menüs wie bei den DXF-Formen gegliedert: „Heißdraht-G-Code“ → „Synchronpunkte“ → „Schnitt“ (Umlaufrichtung, **Abbrand kompensieren** an/aus, Schnittspur, Anfahrpunkt) → „Punkte bearbeiten“.
+- **Anfahrt von** hinten/oben/vorne/unten mit Abstand zur Blockfläche, **Anfahrt/Ausfahrt sicher**, **Blockzuschnitt** vor/nach dem Formschnitt oder nur Blockschnitt (gleiche Einstellung wie DXF-Formen) und neue **Blockzugabe rundum**. Der G-Code ist kommentiert.
+- **Ansichtsmenü** (verschiebbar, wie im Kerndesign) in „◫ Segmentpaar“, in den DXF-Formen und in „▤ Platte“: Konturen, Schnittspur, wahre Dicke, Block, Startpunkt, Synchronpaare, Punktnummern, Fahrwege, Legende.
+- Anfahrpunkt per Klick nur noch nach **„▶ Anfahrpunkt wählen“** (Esc bricht ab).
+
+### DXF-Formen: Einstich wieder auf Synchronpunkt 1
+- Der Schnitt begann sporadisch nicht am Startpaar, sondern an einer anderen Stelle der Kontur (bei senkrechter Hinterkante entschied Rundungsrauschen). Mit Synchronpunkten legt jetzt immer das Startpaar den Einstich fest; „Anfahrt/Ausfahrt sicher“ wählt den Start nur noch ohne Synchronpunkte.
+- Synchronpaar-Liste: die Beschriftung „Paar k: innen … ↔ außen …“ ist wieder sichtbar.
+
+### G-Code: Knopf zurück zur Quelle
+- Unter der Simulation springt **„↩ <Reiter>“** direkt in den Reiter der gewählten G-Code-Quelle.
+
+### Seitenleiste springt nicht mehr beim Eingeben
+- Beim Neuaufbau der Seitenleiste bleiben Scrolllage und Eingabefokus samt Cursor erhalten — in allen Reitern.
+
 ## [1.94] — 2026-10-20
 ### 3D-Modell: Anfahrpunkt und Richtung je Segment
 - Im Menü „Heißdraht-G-Code“ gelten **Anfahrpunkt, Anfahrwinkel und „Richtung umkehren“** jetzt nur für das gewählte Segment; der Klick auf die Schnittspur in der Ansicht „◫ Segmentpaar“ ebenfalls. Segmente ohne eigene Einstellung nutzen die gemeinsame Vorgabe aus „Platte / Stapeln“.

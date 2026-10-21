@@ -1422,7 +1422,41 @@
     }
   }
 
+  // Neuaufbau der Seitenleiste ohne Sprung: Scrolllage und Eingabefokus (samt Cursor) bleiben erhalten. Der Fokus wird über
+  // die Gruppe (data-grpkey bzw. Überschrift) und die Nummer des Bedienelements darin wiedergefunden. Ohne das verankert der
+  // Browser die Scrolllage an einem Element, das es nach dem Neuaufbau nicht mehr gibt, und die Leiste springt.
+  function sidebarFocusKey(el, side) {
+    if (!el || !side.contains(el) || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return null;
+    const g = el.closest('.grp'); if (!g) return null;
+    const h = g.querySelector('h3'), key = g.dataset.grpkey || (h ? h.textContent : '');
+    const all = [...g.querySelectorAll('input,select,textarea')];
+    let s0 = null, s1 = null; try { s0 = el.selectionStart; s1 = el.selectionEnd; } catch (e) { /* select/checkbox */ }
+    return { key, idx: all.indexOf(el), tag: el.tagName, type: el.type, s0, s1 };
+  }
+  function sidebarFocusRestore(fk, side) {
+    if (!fk) return;
+    const g = [...side.querySelectorAll('.grp')].find(q => { const h = q.querySelector('h3'); return (q.dataset.grpkey || (h ? h.textContent : '')) === fk.key; });
+    const el = g && [...g.querySelectorAll('input,select,textarea')][fk.idx];
+    if (!el || el.tagName !== fk.tag || el.type !== fk.type || el.offsetParent === null) return;
+    try { el.focus({ preventScroll: true }); if (fk.s0 != null) el.setSelectionRange(Math.min(fk.s0, el.value.length), Math.min(fk.s1, el.value.length)); } catch (e) { /* nicht fokussierbar */ }
+  }
   function buildSidebar() {
+    const side = document.getElementById('side');
+    if (!side) return buildSidebarInner();
+    const top = side.scrollTop, tab = state.activeTab, fk = sidebarFocusKey(document.activeElement, side);
+    try { return buildSidebarInner(); }
+    finally {
+      side.scrollTop = top; sidebarFocusRestore(fk, side); side.scrollTop = top;
+      requestAnimationFrame(() => { if (state.activeTab === tab && Math.abs(side.scrollTop - top) > 1 && side.scrollHeight - side.clientHeight >= top) side.scrollTop = top; });
+    }
+  }
+  // Zahlenfeld, das erst mit Enter, beim Verlassen oder per Pfeil übernimmt (für Setter, die die Seitenleiste neu aufbauen):
+  // Tippen wird nicht unterbrochen, Zwischenwerte („1“ auf dem Weg zu „150“) werden nicht begrenzt. Beim Verlassen läuft der
+  // Setter erst nach dem Fokuswechsel — sonst baut er die Leiste neu, bevor das angeklickte Feld den Fokus bekommt.
+  function numRowEnter(body, label, get, set, opt) {
+    return numRow(body, label, get, (v, src) => { if (src === 'blur') setTimeout(() => set(v, src), 0); else set(v, src); }, Object.assign({}, opt || {}, { enter: true }));
+  }
+  function buildSidebarInner() {
     App.inheritRootExtensions();   // Wurzelwerte ab Segment 2 vom Vorsegment übernehmen
     // Berechnete Scharnier-Pfeilung aktuell halten, damit die (schreibgeschützten)
     // Sweep-Anzeigen mit dem gezeichneten Grundriss übereinstimmen.
@@ -1868,6 +1902,18 @@
           + 'oder aus einem Segment des 3D-Modells.'
         : 'Diese Ausgabe erzeugt keinen G-Code. Die Quelle legt nur fest, welcher Block (Tragfläche, '
           + 'Negativschale, DXF-Form, 3D-Modell) in der Simulation zu einer geladenen G-Code-Datei gezeigt wird.');
+    // Knopf „↩ <Reiter>" unter der Simulation: direkt in den Reiter der gewählten Quelle.
+    { const b = document.getElementById('simToSrc');
+      const tab = { core: 'core', neg: 'neg', dxf: 'dxf', model: 'model', plate: 'model', schrift: 'schrift', ausschnitt: 'ausschnitt' }[state.cfg.gcodeSource];
+      const tb = tab && document.querySelector('.tabs button[data-view="' + tab + '"]');
+      if (b) {
+        b.style.display = tb ? '' : 'none';
+        if (tb) {
+          b.textContent = '↩ ' + tb.textContent.trim();
+          b.title = T('Zum Reiter der gewählten G-Code-Quelle wechseln') + ': ' + tb.textContent.trim();
+          b.onclick = () => { App.switchView(tab); buildSidebar(); render(); };
+        }
+      } }
     if (!App.autoGen)
       hint(pv.body, 'G-Code-Datei laden: Knopf „G-Code laden…" unter der Simulation. Sie wird abgespielt und auf Maschinengrenzen geprüft.');
     // Tragflächenwahl direkt unter der Quelle (statt eigenem Block): nur für die
@@ -2583,6 +2629,22 @@
     if (!state.modelGcode.edits) state.modelGcode.edits = {};
     if (!state.modelGcode.kerfMode) state.modelGcode.kerfMode = 'ratio';   // eigene Abbrand-Berechnung (Altprojekte: loadProject)
     if (!state.modelGcode.segStart) state.modelGcode.segStart = {};      // Anfahrpunkt/Richtung je Segmentpaar
+    if (!state.modelGcode.segSync) state.modelGcode.segSync = {};        // manuelle Synchronpaare je Segmentpaar [{a:[u,w], b:[u,w]}]
+    // Ansichtsmenü „◫ Segmentpaar" (was gezeigt wird). Punktnummern: Schalter pv.nums + Abstand pairNums.
+    if (!state.modelGcode.pv) {
+      const n0 = +state.modelGcode.pairNums || 0;   // Altstand: pairNums 0 = aus
+      state.modelGcode.pv = { sol: true, cut: true, block: true, start: true, sync: true, nums: n0 > 0, legend: true };
+    }
+    if (!(state.modelGcode.pairNums >= 1)) state.modelGcode.pairNums = 10;
+    // Punktverteilung + Abbrand-Schalter wie DXF-Formen (Gruppen „Synchronpunkte"/„Schnitt").
+    if (state.modelGcode.densMode !== 'permm') state.modelGcode.densMode = 'total';
+    if (!(state.modelGcode.perMM > 0)) state.modelGcode.perMM = 1;
+    if (state.modelGcode.kerfOn == null) state.modelGcode.kerfOn = true;
+    // Anfahrt + Block wie DXF-Formen (Blockzuschnitt selbst = gemeinsame cfg.cutOrder).
+    if (['rear', 'top', 'front', 'bottom'].indexOf(state.modelGcode.approach) < 0) state.modelGcode.approach = 'rear';
+    if (state.modelGcode.approachDist == null) state.modelGcode.approachDist = 10;
+    if (state.modelGcode.blockMargin == null) state.modelGcode.blockMargin = 0;
+    if (state.modelGcode.safeLead == null) state.modelGcode.safeLead = true;
     return state.modelGcode;
   }
   // Anfahrpunkt + Richtung je Segmentpaar: segStart[seg] = {start, startAng, startPt,
@@ -2609,8 +2671,13 @@
     return { axX: state.cfg.axX, axY: state.cfg.axY, axU: state.cfg.axU, axV: state.cfg.axV,
       feed: c.feed, safe: c.safe, heat: heat != null ? heat : 0, heatS: App.wireSFor(heat), prec: state.cfg.precision || 3, maxFeed: state.cfg.maxFeed || 0,
       N: c.N, swap: c.swap, flip: c.flip, start: c.start, startPt: c.startPt, startAng: c.startAng, reverse: c.reverse, startBySeg: c.segStart,
-      edits: c.edits, leadIn: c.leadIn,
-      kerfMode: c.kerfMode || 'ratio', kerf: App.kerfForSpeed(mid, c.feed), cal,   // eigene Abbrand-Berechnung des 3D-Modells
+      syncBySeg: c.segSync, edits: c.edits, leadIn: c.leadIn,
+      // eigene Abbrand-Berechnung des 3D-Modells; „Abbrand kompensieren" aus = Sollkontur
+      kerfMode: c.kerfOn === false ? 'none' : (c.kerfMode || 'ratio'), kerf: c.kerfOn === false ? 0 : App.kerfForSpeed(mid, c.feed), cal,
+      perMM: c.densMode === 'permm' ? c.perMM : 0,
+      approach: c.approach, approachDist: c.approachDist, blockMargin: c.blockMargin, safeLead: c.safeLead,
+      cutOrder: state.cfg.cutOrder || 'none', blockCutY: App.blockCutY ? App.blockCutY() : 0,
+      airFeed: App.outsideFeed ? App.outsideFeed() : null,
       machineWidth: state.cfg.machineWidth,
       sectionDensity: (window.Model3D ? Model3D.getSectionDensity() : 1),
       blockX: state.cfg.blockX || 0, blockY: state.cfg.blockY || 0,
@@ -2625,7 +2692,10 @@
     const bb = P => { let a = [Infinity, Infinity, -Infinity, -Infinity];
       for (const p of P) { a[0] = Math.min(a[0], p[0]); a[1] = Math.min(a[1], p[1]); a[2] = Math.max(a[2], p[0]); a[3] = Math.max(a[3], p[1]); } return a; };
     const blocks = [];
-    if (r && r.profA && r.profB) {
+    if (r && r.block) {   // Block wie im G-Code (Prisma inkl. Blockzugabe)
+      const k = r.block, zA = r.zA != null ? r.zA : 0, zB = r.zB != null ? r.zB : mw;
+      blocks.push({ seg: 0, x0: k[0], x1: k[2], y0: k[1], y1: k[3], x0t: k[0], x1t: k[2], y0t: k[1], y1t: k[3], z0: zA, z1: zB, cutZ0: zA, cutZ1: zB });
+    } else if (r && r.profA && r.profB) {
       const A = bb(r.profA), B = bb(r.profB);
       const zA = r.zA != null ? r.zA : 0, zB = r.zB != null ? r.zB : mw;
       blocks.push({ seg: 0, x0: A[0], x1: A[2], y0: A[1], y1: A[3],
@@ -2721,20 +2791,30 @@
     selectRow(body, 'Anfahrpunkt',
       [['custom', 'per Klick am Querschnitt gewählt'],
        ['angle', 'fester Winkel vom Schwerpunkt (bei allen Segmenten gleiche Stelle)'],
-       ['auto', 'automatisch (Konturanfang)'], ['rear', 'hinten (max. waagerecht)'],
-       ['front', 'vorne (min. waagerecht)'], ['top', 'oben (max. senkrecht)'], ['bottom', 'unten (min. senkrecht)']],
+       ['auto', 'automatisch (Konturanfang)'], ['rear', 'max. waagerecht (vom Nullpunkt weg)'],
+       ['front', 'min. waagerecht (zum Nullpunkt)'], ['top', 'oben (max. senkrecht)'], ['bottom', 'unten (min. senkrecht)']],
       () => get('start'), v => { set('start', v); buildSidebar(); after(); },
       'Legt fest, an welchem Konturpunkt der Schnitt beginnt und endet (Ein-/Austrittsstelle '
       + 'des Drahts). „fester Winkel": Der Eindringpunkt liegt dort, wo ein Strahl vom '
       + 'Profilschwerpunkt unter dem Anfahrwinkel die Kontur trifft — bei jedem Segment an '
       + 'derselben Stelle, sodass der Eindringschlitz beim Zusammensetzen der Segmente als '
-      + 'Ausrichtmarke dient. „per Klick am Querschnitt": In der Ansicht „◫ Segmentpaar" auf den '
-      + 'Querschnitt klicken — der Schnitt beginnt genau an diesem Konturpunkt (gilt nur für dieses '
-      + 'Segmentpaar). Für Tragflächenprofile ist „hinten" (Endleiste) üblich.');
+      + 'Ausrichtmarke dient. „per Klick am Querschnitt": „▶ Anfahrpunkt wählen" starten, dann in der '
+      + 'Ansicht „◫ Segmentpaar" auf den Querschnitt klicken — der Schnitt beginnt genau an diesem '
+      + 'Konturpunkt (gilt nur für dieses Segmentpaar). Der Wahlmodus endet nach dem Klick (Esc bricht ab). Für Tragflächenprofile ist die Endleiste üblich.');
     if (get('start') === 'custom') {
       const pt = get('startPt');
+      // Wahlmodus wie bei den Synchronpunkten: erst starten, dann klicken (endet nach dem Setzen).
+      if (seg != null && window.Model3D && Model3D.setPairStart) {
+        const on = Model3D.isPairStart();
+        const bs = document.createElement('button');
+        bs.textContent = on ? T('■ Anfahrpunkt wählen: AN') : T('▶ Anfahrpunkt wählen');
+        bs.className = on ? '' : 'primary';
+        if (on) { bs.style.background = 'var(--accent)'; bs.style.color = '#04121f'; bs.style.borderColor = 'var(--accent)'; }
+        bs.onclick = () => { Model3D.setPairStart(!on); if (!on) Model3D.setView('pairs'); buildSidebar(); };
+        body.appendChild(bs);
+      }
       hint(body, pt ? T('Startpunkt per Klick: h ') + (+pt[0]).toFixed(1) + ' / v ' + (+pt[1]).toFixed(1) + ' mm'
-        : T('Noch kein Punkt gewählt — in der Ansicht „◫ Segmentpaar" auf den Querschnitt klicken.'));
+        : T('Noch kein Punkt gewählt — „▶ Anfahrpunkt wählen" starten und in der Ansicht „◫ Segmentpaar" auf den Querschnitt klicken.'));
     }
     if (get('start') === 'angle')
       numRow(body, 'Anfahrwinkel (°)', () => get('startAng'), v => { set('startAng', ((v % 360) + 360) % 360); after(); },
@@ -2744,7 +2824,7 @@
   function buildModelGcodeSidebar(side) {
     if (!window.Model3D) return;
     // Pair-Ansicht (3. Fenster) holt Segment + Parameter hierüber.
-    window.__model3dPairProvider = () => ({ seg: mgCfg().seg, opt: mgOpt() });
+    window.__model3dPairProvider = () => ({ seg: mgCfg().seg, opt: mgOpt(), nums: mgCfg().pv.nums ? mgCfg().pairNums : 0 });
     // Platten-Ansicht: Stücke + Parameter, und Bearbeitung (Verschieben/Kanal).
     window.__model3dPlateProvider = () => ({ placements: platePlacements(),
       opt: Object.assign({}, mgOpt(), { plateConnEdits: plateCfg().connEdits, plateGap: Math.min(plateCfg().gapH, plateCfg().gapV) }) });
@@ -2763,6 +2843,11 @@
       START_KEYS.forEach(k => { if (patch[k] !== undefined) segStartSet(cc.seg, k, patch[k]); });
       if (START_KEYS.some(k => patch[k] !== undefined)) buildSidebar();
       if (patch.edits !== undefined) cc.edits = patch.edits;
+      if (patch.syncAdd) {
+        const list = (cc.segSync[cc.seg] || []).concat([{ a: patch.syncAdd.a.map(v => +(+v).toFixed(4)), b: patch.syncAdd.b.map(v => +(+v).toFixed(4)) }]);
+        cc.segSync = Object.assign({}, cc.segSync, { [cc.seg]: list });   // neue Referenz -> Memos erkennen die Änderung
+        buildSidebar();
+      }
       if (state.cfg.gcodeSource === 'model') render();
       if (window.Model3D) Model3D.refresh();
     };
@@ -2781,38 +2866,227 @@
       + 'gewählten Segments. Das gewählte Segmentpaar mit Schnittspur zeigt die Ansicht '
       + '„◫ Segmentpaar" (unten). „Als G-Code-Quelle übernehmen" schaltet die Quelle auf '
       + '„3D-Modell" — der G-Code samt 3D-Simulation erscheint im Reiter „G-Code" (dort auch '
-      + 'die Blocklage am Nullpunkt). Im Reiter „Schneiden" ist „3D-Modell" als Quelle wählbar.');
+      + 'die Blocklage am Nullpunkt). Im Reiter „Schneiden" ist „3D-Modell" als Quelle wählbar. '
+      + 'Synchronpunkte, Schnitt (Richtung, Abbrand, Anfahrt) und Punkte bearbeiten stehen in eigenen Gruppen darunter — gegliedert wie bei den DXF-Formen.');
     // Übernehmen: Quelle auf 'model' schalten + Sidebar neu (Dropdown „Quelle
     // Gcode" mitziehen). Parameteränderungen aktualisieren die G-Code-Ansicht (falls
     // Modellquelle aktiv) und die Segmentpaar-Ansicht live.
     const useThis = () => { state.cfg.gcodeSource = 'model'; buildSidebar(); render(); if (window.Model3D) Model3D.refresh(); };
     const live = () => { if (state.cfg.gcodeSource === 'model') render(); if (window.Model3D) Model3D.refresh(); };
-    const segList = [];
-    for (let i = 0; i < nseg; i++) segList.push([String(i), T('Segment ') + (i + 1) + ' / ' + nseg]);
-    selectRow(g.body, 'Segment', segList,
-      () => String(c.seg), v => { c.seg = +v; buildSidebar(); live(); },
-      'Wähle das Segment. Sein Segmentpaar (zwei Stirnprofile) mit Schnittspur zeigt die Ansicht „◫ Segmentpaar".');
-    // „Punkte je Profil" und „Querschnitt-Punktdichte" stehen im Reiter „3D-Modell"
-    // unter „Segmentteilung" (Zerlegen), da sie die Auflösung der Querschnitte betreffen.
-    kerfModeRow(g.body, 'model');   // Abbrand: „aus Profillängen-Verhältnis" oder „lokal (Bahngeschwindigkeit)"
-    hint(g.body, 'Abbrand-Kompensation wie in den anderen Reitern — der Draht schneidet um den '
-      + 'halben Abbrand nach außen versetzt. Werte aus der Werkstoff-Kalibrierung (Reiter „Projektübersicht"). '
-      + 'Bei „lokal" variiert der Abbrand entlang der Kontur mit der Draht-Geschwindigkeit.');
+    modelSegRow(g.body, live);
     feedRow(g.body, 'Vorschub (mm/min)', () => c.feed, v => { c.feed = Math.max(1, v); live(); },
       { step: 10, min: 1, norender: true });
     numRow(g.body, 'Sicherheitshöhe (mm)', () => c.safe, v => { c.safe = Math.max(0, v); live(); },
-      { step: 1, min: 0, norender: true });
+      { step: 1, min: 0, norender: true,
+        hint: 'Abstand über der Blockoberkante für Luftwege (Anfahrt von oben/vorne, Blockzuschnitt).' });
     boolRow(g.body, 'Achsen tauschen (h ↔ v)', () => c.swap, v => { c.swap = v; live(); },
       'Vertauscht die beiden Ebenenachsen (waagerecht/senkrecht), falls das Profil liegend statt stehend geschnitten werden soll.');
     boolRow(g.body, 'Horizontal spiegeln', () => c.flip, v => { c.flip = v; live(); });
-    // Anfahrpunkt + Richtung gelten je Segmentpaar (eigene Einstellung des gewählten Segments).
+    boolRow(g.body, 'Turmwege anzeigen', () => (window.Model3D && Model3D.isPairTowers()),
+      v => { if (window.Model3D) Model3D.setPairTowers(v); },
+      'Standard aus: die Ansicht „◫ Segmentpaar" zeigt nur die Querschnitte (Sollkontur) und die '
+      + 'Schnittspur (rot, abbrandkompensiert — wo der Draht wirklich fährt). Einschalten blendet '
+      + 'zusätzlich die extrapolierten Turmbahnen (blau/orange) und den Maschinen-Nullpunkt ein '
+      + '(die Turmwege spannen die volle Maschinenbreite auf).');
+    const gen = document.createElement('button'); gen.textContent = T('Als G-Code-Quelle übernehmen'); gen.className = 'primary';
+    gen.onclick = useThis;
+    g.body.appendChild(gen);
+    side.appendChild(g.g);
+
+    buildModelSyncSidebar(side);   // „Synchronpunkte"  — Aufbau wie DXF-Formen
+    buildModelCutSidebar(side);    // „Schnitt"
+    buildModelEditSidebar(side);   // „Punkte bearbeiten"
+    buildPlateSidebar(side);
+  }
+  // Segment-Auswahl (gleiche Einstellung in allen 3D-Modell-Gruppen).
+  function modelSegRow(body, live) {
+    const c = mgCfg(), nseg = Model3D.segCount(), segList = [];
+    for (let i = 0; i < nseg; i++) segList.push([String(i), T('Segment ') + (i + 1) + ' / ' + nseg]);
+    selectRow(body, 'Segment', segList, () => String(c.seg), v => { c.seg = +v; buildSidebar(); live(); },
+      'Wähle das Segment. Sein Segmentpaar (zwei Stirnprofile) mit Schnittspur zeigt die Ansicht „◫ Segmentpaar". '
+      + 'Dieselbe Auswahl gilt in allen Gruppen des 3D-Modells.');
+  }
+  function modelLive() { if (state.cfg.gcodeSource === 'model') render(); if (window.Model3D) Model3D.refresh(); }
+  // Querschnittskoordinaten (u,w) → Ansichtsrahmen (h,v) wie Model3D (Tauschen, dann Spiegeln).
+  function modelMapPt(p) { const c = mgCfg(); let h = p[0], v = p[1]; if (c.swap) { const t = h; h = v; v = t; } if (c.flip) h = -h; return [h, v]; }
+  // Paar k ist Startpaar, wenn der Anfahrpunkt „per Klick" genau auf seinem A-Punkt liegt.
+  function modelStartPairIdx(seg) {
+    const list = mgCfg().segSync[seg] || [];
+    if (segStartVal(seg, 'start') !== 'custom') return -1;
+    const sp = segStartVal(seg, 'startPt'); if (!sp) return -1;
+    return list.findIndex(p => { const q = modelMapPt(p.a); return Math.hypot(q[0] - sp[0], q[1] - sp[1]) < 0.05; });
+  }
+
+  // „Synchronpunkte" (wie DXF-Formen): Setzmodus, Automatik, Paarliste (Startpaar ◎,
+  // Punkte je Intervall, löschen) und Punktverteilung der Bahn. Je Segmentpaar.
+  function buildModelSyncSidebar(side) {
+    if (!window.Model3D || !Model3D.hasModel()) return;
+    const nseg = Model3D.segCount(); if (nseg < 1) return;
+    const c = mgCfg(); if (c.seg >= nseg) c.seg = 0;
+    const sy = grp('Synchronpunkte', true, 'model');
+    const live = modelLive;
+    modelSegRow(sy.body, live);
+    const setSync = (list) => { const ss = Object.assign({}, c.segSync); if (list && list.length) ss[c.seg] = list; else delete ss[c.seg]; c.segSync = ss; };
+    // Setzmodus starten/stoppen — im aktiven Modus setzt der Klick Synchronpunkte.
+    const syncOn = !!(Model3D.isPairSync && Model3D.isPairSync());
+    const bsm = document.createElement('button');
+    bsm.textContent = syncOn ? T('■ Synchronpunkte setzen: AN') : T('▶ Synchronpunkte setzen starten');
+    bsm.className = syncOn ? '' : 'primary';
+    if (syncOn) { bsm.style.background = 'var(--accent)'; bsm.style.color = '#04121f'; bsm.style.borderColor = 'var(--accent)'; }
+    bsm.onclick = () => { Model3D.setPairSync(!syncOn); if (!syncOn) Model3D.setView('pairs'); buildSidebar(); };
+    sy.body.appendChild(bsm);
+    hint(sy.body, syncOn
+      ? 'Setzmodus AKTIV (Ansicht „◫ Segmentpaar"): erst einen Punkt auf Sollkontur A (blau) anklicken, dann den zugehörigen auf B (orange). '
+        + 'Gefangen wird an Stützpunkten, sonst am nächsten Kantenpunkt. Esc verwirft einen halb gesetzten Punkt. Erneut klicken auf den Button beendet den Modus.'
+      : 'Ohne Paare ordnet das Programm die Punkte gleichmäßig nach Bogenlänge zu. Mit Paaren laufen A und B zwischen je zwei Paaren synchron — '
+        + 'z. B. Ecken, Kanten oder Nasen aufeinander legen, damit der Draht nicht verdrillt. Ein Paar genügt, um nur den Gleichlauf-Beginn festzulegen. '
+        + 'Paare auf einem Loch gelten für dieses Loch. Gilt nur für das gewählte Segmentpaar.');
+    // Automatik (dieselbe wie DXF-Formen): Nase, Umkehrpunkte, Ecken, sonst Bogenlänge.
+    if (Model3D.autoSyncSeg && App.autoSyncPairs) {
+      const arow = document.createElement('div'); arow.style.cssText = 'display:flex;gap:6px;margin-top:6px';
+      const ba = document.createElement('button'); ba.textContent = T('⟳ Synchronpunkte automatisch');
+      ba.title = T('Vorhandene Paare des aktiven Segments ersetzen: Startpaar = Nase, dann Umkehrpunkte bzw. Ecken beider Konturen der Reihe nach zuordnen; ohne passende Merkmale gleichmäßig nach Bogenlänge.');
+      ba.onclick = () => { const r = Model3D.autoSyncSeg(c.seg); if (!r) return; setSync(r.pairs); Model3D.setPairSync(false); (App.toast || console.log)(r.msg); buildSidebar(); live(); };
+      const bl = document.createElement('button'); bl.textContent = T('… alle Segmente');
+      bl.title = T('Synchronpunkte für alle Segmente automatisch neu anlegen.');
+      bl.onclick = () => {
+        const ss = Object.assign({}, c.segSync), msgs = [];
+        for (let k = 0; k < nseg; k++) { const r = Model3D.autoSyncSeg(k); if (r) { ss[k] = r.pairs; msgs.push(T('Segment ') + (k + 1) + ': ' + r.msg); } }
+        c.segSync = ss; Model3D.setPairSync(false); (App.toast || console.log)(msgs.join('\n')); buildSidebar(); live();
+      };
+      ba.style.flex = '1 1 0'; bl.style.flex = '0 0 auto';
+      arow.appendChild(ba); if (nseg > 1) arow.appendChild(bl);
+      sy.body.appendChild(arow);
+      hint(sy.body, 'Automatik: Nase als Startpaar, danach die Umkehrpunkte (x-/y-Extrema, gerade Kanten in der Mitte) '
+        + 'beider Außenkonturen der Reihe nach. Stimmt die Abfolge nicht, werden harte Ecken zugeordnet, sonst die Paare gleichmäßig nach Bogenlänge verteilt; '
+        + 'einzelne Paare danach von Hand ergänzen oder löschen.');
+    }
+    const list = c.segSync[c.seg] || [];
+    if (c.edits && c.edits[c.seg]) hint(sy.body, 'Hinweis: Die Schnittspur dieses Segments ist von Hand bearbeitet (eingefroren) — Synchronpunkte wirken erst nach „Bearbeitung zurücksetzen".');
+    const info = Model3D.pairInfo && Model3D.pairInfo();
+    if (list.length && info && info.seg === c.seg && info.syncInfo && (info.syncInfo.dropped || info.syncInfo.invalid))
+      hint(sy.body, T('Achtung: ') + (info.syncInfo.dropped + info.syncInfo.invalid) + T(' Paar(e) ungültig (Reihenfolge überkreuzt oder A/B auf verschiedenen Schleifen) — rot markiert, werden ignoriert.'));
+    if (list.length) {
+      const box = document.createElement('div'); box.style.cssText = 'display:grid;gap:4px;grid-template-columns:minmax(0,1fr)';
+      const f = p => (+p[0]).toFixed(1) + ' / ' + (+p[1]).toFixed(1);
+      const sIdx = modelStartPairIdx(c.seg);
+      list.forEach((p, k) => {
+        // Eigene Flex-Zeile (nicht .row/.hint: die würden als Feld bzw. ausklappbare Beschreibung behandelt).
+        const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+        const lab = document.createElement('span'); lab.style.cssText = 'font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:0';
+        lab.textContent = (k === sIdx ? '▶ ' : '') + T('Paar ') + (k + 1) + ': A ' + f(p.a) + ' ↔ B ' + f(p.b);
+        lab.title = lab.textContent;
+        const np = document.createElement('input'); np.type = 'number'; np.min = '2'; np.step = '1';
+        np.placeholder = T('auto'); np.title = T('Punkte des Segments ab diesem Paar (leer = automatisch)');
+        np.value = p.n > 0 ? p.n : ''; np.style.width = '52px'; np.style.padding = '3px 5px'; np.style.fontSize = '11px';
+        np.onchange = () => { const v = parseInt(np.value, 10); const l = list.map(q => Object.assign({}, q)); l[k].n = (np.value === '' || isNaN(v)) ? 0 : Math.max(2, v); setSync(l); live(); };
+        const bs = mkMini('◎', () => { segStartSet(c.seg, 'start', 'custom'); segStartSet(c.seg, 'startPt', modelMapPt(p.a)); buildSidebar(); live(); });
+        bs.title = T('als Startpaar');
+        const bx = mkMini('✕', () => { const l = list.slice(); l.splice(k, 1); setSync(l); buildSidebar(); live(); });
+        bx.style.color = 'var(--bad)'; bx.title = T('Paar löschen');
+        row.appendChild(lab); row.appendChild(np); row.appendChild(bs); row.appendChild(bx); box.appendChild(row);
+      });
+      sy.body.appendChild(box);
+      const bc = document.createElement('button'); bc.textContent = T('Alle Synchronpaare löschen');
+      bc.onclick = () => { setSync(null); buildSidebar(); live(); };
+      sy.body.appendChild(bc);
+    }
+    // Punktverteilung der synchronen Bahn (wie DXF-Formen).
+    subhead(sy.body, 'Punktverteilung der Bahn');
+    selectRow(sy.body, 'Verteilung', [['total', 'Punkte gesamt'], ['permm', 'Punktdichte (Pkt/mm)']],
+      () => c.densMode, v => { c.densMode = v; buildSidebar(); live(); },
+      'Gesamt: feste Zielpunktzahl je Kontur, längenproportional auf die Intervalle zwischen den Paaren verteilt. '
+      + 'Punktdichte: Punkte je mm der längeren Außenkontur. Einzelne Intervalle per Feld „Pkt" oben fest vorgeben.');
+    if (c.densMode === 'permm')
+      numRow(sy.body, 'Punktdichte (Pkt/mm)', () => c.perMM, v => { c.perMM = Math.max(0.01, v); live(); },
+        { step: 0.1, min: 0.01, norender: true, hint: 'Stützpunkte je mm Bahnlänge.' });
+    else
+      numRow(sy.body, 'Punkte gesamt', () => c.N, v => { c.N = Math.max(8, Math.round(v)); live(); },
+        { int: true, min: 8, max: 2000, norender: true,
+          hint: 'Zielpunktzahl der synchronen Schnittbahn je Kontur (mindestens so viele, wie der Querschnitt Stützpunkte hat).' });
+    boolRow(sy.body, 'Punktnummern', () => c.pv.nums, v => { c.pv.nums = v; buildSidebar(); Model3D.refresh(); },
+      'Zeigt in „◫ Segmentpaar" jeden n-ten Punkt der Schnittbahn mit Nummer auf A und B, verbunden durch eine dünne Linie (= Drahtlage). '
+        + 'Die Nummer ist die Reihenfolge im G-Code. Auch im Ansichtsmenü der Segmentpaar-Ansicht schaltbar.');
+    if (c.pv.nums)
+      numRow(sy.body, 'Nummer alle n Punkte', () => c.pairNums, v => { c.pairNums = Math.max(1, Math.round(v)); Model3D.refresh(); },
+        { int: true, min: 1, max: 1000, norender: true });
+    side.appendChild(sy.g);
+  }
+
+  // „Schnitt" (wie DXF-Formen): Umlaufrichtung, Abbrand, Schnittspur, Anfahrt.
+  function buildModelCutSidebar(side) {
+    if (!window.Model3D || !Model3D.hasModel() || Model3D.segCount() < 1) return;
+    const c = mgCfg(), live = modelLive;
+    const op = grp('Schnitt', true, 'model');
     { const own = !!segStartOwn(c.seg);
-      hint(g.body, T('Anfahrpunkt und Richtung gelten nur für Segment ') + (c.seg + 1) + ' — '
-        + (own ? T('eigene Einstellung.') : T('noch gemeinsame Vorgabe (wird beim Ändern zur eigenen Einstellung).'))
-        + T(' Auch per Klick auf die Schnittspur in der Ansicht „◫ Segmentpaar" setzbar.')); }
-    startRows(g.body, live, c.seg);
-    boolRow(g.body, 'Richtung umkehren', () => segStartVal(c.seg, 'reverse'), v => { segStartSet(c.seg, 'reverse', v); buildSidebar(); live(); },
-      'Kehrt den Umlaufsinn der Schnittspur dieses Segmentpaars um (Pfeil in der Segmentpaar-Ansicht).');
+      hint(op.body, T('Umlaufrichtung und Anfahrpunkt gelten nur für Segment ') + (c.seg + 1) + ' — '
+        + (own ? T('eigene Einstellung.') : T('noch gemeinsame Vorgabe (wird beim Ändern zur eigenen Einstellung).'))); }
+    selectRow(op.body, 'Umlaufrichtung', [['fwd', 'Vorwärts (wie gesetzt)'], ['rev', 'Rückwärts']],
+      () => (segStartVal(c.seg, 'reverse') ? 'rev' : 'fwd'), v => { segStartSet(c.seg, 'reverse', v === 'rev'); buildSidebar(); live(); },
+      'Richtung, in der die Kontur ab dem Startpunkt durchlaufen wird (Pfeil in der Segmentpaar-Ansicht).');
+    boolRow(op.body, 'Abbrand kompensieren', () => c.kerfOn !== false,
+      v => { c.kerfOn = v; buildSidebar(); live(); },
+      'Versetzt beide Bahnen um Abbrand/2 nach außen, Löcher nach innen (Werte aus der Werkstoff-Kalibrierung, Reiter „Projektübersicht"). '
+      + 'Aus = der Draht fährt genau auf der Sollkontur.');
+    if (c.kerfOn !== false) kerfModeRow(op.body, 'model');
+    boolRow(op.body, 'Schnittspur anzeigen', () => c.pv.cut !== false,
+      v => { c.pv.cut = v; buildSidebar(); Model3D.refresh(); },
+      'Zeichnet die tatsächliche Draht-Bahn (A/B synchronisiert, inkl. Abbrand-Versatz) zusätzlich zu den Sollkonturen.');
+    if (c.pv.cut !== false) kerfTrueRow(op.body, 'model');
+    selectRow(op.body, 'Anfahrt von', [['rear', 'hinten (waagrecht)'], ['top', 'oben (senkrecht)'],
+       ['front', 'vorne (waagrecht)'], ['bottom', 'unten (senkrecht)']],
+      () => c.approach, v => { c.approach = v; buildSidebar(); live(); },
+      'Richtung, aus der der Draht an den ersten Konturpunkt fährt (und nach dem Umlauf auf demselben Weg '
+      + 'wieder hinaus). „Hinten": waagrecht vom Maschinennullpunkt wie bisher. „Oben": über den Block, senkrecht '
+      + 'von oben auf den ersten Punkt. „Vorne": über den Block nach vorne, waagrecht von vorne. „Unten": unter dem '
+      + 'Block hindurch, senkrecht von unten (braucht Platz unter dem Block — „Abstand unten zum Nullpunkt"). '
+      + 'Passend dazu den Anfahrpunkt wählen (z. B. „oben (max. senkrecht)"), damit die Anfahrt das Werkstück nicht kreuzt.');
+    if (c.approach !== 'rear')
+      numRow(op.body, 'Anfahrt-Abstand zur Blockfläche (mm)', () => c.approachDist, v => { c.approachDist = Math.max(0, v); live(); },
+        { step: 1, min: 0, norender: true,
+          hint: 'Abstand des Anfahrpunkts vor der gewählten Blockfläche (oben: über der Blockoberkante, vorne: vor der '
+            + 'Blockvorderkante, unten: unter der Blockunterkante). Bis dahin fährt der Draht in Luft, ab dort mit '
+            + 'Schnittvorschub auf den ersten Konturpunkt. Von unten höchstens bis zum Maschinennullpunkt (Y0).' });
+    if (c.approach !== 'rear')
+      boolRow(op.body, 'Anfahrt/Ausfahrt sicher', () => c.safeLead, v => { c.safeLead = v; live(); },
+        'Beginnt den Schnitt automatisch am Punkt, der der Anfahrrichtung am nächsten liegt (von oben: oberster, '
+        + 'von vorne: vorderster, von unten: unterster Punkt), damit die An- und Abfahrt das Werkstück nicht kreuzt. '
+        + 'Ändert nur die Anfahrt, nicht die Form. Nur bei Anfahrpunkt „automatisch" oder „fester Winkel" und ohne Synchronpunkte — '
+        + 'gesetzte Synchronpunkte oder ein anders gewählter Anfahrpunkt haben Vorrang.');
+    startRows(op.body, live, c.seg);
+    if (c.approach === 'rear')
+      numRow(op.body, 'Anfahrabstand (mm)', () => c.leadIn, v => { c.leadIn = Math.max(0, v); live(); },
+        { step: 1, min: 0, norender: true,
+          hint: 'Der Draht fährt vom Nullpunkt zuerst senkrecht hoch auf Eintrittshöhe, dann waagerecht '
+            + 'in den Eindringpunkt. Der Anfahrabstand teilt nur den letzten waagerechten Anteil in '
+            + 'Eilgang + Schnitt auf. 0 = kompletter waagerechter Weg im Schnittvorschub.' });
+    selectRow(op.body, 'Blockzuschnitt',
+      [['none', 'Ohne Blockschnitt'], ['before', 'Blockschnitt vor Formschnitt'],
+       ['after', 'Blockschnitt nach Formschnitt'], ['only', 'Nur Blockschnitt']],
+      // Dieselbe Einstellung wie bei den DXF-Formen und „Schnittreihenfolge" im Reiter „G-Code" (state.cfg.cutOrder).
+      () => (state.cfg.cutOrder === 'wrap' ? 'before' : (state.cfg.cutOrder || 'none')),
+      v => { state.cfg.cutOrder = v; buildSidebar(); live(); },
+      'Zwei senkrechte Schnitte durch den ganzen Block: Blockvorderkante und hinteres Blockende (Seite zum Nullpunkt) — '
+      + 'je bis auf Y0, um den halben Abbrand ins Verschnittmaterial versetzt, damit der Block genau auf Maß steht. '
+      + '„Vor Formschnitt": erst vorne, dann hinten; bei Anfahrt von hinten geht es aus dem hinteren Schnittspalt direkt in die Form. '
+      + '„Nach Formschnitt": erst die Form, dann hinten und vorne. „Nur Blockschnitt": ohne Form. '
+      + 'Dieselbe Einstellung wie bei den DXF-Formen und „Schnittreihenfolge" im Reiter „G-Code".');
+    numRow(op.body, 'Blockzugabe rundum (mm)', () => c.blockMargin, v => { c.blockMargin = Math.max(0, v); live(); },
+      { step: 1, min: 0, norender: true,
+        hint: 'Rand zwischen Schnittspur und Blockkante, ringsum. 0 = der Block liegt knapp an der Schnittspur (wie bisher). '
+          + 'Bestimmt Blockgröße, Blocklage am Nullpunkt, Blockschnitte und die Anfahrpunkte vor den Blockflächen.' });
+    if ((state.cfg.cutOrder || 'none') !== 'none') {
+      blockCutLowRows(op.body, () => { buildSidebar(); live(); });
+      const r = (window.Model3D && Model3D.buildSegmentPaths) ? Model3D.buildSegmentPaths(c.seg, mgOpt()) : null;
+      if (r && r.block) {
+        const k = r.block, hk = (mgOpt().kerf || 0) / 2;
+        hint(op.body, T('Blockschnitt bei h ') + (k[0] - hk).toFixed(1) + T(' mm (hinten) und h ') + (k[2] + hk).toFixed(1)
+          + T(' mm (vorne) · Block ') + (k[2] - k[0]).toFixed(1) + ' × ' + (k[3] - k[1]).toFixed(1) + T(' mm · Abbrand ') + (2 * hk).toFixed(2) + ' mm');
+      }
+      if (!((state.cfg.blockX || 0) > 0))
+        hint(op.body, '⚠ „Abstand in Flugrichtung X" (Blocklage) ist 0 — der hintere Blockschnitt läge dann im negativen X. '
+          + 'Einen Abstand von einigen mm einstellen.');
+    }
     { const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px';
       const b1 = document.createElement('button'); b1.textContent = T('Für alle Segmente übernehmen'); b1.style.flex = '1';
       b1.title = T('Übernimmt Anfahrpunkt und Richtung dieses Segmentpaars als gemeinsame Vorgabe und löscht die eigenen Einstellungen aller Segmente.');
@@ -2821,33 +3095,32 @@
       b2.title = T('Verwirft die eigene Einstellung dieses Segmentpaars — es nutzt wieder die gemeinsame Vorgabe.');
       b2.disabled = !segStartOwn(c.seg);
       b2.onclick = () => { const ss = Object.assign({}, c.segStart); delete ss[c.seg]; c.segStart = ss; buildSidebar(); live(); };
-      row.appendChild(b1); row.appendChild(b2); g.body.appendChild(row); }
-    boolRow(g.body, 'Turmwege anzeigen', () => (window.Model3D && Model3D.isPairTowers()),
-      v => { if (window.Model3D) Model3D.setPairTowers(v); },
-      'Standard aus: die Ansicht „◫ Segmentpaar" zeigt nur die Querschnitte (Sollkontur) und die '
-      + 'Schnittspur (rot, abbrandkompensiert — wo der Draht wirklich fährt). Einschalten blendet '
-      + 'zusätzlich die extrapolierten Turmbahnen (blau/orange) und den Maschinen-Nullpunkt ein '
-      + '(die Turmwege spannen die volle Maschinenbreite auf).');
-    kerfTrueRow(g.body, 'model');
-    // Schnittspur von Hand bearbeiten (Punkte ziehen) — wie in Kern/Negativ.
-    boolRow(g.body, 'Schnittspur bearbeiten', () => (window.Model3D && Model3D.isPairEdit()),
-      v => { if (window.Model3D) { Model3D.setPairEdit(v); if (v) Model3D.setView('pairs'); } },
-      'Punkte der Schnittspur in der Ansicht „◫ Segmentpaar" mit der Maus ziehen. Die Spur wird '
-      + 'dabei eingefroren (Abbrand/Start werden nicht mehr neu berechnet).');
-    { const rb = document.createElement('button'); rb.textContent = T('Bearbeitung zurücksetzen');
-      rb.onclick = () => { if (c.edits) delete c.edits[c.seg]; c.edits = Object.assign({}, c.edits); live(); };
-      g.body.appendChild(rb); }
-    numRow(g.body, 'Anfahrabstand (mm)', () => c.leadIn, v => { c.leadIn = Math.max(0, v); live(); },
-      { step: 1, min: 0, norender: true,
-        hint: 'Der Draht fährt vom Nullpunkt zuerst senkrecht hoch auf Eintrittshöhe, dann waagerecht '
-          + 'in den Eindringpunkt. Der Anfahrabstand teilt nur den letzten waagerechten Anteil in '
-          + 'Eilgang + Schnitt auf. 0 = kompletter waagerechter Weg im Schnittvorschub.' });
-    const gen = document.createElement('button'); gen.textContent = T('Als G-Code-Quelle übernehmen'); gen.className = 'primary';
-    gen.onclick = useThis;
-    g.body.appendChild(gen);
-    side.appendChild(g.g);
+      row.appendChild(b1); row.appendChild(b2); op.body.appendChild(row); }
+    hint(op.body, 'G-Code entsteht über „G-Code-Quelle → 3D-Modell" mit Vorschub, Achsen, '
+      + 'Sicherheitshöhe und dem „Schneiden"-Ablauf der Maschine.');
+    side.appendChild(op.g);
+  }
 
-    buildPlateSidebar(side);
+  // „Punkte bearbeiten" (wie DXF-Formen): Schnittspur einfrieren und Punkte ziehen.
+  function buildModelEditSidebar(side) {
+    if (!window.Model3D || !Model3D.hasModel() || Model3D.segCount() < 1) return;
+    const c = mgCfg(), live = modelLive;
+    const pg = grp('Punkte bearbeiten', true, 'model');
+    const on = !!Model3D.isPairEdit();
+    boolRow(pg.body, 'Bearbeiten aktiv', () => on,
+      v => { Model3D.setPairEdit(v); if (v) Model3D.setView('pairs'); buildSidebar(); },
+      'Zeigt die Punkte der Schnittspur in der Ansicht „◫ Segmentpaar" als Griffe (Ziehen = verschieben). '
+      + 'Die Spur wird dabei eingefroren (A/B index-synchron).');
+    if (on) hint(pg.body, 'Bedienung: Griff anklicken und halten = verschieben · Doppelklick = Ansicht zurücksetzen.');
+    const edited = !!(c.edits && c.edits[c.seg]);
+    const rb = document.createElement('button'); rb.textContent = T('⟲ Schneidepfad zurücksetzen (neu aus Sync)');
+    rb.style.color = 'var(--bad)'; rb.disabled = !edited;
+    rb.onclick = () => { const e = Object.assign({}, c.edits); delete e[c.seg]; c.edits = e; buildSidebar(); live(); };
+    pg.body.appendChild(rb);
+    hint(pg.body, edited
+      ? 'Schneidepfad eingefroren: Punktverteilung/Sync/Abbrand ändern ihn nicht mehr, bis zurückgesetzt. Wirkt sofort auf Schnittspur, 3D-Simulation und G-Code.'
+      : 'Noch nicht bearbeitet — die Schnittspur folgt Synchronpunkten, Punktverteilung und Abbrand.');
+    side.appendChild(pg.g);
   }
   // „Platte / Stapeln": mehrere gleich dicke Segmente in einem Schnitt.
   function buildPlateSidebar(side) {
@@ -3195,10 +3468,6 @@
     // Auflösung der abgeleiteten Querschnitte (wirkt auf Anzeige + Schnittkontur/G-Code).
     { const c = mgCfg();
       const liveSec = () => { if (state.cfg.gcodeSource === 'model' || state.cfg.gcodeSource === 'plate') render(); if (window.Model3D) Model3D.refresh(); };
-      numRow(tg.body, 'Punkte je Profil (mind.)', () => c.N, v => { c.N = Math.max(8, Math.round(v)); liveSec(); },
-        { int: true, min: 8, max: 2000, norender: true,
-          hint: 'Mindest-Auflösung beim Korrespondieren der beiden Stirnprofile. Der Schnitt folgt '
-            + 'der abgeleiteten Querschnittkurve — deren Feinheit stellt „Querschnitt-Punktdichte" ein.' });
       numRow(tg.body, 'Querschnitt-Punktdichte (×)', () => (window.Model3D ? Model3D.getSectionDensity() : 1),
         v => { if (window.Model3D) Model3D.setSectionDensity(v); liveSec(); },
         { step: 0.5, min: 0.2, max: 16, norender: true,
@@ -3359,7 +3628,7 @@
   Object.assign(App, { buildModelSidebar, buildModelStlSidebar, buildNotePop, buildPlateScene, buildPlateSidebar, buildSidebar, closeNotePop, decorateFields });
   Object.assign(App, { decorateHints, decorateNotes, effBlockZ, extTriple, grp, grpColor, grpColorDefault, grpKey });
   Object.assign(App, { grpState, hint, hintHost, mgCfg, mgOpt, mkMini, modelGcode, newSpar });
-  Object.assign(App, { noteBuckets, noteGet, noteHas, noteKey, noteSet, numRow, openNotePop, plateCfg });
+  Object.assign(App, { noteBuckets, noteGet, noteHas, noteKey, noteSet, numRow, numRowEnter, openNotePop, plateCfg });
   Object.assign(App, { plateGcode, platePlacements, profilePicker, refreshNoteMarks, saveMenuColors, scheduleMenuColors, segBox, segCard });
   Object.assign(App, { segmentCutCard, segmentSelectRow, segmentShapeCard, segmentSheetRows, selectRow, setHintsMode, setNotesEnabled, sheetingGroup });
   Object.assign(App, { feedRow, sparEditor, sparPosFields, subhead, txtRow, warn, wingImportGroup, wrapWithSpinner });

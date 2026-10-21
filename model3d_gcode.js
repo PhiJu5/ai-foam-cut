@@ -20,10 +20,20 @@
       case 'start': return T('Start am Nullpunkt (0,0)');
       case 'up': return T('senkrecht von Null hoch auf Eintrittshöhe');
       case 'lead': return T('waagerecht heran (Anfahrabstand ') + m.lead.toFixed(1) + ' mm)';
-      case 'enter': return m.seg ? T('Teil ') + m.seg + T(': einfahren') : T('waagerecht in den Eindringpunkt');
+      case 'enter': return m.seg ? T('Teil ') + m.seg + T(': einfahren')
+        : (m.dir === 'top' || m.dir === 'bottom') ? T('senkrecht in den Eindringpunkt') : T('waagerecht in den Eindringpunkt');
       case 'cut': return portal(o, m.spd);
       case 'close': return portal(o, m.spd) + T(' · Kontur schließen');
-      case 'backX': return T('waagerecht zurück auf Null-X');
+      case 'safeUp': return T('hoch auf Sicherheitshöhe');
+      case 'over': return T('über den Block');
+      case 'down': return T('herab zum Anfahrpunkt');
+      case 'under': return T('unter dem Block zum Anfahrpunkt');
+      case 'exit': return T('Ausfahrt auf dem Anfahrweg');
+      case 'backUp': return T('hoch auf Sicherheitshöhe');
+      case 'bcOver': return T('Blockschnitt: über die Blockfläche');
+      case 'bcCut': return T('Blockschnitt: durch den Block');
+      case 'bcUp': return T('Blockschnitt: im Schnittspalt hoch');
+      case 'backX': return m.y != null ? T('zurück auf Null-X') : T('waagerecht zurück auf Null-X');
       case 'backY': return T('senkrecht herab auf Null (0,0)');
       case 'out': return T('heraus in Freiraum');
       case 'end': return T('Ende am Nullpunkt (0,0)');
@@ -58,6 +68,10 @@
       out.push('; ' + T('Abbrand (Profillängen-Verhältnis): ') + ki.kA.toFixed(2) + ' / ' + ki.kB.toFixed(2) + ' mm');
     else if (mt.kerf > 0) out.push('; ' + T('Abbrand ') + mt.kerf.toFixed(2) + ' mm');
     out.push('; ' + T('Spannweite (Ebenenabstand) = ') + mt.span.toFixed(1) + T(' mm · Maschinenbreite ') + mt.mw.toFixed(0) + ' mm');
+    const AP = { rear: 'hinten', top: 'oben', front: 'vorne', bottom: 'unten' };
+    const BC = { before: 'Blockschnitt vor Formschnitt', after: 'Blockschnitt nach Formschnitt', only: 'Nur Blockschnitt' };
+    if (r.cutOrder !== 'only') out.push('; ' + T('Anfahrt von ') + T(AP[r.approach] || 'hinten'));
+    if (BC[r.cutOrder]) out.push('; ' + T(BC[r.cutOrder]) + ' · ' + T('Block ') + (r.block[2] - r.block[0]).toFixed(1) + ' x ' + (r.block[3] - r.block[1]).toFixed(1) + ' mm');
     out.push('G21 ; mm');
     out.push('G90 ; ' + T('absolut'));
     out.push('; ' + T('Nullpunkt: linke untere Ecke (per Set Home der Maschine setzen)'));

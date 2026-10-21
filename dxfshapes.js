@@ -765,11 +765,12 @@
         + 'einzelne Paare danach von Hand ergänzen oder löschen.');
     }
     if (d.sync.length) {
-      const list = document.createElement('div'); list.style.display = 'grid'; list.style.gap = '4px';
+      const list = document.createElement('div'); list.style.display = 'grid'; list.style.gap = '4px'; list.style.gridTemplateColumns = 'minmax(0,1fr)';
       d.sync.forEach((s, k) => {
-        const row = document.createElement('div'); row.className = 'row';
-        const lab = document.createElement('span'); lab.className = 'hint'; lab.style.margin = '0';
-        lab.textContent = (k === d.start ? '▶ ' : '') + T('Paar ') + (k + 1) + T(': innen ') + s.i + T(' ↔ außen ') + s.j;
+        // Eigene Flex-Zeile (nicht .row/.hint: die würden als Feld bzw. ausklappbare Beschreibung behandelt).
+        const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
+        const lab = document.createElement('span'); lab.style.cssText = 'font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:0';
+        lab.textContent = (k === d.start ? '▶ ' : '') + T('Paar ') + (k + 1) + T(': innen ') + s.i + T(' ↔ außen ') + s.j; lab.title = lab.textContent;
         const bs = App.mkMini('◎', () => { d.start = k; App.buildSidebar(); renderDxf(); }); bs.title = T('als Startpaar');
         const np = document.createElement('input'); np.type = 'number'; np.min = '2'; np.step = '1';
         np.placeholder = T('auto'); np.title = T('Punkte des Segments ab diesem Paar (leer = automatisch)');
@@ -777,7 +778,7 @@
         np.oninput = () => { const v = parseInt(np.value, 10); s.n = (np.value === '' || isNaN(v)) ? 0 : Math.max(2, v); renderDxf(); App.render(); };
         const bx = App.mkMini('✕', () => { dxfPushUndo(); d.sync.splice(k, 1); if (d.start >= d.sync.length) d.start = 0; App.buildSidebar(); renderDxf(); App.render(); });
         bx.style.color = 'var(--bad)';
-        row.appendChild(lab); const sp = document.createElement('div'); sp.style.flex = '1'; row.appendChild(sp);
+        row.appendChild(lab);
         row.appendChild(np); row.appendChild(bs); row.appendChild(bx); list.appendChild(row);
       });
       sy.body.appendChild(list);
@@ -833,8 +834,8 @@
       v => { d.safeLead = v; App.render(); },
       'Beginnt den Schnitt automatisch am Punkt, der der Anfahrrichtung am nächsten liegt (von hinten: hinterster, '
       + 'von oben: oberster, von vorne: vorderster, von unten: unterster Punkt), damit die An- und Abfahrt das '
-      + 'Werkstück nicht kreuzt. Ändert nur die Anfahrt, nicht die Form. Ein selbst gewählter Startpunkt '
-      + '(gleicher Querschnitt) hat Vorrang.');
+      + 'Werkstück nicht kreuzt. Ändert nur die Anfahrt, nicht die Form. Nur ohne Synchronpunkte — '
+      + 'gesetzte Synchronpunkte (Startpaar 1) oder ein selbst gewählter Startpunkt haben Vorrang.');
     App.selectRow(op.body, 'Blockzuschnitt',
       [['none', 'Ohne Blockschnitt'], ['before', 'Blockschnitt vor Formschnitt'],
        ['after', 'Blockschnitt nach Formschnitt'], ['only', 'Nur Blockschnitt']],
@@ -1715,10 +1716,12 @@
     // trifft die Anfahrt die Kontur zuerst. Reine zyklische Verschiebung der
     // geschlossenen Bahn -> die geschnittene Form bleibt identisch.
     // Anfahrt von oben/vorne/unten: entsprechend am obersten/vordersten/untersten Punkt.
-    // Bei gleichem Querschnitt mit selbst gewähltem Startpunkt (dxfStartPicked) bleibt
-    // dieser — dann entscheidet der Anwender.
+    // Nur ohne Synchronpunkte (gleicher Querschnitt, automatischer Start): Sobald Paare
+    // gesetzt sind, legt das Startpaar (Punkt 1) bzw. der gewählte Startpunkt den Beginn
+    // fest — sonst sprang der Einstich auf den „hintersten" Punkt, auf einer senkrechten
+    // Geraden je nach Rundungsrauschen mal oben, mal unten.
     const apDir = dxfApproachDir(d);
-    if (d.safeLead && rootPath.length > 2 && !dxfStartPicked()) {
+    if (d.safeLead && rootPath.length > 2 && !d.sync.length) {
       const key = apDir === 'top' ? (p => p.y) : apDir === 'front' ? (p => -p.x) : apDir === 'bottom' ? (p => -p.y) : (p => p.x);
       let r = 0, best = -1e9;
       for (let i = 0; i < rootPath.length; i++) { const s = key(rootPath[i]) + key(tipPath[i]); if (s > best + 1e-9) { best = s; r = i; } }
@@ -2300,6 +2303,8 @@
     ctx.clearRect(0, 0, w, h);
     const d = state.dxf, ed = d.edit;
     const info = document.getElementById('dxfInfo');
+    syncDxfToggles();
+    if (info) info.style.display = (ed.on || dxfPvOn('legend')) ? '' : 'none';
     const ents = App.dxfEntities();
     const bg = d.bg;
     const hasBg = !!(bg && bg.img && bg.visible);
@@ -2369,8 +2374,10 @@
     } else {
       // Hilfslayer (nur Anzeige): gestrichelt, ohne Punkte, nie Schneidpfad.
       if (d.helpLayers) ents.forEach(e => { if (d.helpLayers[e.layer]) { ctx.setLineDash([6, 4]); drawLoop(e.loop, App.PAL.block || '#8fa0b4', 1.2, false); ctx.setLineDash([]); } });
-      if (d.inner) { ctx.setLineDash(dashFor('profInner', [])); drawLoop(d.inner, App.PAL.profInner); ctx.setLineDash([]); }
-      if (d.outer) { ctx.setLineDash(dashFor('profOuter', [])); drawLoop(d.outer, App.PAL.profOuter); ctx.setLineDash([]); }
+      // Profile INNEN/AUSSEN (im Synchron-Setzmodus und Punkteditor immer sichtbar: Fangziel).
+      const showProf = dxfPvOn('prof') || d.syncMode || d.pEdit.on;
+      if (showProf && d.inner) { ctx.setLineDash(dashFor('profInner', [])); drawLoop(d.inner, App.PAL.profInner); ctx.setLineDash([]); }
+      if (showProf && d.outer) { ctx.setLineDash(dashFor('profOuter', [])); drawLoop(d.outer, App.PAL.profOuter); ctx.setLineDash([]); }
       // Schnittspur (tatsächliche Draht-Bahn inkl. Abbrand) — synchron aus INNEN/AUSSEN.
       if (d.showSpur) {
         const sc = App.dxfSynced();
@@ -2386,8 +2393,27 @@
           ctx.setLineDash(dashFor('kerf', [6, 4])); App.poly(ctx, V, ro, true); ctx.stroke(); ctx.setLineDash([]);
         }
       }
+      // Punktnummern der synchronen Bahn (Index = Reihenfolge im G-Code), jeder n-te
+      // Punkt auf INNEN und AUSSEN samt dünner Drahtlinie — zur Prüfung der Zuordnung.
+      if (dxfPvOn('nums')) {
+        const sn = App.dxfSynced();
+        if (sn && sn.inner.length > 1) {
+          let ni = sn.inner, no = sn.outer;
+          if (d.showSpur && d.kerf && !d.pathEdit) { const kk = App.dxfApplyKerf(ni.map(p => ({ x: p.x, y: p.y })), no.map(p => ({ x: p.x, y: p.y }))); ni = kk.root; no = kk.tip; }
+          const nEvery = Math.max(1, Math.round(+d.pvNumN || 10));
+          ctx.strokeStyle = 'rgba(160,176,196,.45)'; ctx.lineWidth = 0.8; ctx.beginPath();
+          for (let i = 0; i < Math.min(ni.length, no.length); i += nEvery) { ctx.moveTo(V.X(ni[i].x), V.Y(ni[i].y)); ctx.lineTo(V.X(no[i].x), V.Y(no[i].y)); }
+          ctx.stroke();
+          ctx.font = '10px system-ui'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+          [[ni, App.PAL.profInner || '#5aa0ff'], [no, App.PAL.profOuter || '#ff9f45']].forEach(([P, c]) => {
+            ctx.fillStyle = c;
+            for (let i = 0; i < P.length; i += nEvery) { const X = V.X(P[i].x), Y = V.Y(P[i].y); ctx.beginPath(); ctx.arc(X, Y, 2, 0, 6.3); ctx.fill(); ctx.fillText(i, X + 4, Y - 2); }
+          });
+          ctx.textBaseline = 'alphabetic';
+        }
+      }
       ctx.lineWidth = 1.2;
-      if (d.inner && d.outer) d.sync.forEach((s, k) => {
+      if (d.inner && d.outer && (dxfPvOn('sync') || d.syncMode)) d.sync.forEach((s, k) => {
         const a = d.inner[s.i], c = d.outer[s.j]; if (!a || !c) return;
         const start = (k === d.start);
         ctx.strokeStyle = start ? App.PAL.syncStart : 'rgba(160,176,196,.6)';
@@ -2447,7 +2473,7 @@
         }
       }
       const synced = App.dxfSynced();
-      if (synced && synced.inner.length > 1) {
+      if (dxfPvOn('start') && synced && synced.inner.length > 1) {
         const s0 = synced.inner[0], s1 = synced.inner[1];
         ctx.fillStyle = App.PAL.syncStart; ctx.beginPath(); ctx.arc(V.X(s0.x), V.Y(s0.y), 4.5, 0, 6.3); ctx.fill();
         const ang = Math.atan2(V.Y(s1.y) - V.Y(s0.y), V.X(s1.x) - V.X(s0.x));
@@ -2480,6 +2506,38 @@
               : 'Setzmodus aus — links „Synchronpunkte setzen starten"') + '</div>';
       }
     }
+  }
+  // ---- Ansichtsmenü DXF-Formen (#dxfViewToggles, wie Kerndesign / 3D-Segmentpaar) ----
+  // Eigene Schalter in state.dxf.pv (fehlend = an, Punktnummern = aus), Abstand pvNumN;
+  // Schnittspur/Block nutzen die vorhandenen showSpur/showBlock.
+  function dxfPvOn(k) { const pv = state.dxf.pv || {}; return k === 'nums' ? pv.nums === true : pv[k] !== false; }
+  function syncDxfToggles() {
+    const box = document.getElementById('dxfViewToggles'); if (!box) return;
+    const d = state.dxf;
+    box.style.display = d.edit && d.edit.on ? 'none' : '';
+    box.querySelectorAll('input[data-dxfpv]').forEach(cb => { cb.checked = dxfPvOn(cb.dataset.dxfpv); });
+    box.querySelectorAll('input[data-dxfshow]').forEach(cb => { cb.checked = !!d[cb.dataset.dxfshow]; });
+    const kt = box.querySelector('input[data-ktrue]'); if (kt && App.kerfTrueOn) kt.checked = App.kerfTrueOn('dxf');
+    const nn = document.getElementById('dxfViewNumN'); if (nn && document.activeElement !== nn) nn.value = d.pvNumN || 10;
+    const sel = document.getElementById('dxfViewSeg');
+    if (sel) {
+      const n = Math.max(1, App.dxfSegCount ? App.dxfSegCount() : 1);
+      if (sel.options.length !== n) { sel.innerHTML = ''; for (let i = 0; i < n; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = T('Segment ') + (i + 1) + ' / ' + n; sel.appendChild(o); } }
+      sel.value = String(Math.min(d.activeSeg || 0, n - 1));
+      sel.closest('label').style.display = n > 1 ? '' : 'none';
+    }
+  }
+  function bindDxfToggles() {
+    const box = document.getElementById('dxfViewToggles'); if (!box) return;
+    const after = () => { App.buildSidebar(); renderDxf(); };
+    box.querySelectorAll('input[data-dxfpv]').forEach(cb => cb.addEventListener('change', () => {
+      const d = state.dxf; if (!d.pv) d.pv = {}; d.pv[cb.dataset.dxfpv] = cb.checked; after(); }));
+    box.querySelectorAll('input[data-dxfshow]').forEach(cb => cb.addEventListener('change', () => { state.dxf[cb.dataset.dxfshow] = cb.checked; after(); }));
+    const kt = box.querySelector('input[data-ktrue]'); if (kt) kt.addEventListener('change', () => renderDxf());
+    const nn = document.getElementById('dxfViewNumN');
+    if (nn) nn.addEventListener('change', () => { const v = Math.round(+nn.value); if (v >= 1) { state.dxf.pvNumN = v; renderDxf(); } else nn.value = state.dxf.pvNumN || 10; });
+    const sel = document.getElementById('dxfViewSeg');
+    if (sel) sel.addEventListener('change', () => { dxfSetActive(+sel.value); App.buildSidebar(); renderDxf(); App.render(); });
   }
   function dxfToolLabel(t) {
     return ({ select: 'Auswählen', vertex: 'Punkt', line: 'Linie', rect: 'Rechteck', circle: 'Kreis',
@@ -2636,9 +2694,18 @@
   //  2. sonst harte Ecken beider Konturen bei gleicher Anzahl;
   //  3. sonst M Paare gleichmäßig nach Bogenlänge.
   function dxfAutoSync(opt) {
-    const d = state.dxf; opt = opt || {};
+    const d = state.dxf;
     const A = d.inner, B = d.outer;
     if (!A || !B || A.length < 4 || B.length < 4) return T('Keine INNEN/AUSSEN-Kontur vorhanden.');
+    const r = autoSyncPairs(A, B, opt);
+    d.sync = r.pairs; d.start = 0; d.pick = null; d.pathEdit = null;
+    if (d.segs && d.segs[d.activeSeg]) { d.segs[d.activeSeg].sync = r.pairs; d.segs[d.activeSeg].pathEdit = null; }
+    return r.msg;
+  }
+  // Kern der Automatik, rein auf zwei geschlossenen Konturen [{x,y}] (auch vom
+  // 3D-Modell genutzt): Rückgabe { pairs:[{i,j}] (erstes = Nase), msg }.
+  function autoSyncPairs(A, B, opt) {
+    opt = opt || {};
     const nA = A.length, nB = B.length;
     const bA = dxfLoopBBox(A), bB = dxfLoopBBox(B);
     const size = Math.max(bA.maxx - bA.minx, bA.maxy - bA.miny, bB.maxx - bB.minx, bB.maxy - bB.miny);
@@ -2673,9 +2740,7 @@
         msg = T('Synchronpunkte automatisch: Merkmale ungleich (Umkehrpunkte ') + eA.length + '/' + eB.length + T(', Ecken ') + cA.length + '/' + cB.length + T(') — ') + pairs.length + T(' Paare gleichmäßig nach Bogenlänge.');
       }
     }
-    d.sync = pairs; d.start = 0; d.pick = null; d.pathEdit = null;
-    if (d.segs && d.segs[d.activeSeg]) { d.segs[d.activeSeg].sync = pairs; d.segs[d.activeSeg].pathEdit = null; }
-    return msg;
+    return { pairs, msg };
   }
   // Alle Segmente der Rippenkette nacheinander (aktives Segment bleibt).
   function dxfAutoSyncAll() {
@@ -3135,6 +3200,7 @@
   function dxfWireUp() {
     const setupNav = App.setupNav, buildSidebar = App.buildSidebar;
     setupNav('cDxf', 'dxf', renderDxf);      // Zoom/Pan in der DXF-Formen-Ansicht
+    bindDxfToggles();                        // Ansichtsmenü (was gezeigt wird)
     setupNav('cExport', 'exp', renderDxfExport);   // Zoom/Pan in der DXF-Export-Vorschau
     const cdxf = document.getElementById('cDxf');
     if (cdxf) {
@@ -3203,7 +3269,7 @@
   Object.assign(App, { dxfPathRedo, dxfPathSnap, dxfPathUndo, dxfPathUp, dxfPathWorld, dxfPosPoint, dxfProjection, dxfPushUndo });
   Object.assign(App, { dxfRedo, dxfResolve, dxfSameSection, dxfSetActive, dxfSnap, dxfStashActive, dxfSynced, dxfSyncedRaw });
   Object.assign(App, { dxfToolHint, dxfToolPoint, dxfTranslateSelection, dxfTrimAt, dxfUndo, dxfWorld, flashDxf });
-  Object.assign(App, { dxfSegCount, dxfSetLinkPrev, dxfApplyRibChain, dxfAutoSync, dxfAutoSyncAll, dxfLoopCorners, dxfLoopExtrema, dxfLoopNose, loadDxfRole, loadSvgRole, mkLoopLocal, renderDxfExport, svgImport });
+  Object.assign(App, { dxfSegCount, dxfSetLinkPrev, dxfApplyRibChain, dxfAutoSync, autoSyncPairs, dxfAutoSyncAll, dxfLoopCorners, dxfLoopExtrema, dxfLoopNose, loadDxfRole, loadSvgRole, mkLoopLocal, renderDxfExport, svgImport });
   Object.defineProperty(App, 'dxfDraw', { get: () => dxfDraw, set: v => { dxfDraw = v; }, enumerable: true, configurable: true });
   Object.defineProperty(App, 'dxfFlashT', { get: () => dxfFlashT, set: v => { dxfFlashT = v; }, enumerable: true, configurable: true });
 })();

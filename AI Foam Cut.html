@@ -64,7 +64,7 @@
   button:hover{border-color:var(--accent);color:#fff}
   button.primary{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
   button.primary:hover{filter:brightness(1.1)}
-  #side{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:10px}
+  #side{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;overflow-anchor:none;padding:10px}
   .grp{border:1px solid var(--line);border-radius:8px;margin-bottom:10px;overflow:hidden}
   .grp>h3{margin:0;padding:8px 11px;background:var(--panel2);font-size:14px;
     font-weight:700;color:var(--txt);cursor:pointer;display:flex;align-items:center;gap:6px}
@@ -766,6 +766,7 @@
           <button id="simSide" title="Seitenansicht: Blick längs der Spannweite auf das Profil (Sehne waagerecht)">➡ Seitenansicht</button>
           <button id="simFront" title="Vorderansicht: Blick längs der Sehne, Spannweite waagerecht">⬅ Vorderansicht</button>
           <button id="simView0" title="Ansicht zurücksetzen: Standard-Schrägansicht, Zoom und Verschiebung auf Ausgangswert">⟲ Ansicht</button>
+          <button id="simToSrc" style="display:none" title="Zum Reiter der gewählten G-Code-Quelle wechseln">↩ Quelle</button>
           <button class="primary" id="simToCut" style="display:none" title="Zum Reiter „Schneiden“ wechseln und dieses Programm (gewählte Quelle und Segment) dort als Quelle übernehmen (Strg+C)">✂ Schneiden</button>
           <label class="mfield">Tempo
             <select id="simSpeed">
@@ -886,6 +887,19 @@
           <div class="wing-pane" style="border-left:0">
             <span class="pane-label">DXF-Formen — INNEN &amp; AUSSEN mit Synchronpunkten</span>
             <div class="simlegend" id="dxfInfo" style="left:10px;right:auto;top:10px;max-width:280px"></div>
+            <!-- Ansichtsmenü DXF-Formen (wie Kerndesign / 3D-Segmentpaar); Werte in state.dxf -->
+            <div class="pane-toggles" id="dxfViewToggles" style="left:auto;right:10px;top:36px">
+              <label>Segment: <select id="dxfViewSeg"></select></label>
+              <label><input type="checkbox" data-dxfpv="prof"> Profile INNEN/AUSSEN</label>
+              <label><input type="checkbox" data-dxfshow="showSpur"> Schnittspur (Abbrand)</label>
+              <label title="Band in der echten Breite des Schnittspalts unter der Schnittspur (Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="dxf"> Abbrand in wahrer Dicke</label>
+              <label><input type="checkbox" data-dxfshow="showBlock"> Styroporblock</label>
+              <label><input type="checkbox" data-dxfpv="start"> Startpunkt + Richtung</label>
+              <label><input type="checkbox" data-dxfpv="sync"> Synchronpaare</label>
+              <label><input type="checkbox" data-dxfpv="nums"> Punktnummern alle <input type="number" id="dxfViewNumN" min="1" max="1000" step="1" style="width:46px;padding:1px 3px;font-size:11px"></label>
+              <label><input type="checkbox" data-dxfpv="legend"> Legende</label>
+              <button type="button" class="to-gcode" data-gsrc="dxf" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+            </div>
             <canvas id="cDxf"></canvas>
             <div id="dxfCoordBar" style="position:absolute;left:10px;bottom:10px;display:none;gap:8px;align-items:center;z-index:5;background:rgba(10,14,19,.82);border:1px solid var(--line);border-radius:7px;padding:5px 8px">
               <span id="dxfCoordRead" class="hint" style="margin:0;font-family:Consolas,monospace;white-space:nowrap"></span>
@@ -935,6 +949,32 @@
           <span class="pane-label">3D-Modell — Segmentzerlegung</span>
           <div class="simlegend" id="modelInfo" style="left:10px;right:auto;top:10px;max-width:340px">Keine Datei geladen. STL laden.</div>
           <canvas id="cModel"></canvas>
+          <!-- Ansichtsmenü „◫ Segmentpaar" (wie im Kerndesign): was gezeigt wird; Werte in modelGcode.pv -->
+          <div class="pane-toggles" id="m3dPairToggles" style="left:auto;right:10px;top:130px;display:none">
+            <label>Segment: <select id="m3dPairSeg"></select></label>
+            <label><input type="checkbox" data-pv="sol"> Sollkontur A/B</label>
+            <label><input type="checkbox" data-pv="cut"> Schnittspur (Abbrand)</label>
+            <label title="Band in der echten Breite des Schnittspalts unter der Schnittspur (Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="model"> Abbrand in wahrer Dicke</label>
+            <label><input type="checkbox" data-pv="block"> Styroporblock</label>
+            <label><input type="checkbox" data-pv="start"> Startpunkt + Richtung</label>
+            <label><input type="checkbox" data-pv="sync"> Synchronpaare</label>
+            <label><input type="checkbox" data-pv="nums"> Punktnummern alle <input type="number" id="m3dPairNumN" min="1" max="1000" step="1" style="width:46px;padding:1px 3px;font-size:11px"></label>
+            <label title="Extrapolierte Turmbahnen (links/rechts) und Maschinen-Nullpunkt"><input type="checkbox" id="m3dPairTowers"> Turmwege</label>
+            <label><input type="checkbox" data-pv="legend"> Legende</label>
+            <button type="button" class="to-gcode" data-gsrc="model" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+          </div>
+          <!-- Ansichtsmenü „▤ Platte"; Werte in modelGcode.plv -->
+          <div class="pane-toggles" id="m3dPlateToggles" style="left:auto;right:10px;top:130px;display:none">
+            <label><input type="checkbox" data-plv="sol"> Querschnitte A/B</label>
+            <label><input type="checkbox" data-plv="cut"> Schnittspur (Abbrand)</label>
+            <label title="Band in der echten Breite des Schnittspalts unter der Schnittspur (Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="model"> Abbrand in wahrer Dicke</label>
+            <label><input type="checkbox" data-plv="block"> Styroporblock je Stück</label>
+            <label><input type="checkbox" id="m3dPlateTravel"> Fahrwege</label>
+            <label><input type="checkbox" data-plv="labels"> Stücknummern</label>
+            <label><input type="checkbox" data-plv="nums"> Punktnummern alle <input type="number" id="m3dPlateNumN" min="1" max="1000" step="1" style="width:46px;padding:1px 3px;font-size:11px"></label>
+            <label><input type="checkbox" data-plv="legend"> Legende</label>
+            <button type="button" class="to-gcode" data-gsrc="plate" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
+          </div>
           <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
             <button id="m3dViewToggle" title="Zwischen 3D-Ansicht und lagerichtigen Schnittprofilen umschalten">▦ Schnittprofile</button>
             <button id="m3dViewPairs" title="Ein Segmentpaar (zwei Stirnprofile) mit Schnittspur anzeigen">◫ Segmentpaar</button>
@@ -1594,7 +1634,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261020pick1"></script>
+<script src="i18n.js?v=20261021src1"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261004gerade2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
@@ -1617,22 +1657,22 @@
 <script src="simmodel.js?v=20261004gerade2"></script>
 <script src="occt-import-js.js?v=20261018asm"></script>
 <script src="occt_wasm.js?v=20261018asm"></script>
-<script src="model3d.js?v=20261020pick1"></script>
-<script src="model3d_gcode.js?v=20261020heat1"></script>
+<script src="model3d.js?v=20261021ap2"></script>
+<script src="model3d_gcode.js?v=20261021ap1"></script>
 <script src="core.js?v=20261012re"></script>
 <script src="cad.js?v=20261004gerade2"></script>
 <script src="gcode.js?v=20261017theme3"></script>
 <script src="spars.js?v=20261004gerade2"></script>
 <script src="ribs.js?v=20261017theme2"></script>
-<script src="dxfshapes.js?v=20261017theme2"></script>
+<script src="dxfshapes.js?v=20261021uni4"></script>
 <script src="wingimport.js?v=20261010xflm"></script>
-<script src="filesys.js?v=20261019me1"></script>
+<script src="filesys.js?v=20261021rpu1"></script>
 <script src="stlpreview.js?v=20261017theme2"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
 <script src="gmfc.js?v=20261017theme2"></script>
 <script src="render.js?v=20261005home"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261020pick1"></script>
+<script src="sidebar.js?v=20261021src1"></script>
 <script src="pathpreview.js?v=20261008bcl"></script>
 <script src="gcodegen.js?v=20261008bcl"></script>
 <script src="cutpanel.js?v=20261008abl"></script>

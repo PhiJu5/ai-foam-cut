@@ -1286,6 +1286,75 @@
   function correspondLoops(a, b, N) {
     let A = resampleClosed(a, N), B = resampleClosed(b, N); B = alignLoops(A, B); return [A, B];
   }
+  // ---- Manuelle Synchronpaare (wie DXF-Formen) ----
+  // Ein Paar {a:[u,w], b:[u,w]} liegt in Querschnittskoordinaten (vor Achsentausch/
+  // Spiegeln), damit es Punktzahl-, Tausch- und Spiegel-Änderungen übersteht. Es wird
+  // auf die Schleife projiziert (Bogenlänge); zwischen den Paaren laufen A und B
+  // gleichmäßig nach Bogenlänge, die Paare selbst sind exakte Stützpunkte beider Seiten.
+  function loopAcc(P) { const acc = [0]; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; acc.push(acc[i] + Math.hypot(q[0] - p[0], q[1] - p[1])); } return acc; }
+  // Nächster Punkt auf der geschlossenen Schleife (Kantenprojektion) → {s, d2, pt}.
+  function projectOnLoop(P, q, acc) {
+    acc = acc || loopAcc(P);
+    let best = { s: 0, d2: Infinity, pt: P[0] };
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length], ex = b[0] - a[0], ey = b[1] - a[1], L2 = ex * ex + ey * ey;
+      const t = L2 > 1e-12 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * ex + (q[1] - a[1]) * ey) / L2)) : 0;
+      const x = a[0] + t * ex, y = a[1] + t * ey, d2 = (q[0] - x) ** 2 + (q[1] - y) ** 2;
+      if (d2 < best.d2) best = { s: acc[i] + t * (acc[i + 1] - acc[i]), d2, pt: [x, y] };
+    }
+    return best;
+  }
+  function pointAtArc(P, acc, s) {
+    const tot = acc[acc.length - 1]; s = ((s % tot) + tot) % tot;
+    let i = 0; while (i < P.length - 1 && acc[i + 1] < s) i++;
+    const seg = acc[i + 1] - acc[i], t = seg > 1e-12 ? (s - acc[i]) / seg : 0, a = P[i], b = P[(i + 1) % P.length];
+    return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])];
+  }
+  // Schleifenpaar über Synchronpaare korrespondieren. Paare, die die Reihenfolge auf
+  // B verletzen (Überkreuzung) oder doppelt sind, werden verworfen (dropped).
+  // Rückgabe {A, B, used, dropped}; der erste Punkt ist das erste gültige Paar.
+  function syncLoops(a, b, pairs, N) {
+    const accA = loopAcc(a), accB = loopAcc(b), LA = accA[a.length], LB = accB[b.length];
+    const pp = pairs.map(p => ({ sa: projectOnLoop(a, p.a, accA).s, sb: projectOnLoop(b, p.b, accB).s }));
+    const sa0 = pp[0].sa, sb0 = pp[0].sb, rel = (s, s0, L) => ((s - s0) % L + L) % L;
+    const ord = pp.map((p, k) => ({ ra: rel(p.sa, sa0, LA), rb: rel(p.sb, sb0, LB), k })).sort((x, y) => x.ra - y.ra);
+    const keep = [ord[0]], bad = []; let dropped = 0;
+    for (let k = 1; k < ord.length; k++) {
+      const last = keep[keep.length - 1];
+      if (ord[k].ra > last.ra + 1e-6 && ord[k].rb > last.rb + 1e-6) keep.push(ord[k]); else { dropped++; bad.push(ord[k].k); }
+    }
+    const K = keep.length, len = [];
+    for (let k = 0; k < K; k++) {
+      const nx = k + 1 < K ? keep[k + 1] : { ra: LA, rb: LB };
+      len.push({ la: nx.ra - keep[k].ra, lb: nx.rb - keep[k].rb });
+    }
+    // Punkte je Intervall: fest vorgegeben (Paar.n, wie „Pkt" bei DXF-Formen) oder
+    // längenproportional aus dem Rest der Zielpunktzahl.
+    const fixN = k => { const v = pairs[keep[k].k].n | 0; return v >= 2 ? v : 0; };
+    let fixed = 0, wsum = 0;
+    for (let k = 0; k < K; k++) { if (fixN(k)) fixed += fixN(k); else wsum += Math.max(len[k].la, len[k].lb); }
+    const rest = Math.max(K, N - fixed); wsum = wsum || 1;
+    const A = [], B = [];
+    for (let k = 0; k < K; k++) {
+      const n = fixN(k) || Math.max(1, Math.round(rest * Math.max(len[k].la, len[k].lb) / wsum));
+      for (let i = 0; i < n; i++) {
+        A.push(pointAtArc(a, accA, sa0 + keep[k].ra + len[k].la * i / n));
+        B.push(pointAtArc(b, accB, sb0 + keep[k].rb + len[k].lb * i / n));
+      }
+    }
+    return { A, B, used: K, dropped, bad };
+  }
+  // Synchronpaare automatisch (Außenkontur, gleiche Automatik wie DXF-Formen über
+  // App.autoSyncPairs: Nase, Umkehrpunkte, Ecken, sonst Bogenlänge). Rückgabe
+  // { pairs:[{a:[u,w], b:[u,w]}], msg } in Querschnittskoordinaten oder null.
+  function autoSyncSeg(segIndex) {
+    if (!ensureSegments() || !M.segs[segIndex] || !(window.App && App.autoSyncPairs)) return null;
+    const s = M.segs[segIndex], mA = sectionMulti(M.axis, s.lo), mB = sectionMulti(M.axis, s.hi);
+    if (!mA || !mB) return null;
+    const xy = L => L.map(p => ({ x: p[0], y: p[1] }));
+    const r = App.autoSyncPairs(xy(mA.outer), xy(mB.outer));
+    return { pairs: r.pairs.map(q => ({ a: mA.outer[q.i].slice(), b: mB.outer[q.j].slice() })), msg: r.msg };
+  }
   // Kombinierten Schnittpfad bauen: erst INNEN (über einen Eindringschlitz vom
   // Außen-Eindringpunkt), dann AUSSEN. entryIdx = Punkt auf der Außenkontur.
   // Eindringschlitz außen → Loch: IMMER exakt senkrecht oder waagerecht (je nach
@@ -1530,36 +1599,65 @@
     // gemeinsamen Vorgaben — nur für Segmente mit eigener Einstellung.
     const ownStart = o.startBySeg && o.startBySeg[segIndex];
     if (ownStart) ['start', 'startPt', 'startAng', 'reverse'].forEach(k => { if (ownStart[k] !== undefined) o[k] = ownStart[k]; });
+    // „Anfahrt/Ausfahrt sicher" (wie DXF-Formen): bei Anfahrt von oben/vorne/unten beginnt der
+    // Schnitt am Punkt, der der Anfahrrichtung am nächsten liegt — nur bei automatischem bzw.
+    // Winkel-Startpunkt und ohne Synchronpaare. „Vorne" = vom Nullpunkt weg (max. h).
+    if (o.safeLead && (o.start === 'auto' || o.start === 'angle') && !((o.syncBySeg && o.syncBySeg[segIndex]) || []).length) {
+      const sl = { top: 'top', front: 'rear', bottom: 'bottom' }[o.approach];
+      if (sl) o.start = sl;
+    }
     const ax = M.axis, s = M.segs[segIndex];
     const mA = sectionMulti(ax, s.lo), mB = sectionMulti(ax, s.hi);
     if (!mA || !mB) return null;
     const map = p => { let h = p[0], v = p[1]; if (o.swap) { const t = h; h = v; v = t; } if (o.flip) h = -h; return [h, v]; };
-    const N = Math.max(8, Math.min(2000, Math.max(o.N | 0, mA.outer.length, mB.outer.length)));
-    let [oA, oB] = correspondLoops(mA.outer, mB.outer, N); oA = oA.map(map); oB = oB.map(map);
+    // Punktverteilung wie DXF-Formen: „Punkte gesamt" (o.N) oder „Punktdichte" (o.perMM,
+    // Punkte je mm der längeren Außenkontur).
+    const NT = o.perMM > 0 ? Math.round(Math.max(perimClosed(mA.outer), perimClosed(mB.outer)) * o.perMM) : (o.N | 0);
+    const N = Math.max(8, Math.min(2000, Math.max(NT, mA.outer.length, mB.outer.length)));
+    // Manuelle Synchronpaare dieses Segments: jedes Paar der Schleife zuordnen, auf
+    // der sein A- bzw. B-Punkt liegt (-1 = außen, sonst Lochindex). Passen A- und
+    // B-Schleife nicht zusammen (außen ↔ Loch, fremdes Loch), zählt es als ungültig.
+    const syncRaw = (o.syncBySeg && o.syncBySeg[segIndex]) || [];
+    const loopOf = (m, q) => { let bi = -1, bd = projectOnLoop(m.outer, q).d2; m.inners.forEach((l, i) => { const d = projectOnLoop(l, q).d2; if (d < bd) { bd = d; bi = i; } }); return bi; };
+    const syncTag = syncRaw.filter(p => p && p.a && p.b).map(p => ({ a: p.a, b: p.b, n: p.n, la: loopOf(mA, p.a), lb: loopOf(mB, p.b), ok: false }));
+    const syncInfo = { total: syncTag.length, used: 0, dropped: 0 };
+    const pairLoops = (la, lb, iA, iB, Np) => {
+      const sp = syncTag.filter(t => t.la === iA && t.lb === iB);
+      if (!sp.length) return correspondLoops(la, lb, Np);
+      const r = syncLoops(la, lb, sp, Np); syncInfo.used += r.used; syncInfo.dropped += r.dropped;
+      sp.forEach((t, k) => { t.ok = r.bad.indexOf(k) < 0; t.dropped = !t.ok; });
+      return [r.A, r.B];
+    };
+    let [oA, oB] = pairLoops(mA.outer, mB.outer, -1, -1, N); oA = oA.map(map); oB = oB.map(map);
     // Innenkonturen (Löcher) paaren + korrespondieren. Fehlt auf EINER Stirnfläche
     // ein Loch (die Kavität endet vor der Fläche), wird ein entarteter kleiner Kreis
     // am Schwerpunkt genutzt → das Loch läuft konisch aus, statt zu verschwinden.
     let innersA = [], innersB = [];
     const cA = mA.inners.map(centroid2D), cB = mB.inners.map(centroid2D), usedB = new Set();
     const degen = c => { const r = 0.3, o6 = []; for (let k = 0; k < 6; k++) { const a = k / 6 * 2 * Math.PI; o6.push([c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)]); } return o6; };
-    const pushPair = (la, lb) => { const Ni = Math.max(8, Math.min(1000, Math.max(o.N | 0, la.length, lb.length))); const [iA, iB] = correspondLoops(la, lb, Ni); innersA.push(iA.map(map)); innersB.push(iB.map(map)); };
+    const pushPair = (la, lb, ia, ib) => { const Ni = Math.max(8, Math.min(1000, Math.max(o.N | 0, la.length, lb.length))); const [iA, iB] = (ia != null && ib != null) ? pairLoops(la, lb, ia, ib, Ni) : correspondLoops(la, lb, Ni); innersA.push(iA.map(map)); innersB.push(iB.map(map)); };
     // von der größeren Seite aus paaren (nächster Schwerpunkt)
     const order = mA.inners.map((inn, i) => i).sort((x, y) => Math.abs(polyArea2D(mA.inners[y])) - Math.abs(polyArea2D(mA.inners[x])));
     for (const i of order) {
       let best = -1, bd = Infinity;
       for (let j = 0; j < mB.inners.length; j++) { if (usedB.has(j)) continue; const d = (cA[i][0] - cB[j][0]) ** 2 + (cA[i][1] - cB[j][1]) ** 2; if (d < bd) { bd = d; best = j; } }
-      if (best >= 0) { usedB.add(best); pushPair(mA.inners[i], mB.inners[best]); }
+      if (best >= 0) { usedB.add(best); pushPair(mA.inners[i], mB.inners[best], i, best); }
       else pushPair(mA.inners[i], degen(cA[i]));      // A-Loch ohne B-Partner → B entartet
     }
     for (let j = 0; j < mB.inners.length; j++) if (!usedB.has(j)) pushPair(degen(cB[j]), mB.inners[j]);  // B-Loch ohne A-Partner
     const hollow = innersA.length > 0;
+    // Marken der Synchronpaare für die Anzeige (auf die Sollkontur projiziert, Ansichtsrahmen).
+    const loopRaw = (m, i) => (i < 0 ? m.outer : m.inners[i]);
+    const syncMarks = syncTag.map((t, k) => ({ n: k + 1, ok: t.ok,
+      a: map(projectOnLoop(loopRaw(mA, t.la), t.a).pt), b: map(projectOnLoop(loopRaw(mB, t.lb), t.b).pt) }));
+    syncInfo.invalid = syncTag.filter(t => !t.ok && !t.dropped).length;
 
     const ed = o.edits && o.edits[segIndex];
     if (ed && ed.A && ed.B && ed.A.length === ed.B.length) {
       return { A: ed.A.map(p => p.slice()), B: ed.B.map(p => p.slice()),
         rawOuterA: oA, rawOuterB: oB, rawInnersA: innersA, rawInnersB: innersB,
         cutOuterA: oA, cutOuterB: oB, cutInnersA: innersA, cutInnersB: innersB,
-        hollow, entryIdx: 0, entry: oA[0], kerfInfo: { mode: 'edit' }, edited: true, seg: segIndex, lo: s.lo, hi: s.hi };
+        hollow, entryIdx: 0, entry: oA[0], kerfInfo: { mode: 'edit' }, edited: true, seg: segIndex, lo: s.lo, hi: s.hi, syncMarks, syncInfo };
     }
 
     // Abbrand: Außen nach außen, Innen nach innen.
@@ -1596,7 +1694,7 @@
     }
     return { A, B, rawOuterA: oA, rawOuterB: oB, rawInnersA: innersA, rawInnersB: innersB,
       cutOuterA, cutOuterB, cutInnersA, cutInnersB,
-      hollow, entryIdx, innerEntries, entry: cutOuterA[entryIdx], kerfInfo, edited: false, seg: segIndex, lo: s.lo, hi: s.hi };
+      hollow, entryIdx, innerEntries, entry: cutOuterA[entryIdx], kerfInfo, edited: false, seg: segIndex, lo: s.lo, hi: s.hi, syncMarks, syncInfo };
   }
 
   // Bahnen (Türme, Profile) eines Segments samt Bewegungsliste. opt: Achsbuchstaben, Vorschub, Abbrand,
@@ -1664,10 +1762,13 @@
     // beide Stirnprofile) sitzt mit seiner unteren/rückwärtigen Kante bei
     // (blockX, blockY) über dem Maschinennullpunkt. Alle Koordinaten entsprechend
     // verschieben. Die Türme dürfen (Extrapolation) darüber hinausragen.
-    const blockX = o.blockX || 0, blockY = o.blockY || 0;
-    let bMinH = Infinity, bMinV = Infinity;
-    for (const p of A.concat(B)) { if (p[0] < bMinH) bMinH = p[0]; if (p[1] < bMinV) bMinV = p[1]; }
-    const offH = blockX - bMinH, offV = blockY - bMinV;
+    // Blockzugabe rundum (o.blockMargin, Standard 0 = Block liegt knapp an der Schnittspur).
+    const blockX = o.blockX || 0, blockY = o.blockY || 0, bm = Math.max(0, +o.blockMargin || 0);
+    let bMinH = Infinity, bMinV = Infinity, bMaxH = -Infinity, bMaxV = -Infinity;
+    for (const p of A.concat(B)) { if (p[0] < bMinH) bMinH = p[0]; if (p[1] < bMinV) bMinV = p[1]; if (p[0] > bMaxH) bMaxH = p[0]; if (p[1] > bMaxV) bMaxV = p[1]; }
+    const offH = blockX - (bMinH - bm), offV = blockY - (bMinV - bm);
+    // Block (Prisma, beide Stirnflächen gleich) im Maschinenrahmen: [h0, v0, h1, v1].
+    const blk = [blockX, blockY, bMaxH - bMinH + 2 * bm + blockX, bMaxV - bMinV + 2 * bm + blockY];
     const sh = (arr) => arr.map(p => [p[0] + offH, p[1] + offV]);
     const L = sh(towerL), R = sh(towerR); A = sh(A); B = sh(B);
     M.rule = { seg: segIndex };
@@ -1687,33 +1788,106 @@
     // (0 = aus) teilt nur den letzten waagerechten Anteil in Eilgang + Schnitt.
     const pathL = [], pathR = [];
     const step = (l, r) => { pathL.push(l.slice()); pathR.push(r.slice()); };
+    // Punkt je Stirnfläche (pA in Ebene A, pB in Ebene B) → Turmpunkte wie die Kontur
+    // extrapoliert. Gleiche Punkte auf beiden Flächen ergeben gleiche Turmpunkte.
+    const towers = (pA, pB) => { const dh = pB[0] - pA[0], dv = pB[1] - pA[1]; const l = [pA[0] - dh * tA / den, pA[1] - dv * tA / den]; return [l, [l[0] + dh / den, l[1] + dv / den]]; };
+    const go = (pA, pB, k, F, extra) => {
+      const [l, r] = towers(pA, pB || pA);
+      mv(Object.assign({ x: f(l[0]), y: f(l[1]), u: f(r[0]), v: f(r[1]), F, k }, extra || {})); step(l, r);
+    };
+    // Anfahrt (wie DXF-Formen): 'rear' waagrecht vom Nullpunkt (bisher), 'top' über den
+    // Block und senkrecht von oben, 'front' über den Block nach vorne und waagrecht von
+    // vorne, 'bottom' unter dem Block hindurch und senkrecht von unten. „Hinten" = Seite
+    // zum Nullpunkt (kleines h), „vorne" = gegenüber. Luftwege auf Sicherheitshöhe
+    // (o.safe über der Blockoberkante); An-/Ausfahrpunkt o.approachDist vor der Blockfläche.
+    const apDir = ['top', 'front', 'bottom'].indexOf(o.approach) >= 0 ? o.approach : 'rear';
+    const apDist = Math.max(0, o.approachDist != null ? +o.approachDist : 10);
+    const ySafe = blk[3] + Math.max(0, +o.safe || 0);
+    const yBot = Math.max(0, blk[1] - apDist);
+    const A0 = A[0], B0 = B[0], airF = o.airFeed ? (+o.airFeed).toFixed(0) : rapid;
+    const apPt = apDir === 'top' ? [[A0[0], blk[3] + apDist], [B0[0], blk[3] + apDist]]
+      : apDir === 'front' ? [[blk[2] + apDist, A0[1]], [blk[2] + apDist, B0[1]]]
+      : apDir === 'bottom' ? [[A0[0], yBot], [B0[0], yBot]] : null;
+    // Blockzuschnitt (wie DXF-Formen, gleiche Einstellung cfg.cutOrder): senkrechte Schnitte
+    // an Blockvorderkante (h1) und hinterem Blockende (h0), um den halben Abbrand ins
+    // Verschnittmaterial versetzt, von der Sicherheitshöhe bis o.blockCutY (Y0 bzw. Überschnitt).
+    const ord0 = o.cutOrder === 'wrap' ? 'before' : o.cutOrder;
+    const order = ['before', 'after', 'only'].indexOf(ord0) >= 0 ? ord0 : 'none';
+    const hk = Math.max(0, +o.kerf || 0) / 2, xFront = blk[2] + hk, xRear = blk[0] - hk;
+    const yLow = Math.max(0, +o.blockCutY || 0);
+    const blockCut = (x, back) => {   // über der Fläche → durch den Block hinab (→ wieder hoch)
+      go([x, ySafe], null, 'bcOver', airF);
+      go([x, yLow], null, 'bcCut', feedS);
+      if (back) go([x, ySafe], null, 'bcUp', feedS);
+    };
     mv({ x: '0', y: '0', u: '0', v: '0', F: rapid, k: 'start' });
     step([0, 0], [0, 0]);
-    const L0 = L[0], R0 = R[0];
-    mv({ y: f(L0[1]), v: f(R0[1]), F: rapid, k: 'up' });
-    step([0, L0[1]], [0, R0[1]]);
-    if (lead > 0) {
-      mv({ x: f(L0[0] - loff), u: f(R0[0] - loff), F: rapid, k: 'lead', lead });
-      step([L0[0] - loff, L0[1]], [R0[0] - loff, R0[1]]);
+    let at = 'origin';   // 'origin' | 'slit' (unten im hinteren Blockschnitt) | 'safe' | 'entryRear' | 'bottom'
+    if (order === 'before' || order === 'only') {
+      go([0, ySafe], null, 'safeUp', airF);
+      blockCut(xFront, true);
+      blockCut(xRear, order === 'only');
+      at = order === 'only' ? 'safe' : 'slit';
     }
-    mv({ x: f(L0[0]), u: f(R0[0]), F: feedS, k: 'enter' });
-    step([L0[0], L0[1]], [R0[0], R0[1]]);
-    for (let i = 1; i < L.length; i++) {
-      const fn = feedNote(o, L[i - 1], L[i], R[i - 1], R[i], A[i - 1], A[i], B[i - 1], B[i]);
-      mv({ x: f(L[i][0]), y: f(L[i][1]), u: f(R[i][0]), v: f(R[i][1]), F: fn.F.toFixed(0), k: 'cut', spd: fn });
-      step(L[i], R[i]);
+    if (order !== 'only') {
+      // --- Anfahren ---
+      if (apDir === 'rear') {
+        if (at === 'slit') go([xRear, A0[1]], [xRear, B0[1]], 'bcUp', feedS);   // im Schnittspalt hoch auf Eintrittshöhe
+        else {
+          go([0, A0[1]], [0, B0[1]], 'up', rapid);
+          if (lead > 0) go([A0[0] - loff, A0[1]], [B0[0] - loff, B0[1]], 'lead', rapid, { lead });
+        }
+      } else if (apDir === 'bottom') {
+        if (at === 'slit') go([xRear, yBot], null, 'bcUp', feedS); else go([0, yBot], null, 'up', airF);
+        go(apPt[0], apPt[1], 'under', airF);
+      } else {
+        if (at === 'slit') go([xRear, ySafe], null, 'bcUp', feedS); else go([0, ySafe], null, 'safeUp', airF);
+        if (apDir === 'top') go([A0[0], ySafe], [B0[0], ySafe], 'over', airF);
+        else go([apPt[0][0], ySafe], [apPt[1][0], ySafe], 'over', airF);
+        go(apPt[0], apPt[1], 'down', airF);
+      }
+      go(A0, B0, 'enter', feedS, { dir: apDir });
+      // --- Kontur ---
+      const n = A.length;
+      for (let i = 1; i < n; i++) {
+        const fn = feedNote(o, L[i - 1], L[i], R[i - 1], R[i], A[i - 1], A[i], B[i - 1], B[i]);
+        mv({ x: f(L[i][0]), y: f(L[i][1]), u: f(R[i][0]), v: f(R[i][1]), F: fn.F.toFixed(0), k: 'cut', spd: fn });
+        step(L[i], R[i]);
+      }
+      if (o.closeLoop) {
+        const n1 = n - 1, fn = feedNote(o, L[n1], L[0], R[n1], R[0], A[n1], A[0], B[n1], B[0]);
+        mv({ x: f(L[0][0]), y: f(L[0][1]), u: f(R[0][0]), v: f(R[0][1]), F: fn.F.toFixed(0), k: 'close', spd: fn }); step(L[0], R[0]);
+      }
+      // --- Ausfahren auf demselben Weg ---
+      if (apDir === 'rear') at = 'entryRear';
+      else {
+        go(apPt[0], apPt[1], 'exit', feedS);
+        if (apDir === 'bottom') at = 'bottom';
+        else {
+          const xa = apDir === 'top' ? [A0[0], B0[0]] : [apPt[0][0], apPt[1][0]];
+          go([xa[0], ySafe], [xa[1], ySafe], 'backUp', airF); at = 'safe';
+        }
+      }
     }
-    if (o.closeLoop) {
-      const n1 = L.length - 1, fn = feedNote(o, L[n1], L0, R[n1], R0, A[n1], A[0], B[n1], B[0]);
-      mv({ x: f(L0[0]), y: f(L0[1]), u: f(R0[0]), v: f(R0[1]), F: fn.F.toFixed(0), k: 'close', spd: fn }); step(L0, R0); }
-    mv({ x: '0', u: '0', F: rapid, k: 'backX' }); step([0, L0[1]], [0, R0[1]]);   // davor: Draht aus (M5)
+    if (order === 'after') {
+      if (at === 'entryRear') go([0, A0[1]], [0, B0[1]], 'out', airF);
+      if (at === 'bottom') go([0, yBot], null, 'out', airF);
+      if (at !== 'safe') go([0, ySafe], null, 'safeUp', airF);
+      blockCut(xRear, true);
+      blockCut(xFront, true);
+      at = 'safe';
+    }
+    // --- zurück zum Nullpunkt (Draht aus bei backX) ---
+    if (at === 'entryRear') go([0, A0[1]], [0, B0[1]], 'backX', rapid);
+    else if (at === 'bottom') go([0, yBot], null, 'backX', airF);
+    else go([0, ySafe], null, 'backX', airF);
     mv({ y: '0', v: '0', F: rapid, k: 'backY' }); step([0, 0], [0, 0]);
     // Sollkontur (ohne Abbrand) im selben Rahmen — für die Anzeige „Querschnitt vs. Schnittspur".
     const rawA = sh(cp.rawOuterA || []), rawB = sh(cp.rawOuterB || []);
     const rawInA = (cp.rawInnersA || []).map(sh), rawInB = (cp.rawInnersB || []).map(sh);
     return { moves, meta, opt: o, N: A.length, points: A.length, profA: A, profB: B,
       rawA, rawB, rawInA, rawInB,
-      towerL: L, towerR: R, pathL, pathR, offH, offV, span, zA, zB, mw, seg: segIndex };
+      towerL: L, towerR: R, pathL, pathR, offH, offV, span, zA, zB, mw, seg: segIndex, block: blk, approach: apDir, cutOrder: order };
   }
 
   // Segment-Dicke (= Ebenenabstand) eines Segments.
@@ -1734,7 +1908,7 @@
     // Signatur der geometrie-relevanten Optionen (inkl. Maschinenbreite/Blocklage,
     // da diese die Turm-Extrapolation bestimmen).
     const segSig = JSON.stringify([o.N, o.swap, o.flip, o.start, o.startPt, o.startAng, o.reverse,
-      o.kerfMode, o.kerf, o.cal, o.edits, o.machineWidth, o.blockZ, o.startBySeg || null]);
+      o.kerfMode, o.kerf, o.cal, o.edits, o.machineWidth, o.blockZ, o.startBySeg || null, o.syncBySeg || null]);
     // pro Stück: Profile (Plattenfläche A/B) + extrapolierte Türme. Kontur am
     // Ursprung je Segment gecacht (teure Modell-Schnitte nur einmal).
     const pieces = [];
@@ -2496,7 +2670,36 @@
     else edits[seg] = { A: edits[seg].A.map(p => p.slice()), B: edits[seg].B.map(p => p.slice()) };
     if (edits[seg][which][idx]) { edits[seg][which][idx] = pt; pairApply({ edits }); }
   }
-  function setPairEdit(on) { pairEdit = !!on; draw(); }
+  function setPairEdit(on) { pairEdit = !!on; if (pairEdit) { pairSync = false; pairSyncPick = null; pairStart = false; } draw(); }
+  // Synchronpunkte setzen: erst Punkt auf Sollkontur A, dann zugehörigen auf B.
+  let pairSync = false, pairSyncPick = null, pairSyncHover = null;
+  function setPairSync(on) { pairSync = !!on; pairSyncPick = null; pairSyncHover = null; if (pairSync) { pairEdit = false; pairStart = false; } draw(); }
+  // Anfahrpunkt per Klick setzen: nur im eigens gestarteten Wahlmodus (endet nach dem Setzen).
+  let pairStart = false;
+  function setPairStart(on) { pairStart = !!on; pairHover = null; if (pairStart) { pairEdit = false; pairSync = false; pairSyncPick = null; } draw(); }
+  // Fangpunkt auf den Sollkonturen einer Seite: Stützpunkt in 8 px, sonst Kantenpunkt.
+  function pairSyncSnap(mx, my, side) {
+    if (!pairX || !pairX.sol) return null;
+    const loops = pairX.sol[side], q = pairInv(mx, my); if (!q) return null;
+    let bv = null, bvd = 8 * 8, be = null, bed = PAIR_PICK_TOL * PAIR_PICK_TOL;
+    for (const P of loops) {
+      for (const p of P) { const s = pairScreen(p), d = (s.x - mx) ** 2 + (s.y - my) ** 2; if (d < bvd) { bvd = d; bv = p; } }
+      const pr = projectOnLoop(P, q), s = pairScreen(pr.pt), d = (s.x - mx) ** 2 + (s.y - my) ** 2;
+      if (d < bed) { bed = d; be = pr.pt; }
+    }
+    const pt = bv || be;
+    return pt ? { pt: pt.slice(), side } : null;
+  }
+  // Ansichtsrahmen (h,v) → Querschnittskoordinaten (u,w): Spiegeln/Tauschen zurücknehmen.
+  function pairUnmap(p) { let h = p[0], v = p[1]; if (pairX.flip) h = -h; if (pairX.swap) { const t = h; h = v; v = t; } return [h, v]; }
+  function pairSyncClick(mx, my) {
+    const side = pairSyncPick ? 'B' : 'A', hit = pairSyncSnap(mx, my, side);
+    if (!hit) return;
+    if (!pairSyncPick) { pairSyncPick = hit.pt; pairSyncHover = null; draw(); return; }
+    const a = pairUnmap(pairSyncPick), b = pairUnmap(hit.pt);
+    pairSyncPick = null; pairSyncHover = null;
+    pairApply({ syncAdd: { a, b } });
+  }
 
   // Für ein Segment: seine beiden Stirnprofile (das „Paar") mit dem
   // abbrandkompensierten Schnittweg (Schnittspur), analog zu Kern-/Negativ-Design.
@@ -2506,13 +2709,17 @@
     return { outerA: cp.rawOuterA, outerB: cp.rawOuterB, innersA: cp.rawInnersA, innersB: cp.rawInnersB,
       cutOuterA: cp.cutOuterA, cutOuterB: cp.cutOuterB, cutInnersA: cp.cutInnersA, cutInnersB: cp.cutInnersB,
       A: cp.A, B: cp.B, hollow: cp.hollow, entry: cp.entry, innerEntries: cp.innerEntries || [], edited: cp.edited,
-      seg: segIndex, lo: cp.lo, hi: cp.hi, kp: kerfPairOf(cp.kerfInfo, Object.assign({ kerf: 0 }, o || {})) };
+      seg: segIndex, lo: cp.lo, hi: cp.hi, kp: kerfPairOf(cp.kerfInfo, Object.assign({ kerf: 0 }, o || {})),
+      syncMarks: cp.syncMarks || [], syncInfo: cp.syncInfo || null };
   }
   function drawPairs() {
     ensureSegments();     // bei Bedarf automatisch zerlegen (passend zu Achse/Ebenen)
     const prov = (typeof window !== 'undefined' && window.__model3dPairProvider) ? window.__model3dPairProvider() : { seg: 0, opt: {} };
     const nseg = M.segs ? M.segs.length : 0;
     const seg = Math.max(0, Math.min(prov.seg || 0, nseg - 1));
+    syncPairToggles();
+    const sh = { sol: pairShowOn('sol'), cut: pairShowOn('cut'), block: pairShowOn('block'), start: pairShowOn('start'),
+      sync: pairShowOn('sync') || pairSync, legend: pairShowOn('legend') };
     const d = nseg ? pairData(seg, prov.opt || {}) : null;
     if (!d) {
       ctx.fillStyle = col('--muted', '#8b98a8'); ctx.font = '13px Segoe UI';
@@ -2535,6 +2742,7 @@
     // Blockgrenzen = Bounding-Box der Außen-Schnittspur.
     let bxmin = Infinity, bymin = Infinity, bxmax = -Infinity, bymax = -Infinity;
     for (const p of d.cutOuterA.concat(d.cutOuterB)) { bxmin = Math.min(bxmin, p[0]); bymin = Math.min(bymin, p[1]); bxmax = Math.max(bxmax, p[0]); bymax = Math.max(bymax, p[1]); }
+    { const bm = Math.max(0, +(prov.opt || {}).blockMargin || 0); bxmin -= bm; bymin -= bm; bxmax += bm; bymax += bm; }   // Blockzugabe wie im G-Code
     const all = d.A.concat(d.B);
     if (pathLp) { all.push.apply(all, pathLp); all.push.apply(all, pathRp); all.push(org); }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2545,7 +2753,9 @@
     const tx = x => W / 2 + p2.px + (x - cx) * sc;
     const ty = y => H / 2 + p2.py - (y - cy) * sc;
     // Transform + Punkte für Interaktion (Startpunkt setzen / Punkte verschieben).
-    pairX = { seg, cx, cy, sc, px: p2.px, py: p2.py, cutA: d.A, cutB: d.B, outer: d.cutOuterA, edited: d.edited };
+    pairX = { seg, cx, cy, sc, px: p2.px, py: p2.py, cutA: d.A, cutB: d.B, outer: d.cutOuterA, edited: d.edited,
+      sol: { A: [d.outerA].concat(d.innersA), B: [d.outerB].concat(d.innersB) },
+      swap: !!(prov.opt || {}).swap, flip: !!(prov.opt || {}).flip, syncInfo: d.syncInfo };
     // Achsenkreuz
     ctx.strokeStyle = col('--line', '#2a323c'); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
     ctx.beginPath(); ctx.moveTo(tx(0), 0); ctx.lineTo(tx(0), H); ctx.moveTo(0, ty(0)); ctx.lineTo(W, ty(0)); ctx.stroke();
@@ -2563,7 +2773,7 @@
       ctx.stroke(); ctx.setLineDash([]);
     };
     // Blockgrenzen (Rechteck) — das Werkstück umschließt die Schnittspur.
-    if (isFinite(bxmin)) {
+    if (sh.block && isFinite(bxmin)) {
       ctx.strokeStyle = col('--muted', '#8b98a8'); ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
       ctx.strokeRect(tx(bxmin), ty(bymax), (bxmax - bxmin) * sc, (bymax - bymin) * sc);
       ctx.setLineDash([]);
@@ -2579,13 +2789,15 @@
       ctx.fillStyle = col('--bad', '#ff6b6b'); ctx.font = '11px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
       ctx.fillText(T('Null (0,0)'), ox + 11, oy - 4);
     }
-    // Sollkontur (blass) — Außen und Löcher.
-    loop(d.outerA, col('--accent', '#4aa3ff'), 1); loop(d.outerB, col('--accent2', '#ffb454'), 1);
-    for (const inn of d.innersA) loop(inn, col('--accent', '#4aa3ff'), 1);
-    for (const inn of d.innersB) loop(inn, col('--accent2', '#ffb454'), 1);
+    // Sollkontur (blass) — Außen und Löcher. Im Synchron-Setzmodus immer sichtbar (Fangziel).
+    if (sh.sol || pairSync) {
+      loop(d.outerA, col('--accent', '#4aa3ff'), 1); loop(d.outerB, col('--accent2', '#ffb454'), 1);
+      for (const inn of d.innersA) loop(inn, col('--accent', '#4aa3ff'), 1);
+      for (const inn of d.innersB) loop(inn, col('--accent2', '#ffb454'), 1);
+    }
     // Abbrand in wahrer Dicke: Band in Schnittspaltbreite unter die Schnittspur (A und
     // B getrennt überblendet; Spalt je Punkt .kk, sonst Stirnflächen-Wert d.kp).
-    if (window.App && App.kerfBand && App.kerfTrueOn && App.kerfTrueOn('model')) {
+    if (sh.cut && window.App && App.kerfBand && App.kerfTrueOn && App.kerfTrueOn('model')) {
       const VB = { s: sc, X: tx, Y: ty }, wc = col('--wire', '#ff5a3c');
       const bl = (loops, k) => loops.map(l => ({ pts: l, kk: l.kk, k: l.k0 != null ? l.k0 : k }));
       if (d.edited) { App.kerfBand(ctx, VB, [d.A], { view: 'model', k: d.kp.A, color: wc }); App.kerfBand(ctx, VB, [d.B], { view: 'model', k: d.kp.B, color: wc }); }
@@ -2595,7 +2807,8 @@
       }
     }
     // Schnittspur (kräftig). Bearbeitet → der eingefrorene Pfad; sonst Außen/Löcher.
-    if (d.edited) {
+    if (!sh.cut && !pairEdit) { /* ausgeblendet */ }
+    else if (d.edited) {
       polyline(d.A, col('--wire', '#ff5a3c'), 1.8); polyline(d.B, col('--wire', '#ff5a3c'), 1.8, [6, 4]);
     } else {
       loop(d.cutOuterA, col('--wire', '#ff5a3c'), 1.8); loop(d.cutOuterB, col('--wire', '#ff5a3c'), 1.8, [6, 4]);
@@ -2603,7 +2816,7 @@
       for (const inn of d.cutInnersB) loop(inn, col('--wire', '#ff5a3c'), 1.8, [6, 4]);
     }
     // Eindringschlitz (außen → Loch), falls hohl.
-    if (d.hollow && d.cutInnersA.length && !d.edited) {
+    if (sh.start && d.hollow && d.cutInnersA.length && !d.edited) {
       ctx.strokeStyle = col('--good', '#57d38c'); ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
       for (let k = 0; k < d.cutInnersA.length; k++) { const inn = d.cutInnersA[k]; const ie = (d.innerEntries && d.innerEntries[k] != null) ? d.innerEntries[k] : nearestIdx(inn, d.entry); ctx.beginPath(); ctx.moveTo(tx(d.entry[0]), ty(d.entry[1])); ctx.lineTo(tx(inn[ie][0]), ty(inn[ie][1])); ctx.stroke(); }
       ctx.setLineDash([]);
@@ -2613,20 +2826,60 @@
       ctx.fillStyle = col('--wire', '#ff5a3c');
       for (const P of [d.A, d.B]) for (const p of P) { ctx.beginPath(); ctx.arc(tx(p[0]), ty(p[1]), 2.4, 0, 6.3); ctx.fill(); }
     }
+    // Punktnummern der Schnittbahn (Index = Reihenfolge im G-Code), jeder n-te Punkt
+    // auf A und B samt dünner Drahtlinie A[i]–B[i] — zur Prüfung der Zuordnung.
+    const nEvery = Math.max(0, Math.round(+prov.nums || 0));
+    if (nEvery > 0) {
+      const nc = col('--muted', '#8b98a8');
+      ctx.strokeStyle = nc; ctx.globalAlpha = 0.45; ctx.lineWidth = 0.8; ctx.beginPath();
+      for (let i = 0; i < Math.min(d.A.length, d.B.length); i += nEvery) { ctx.moveTo(tx(d.A[i][0]), ty(d.A[i][1])); ctx.lineTo(tx(d.B[i][0]), ty(d.B[i][1])); }
+      ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.font = '10px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      for (const [P, c] of [[d.A, col('--accent', '#4aa3ff')], [d.B, col('--accent2', '#ffb454')]]) {
+        ctx.fillStyle = c;
+        for (let i = 0; i < P.length; i += nEvery) { const X = tx(P[i][0]), Y = ty(P[i][1]); ctx.beginPath(); ctx.arc(X, Y, 2, 0, 6.3); ctx.fill(); ctx.fillText(i, X + 4, Y - 2); }
+      }
+    }
+    // Synchronpaare: Verbindungslinie A–B mit Nummer (ungültige rot).
+    if (sh.sync && d.syncMarks.length) {
+      ctx.font = 'bold 11px Segoe UI'; ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+      for (const m of d.syncMarks) {
+        const ax2 = tx(m.a[0]), ay2 = ty(m.a[1]), bx2 = tx(m.b[0]), by2 = ty(m.b[1]);
+        const lc = m.ok ? col('--good', '#57d38c') : col('--bad', '#ff6b6b');
+        ctx.strokeStyle = lc; ctx.lineWidth = 1.4; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(ax2, ay2); ctx.lineTo(bx2, by2); ctx.stroke(); ctx.setLineDash([]);
+        for (const [X, Y, c] of [[ax2, ay2, col('--accent', '#4aa3ff')], [bx2, by2, col('--accent2', '#ffb454')]]) {
+          ctx.fillStyle = c; ctx.beginPath(); ctx.arc(X, Y, 4.5, 0, 6.3); ctx.fill();
+          ctx.strokeStyle = lc; ctx.lineWidth = 1.4; ctx.stroke();
+        }
+        ctx.fillStyle = lc; ctx.fillText(String(m.n), (ax2 + bx2) / 2, (ay2 + by2) / 2 - 8);
+      }
+      ctx.textAlign = 'left';
+    }
+    if (pairSync) {
+      if (pairSyncPick) { ctx.fillStyle = col('--accent', '#4aa3ff'); ctx.beginPath(); ctx.arc(tx(pairSyncPick[0]), ty(pairSyncPick[1]), 6, 0, 6.3); ctx.fill(); }
+      if (pairSyncHover) {
+        ctx.strokeStyle = pairSyncHover.side === 'A' ? col('--accent', '#4aa3ff') : col('--accent2', '#ffb454');
+        ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(tx(pairSyncHover.pt[0]), ty(pairSyncHover.pt[1]), 8, 0, 6.3); ctx.stroke();
+        if (pairSyncPick) { ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(tx(pairSyncPick[0]), ty(pairSyncPick[1])); ctx.lineTo(tx(pairSyncHover.pt[0]), ty(pairSyncHover.pt[1])); ctx.stroke(); ctx.setLineDash([]); }
+      }
+    }
     // Eindringpunkt/Startpunkt + Richtung (Pfeil in den ersten Schnittzug).
-    const s0 = d.entry, s1 = d.A[Math.min(1, d.A.length - 1)];
-    const sx = tx(s0[0]), sy = ty(s0[1]);
-    ctx.fillStyle = col('--good', '#57d38c'); ctx.beginPath(); ctx.arc(sx, sy, 5, 0, 6.3); ctx.fill();
-    const ang = Math.atan2(ty(s1[1]) - sy, tx(s1[0]) - sx);
-    ctx.strokeStyle = col('--good', '#57d38c'); ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 22 * Math.cos(ang), sy + 22 * Math.sin(ang)); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(sx + 22 * Math.cos(ang), sy + 22 * Math.sin(ang));
-    ctx.lineTo(sx + 14 * Math.cos(ang - 0.4), sy + 14 * Math.sin(ang - 0.4));
-    ctx.lineTo(sx + 14 * Math.cos(ang + 0.4), sy + 14 * Math.sin(ang + 0.4));
-    ctx.closePath(); ctx.fillStyle = col('--good', '#57d38c'); ctx.fill();
+    if (sh.start || pairStart) {
+      const s0 = d.entry, s1 = d.A[Math.min(1, d.A.length - 1)];
+      const sx = tx(s0[0]), sy = ty(s0[1]);
+      ctx.fillStyle = col('--good', '#57d38c'); ctx.beginPath(); ctx.arc(sx, sy, 5, 0, 6.3); ctx.fill();
+      const ang = Math.atan2(ty(s1[1]) - sy, tx(s1[0]) - sx);
+      ctx.strokeStyle = col('--good', '#57d38c'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + 22 * Math.cos(ang), sy + 22 * Math.sin(ang)); ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(sx + 22 * Math.cos(ang), sy + 22 * Math.sin(ang));
+      ctx.lineTo(sx + 14 * Math.cos(ang - 0.4), sy + 14 * Math.sin(ang - 0.4));
+      ctx.lineTo(sx + 14 * Math.cos(ang + 0.4), sy + 14 * Math.sin(ang + 0.4));
+      ctx.closePath(); ctx.fillStyle = col('--good', '#57d38c'); ctx.fill();
+    }
     // Vorschau: hier würde ein Klick den Startpunkt setzen.
-    if (pairHover && !pairEdit) {
+    if (pairHover && !pairEdit && !pairSync) {
       const hx = tx(pairHover[0]), hy = ty(pairHover[1]);
       ctx.strokeStyle = col('--good', '#57d38c'); ctx.lineWidth = 1.5; ctx.setLineDash([3, 2]);
       ctx.beginPath(); ctx.arc(hx, hy, 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]);
@@ -2634,12 +2887,17 @@
     // Titel + Legende
     ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(T('Segmentpaar ') + (seg + 1) + '/' + nseg + ' — A = ' + sectionName(seg) + ', B = ' + sectionName(seg + 1)
-      + (d.hollow ? T('  · hohl (innen zuerst)') : '') + (d.edited ? T('  · bearbeitet') : ''), 12, 10);
-    const leg = [[col('--accent', '#4aa3ff'), T('Sollkontur A (außen/Loch)') + ' · ' + sectionName(seg)], [col('--accent2', '#ffb454'), T('Sollkontur B') + ' · ' + sectionName(seg + 1)],
-      [col('--wire', '#ff5a3c'), T('Schnittspur (A —, B ┄)')],
-      [col('--good', '#57d38c'), d.hollow ? T('Eindringpunkt + Schlitz') : T('Startpunkt + Richtung')],
-      [col('--muted', '#8b98a8'), T('Blockgrenzen')]];
+      + (d.hollow ? T('  · hohl (innen zuerst)') : '') + (d.edited ? T('  · bearbeitet') : '')
+      + (d.syncMarks.length ? T('  · Synchronpaare: ') + d.syncInfo.used + '/' + d.syncInfo.total : '') + T('  · Bahn ') + d.A.length + T(' Pkt'), 12, 10);
+    // Legende nur für eingeblendete Teile (Ansichtsmenü „Legende" schaltet sie ganz ab).
+    const leg = [];
+    if (sh.sol || pairSync) leg.push([col('--accent', '#4aa3ff'), T('Sollkontur A (außen/Loch)') + ' · ' + sectionName(seg)], [col('--accent2', '#ffb454'), T('Sollkontur B') + ' · ' + sectionName(seg + 1)]);
+    if (sh.cut || pairEdit) leg.push([col('--wire', '#ff5a3c'), T('Schnittspur (A —, B ┄)')]);
+    if (sh.start || pairStart) leg.push([col('--good', '#57d38c'), d.hollow ? T('Eindringpunkt + Schlitz') : T('Startpunkt + Richtung')]);
+    if (sh.block) leg.push([col('--muted', '#8b98a8'), T('Blockgrenzen')]);
     if (pathLp) { leg.push(['rgba(74,163,255,.55)', T('Turmweg links/rechts')], [col('--bad', '#ff6b6b'), T('Nullpunkt (0,0)')]); }
+    if (sh.sync && d.syncMarks.length) leg.push([col('--good', '#57d38c'), T('Synchronpaar (ungültig rot)')]);
+    if (!sh.legend) leg.length = 0;
     let ly = 30;
     for (const [c, label] of leg) {
       ctx.strokeStyle = c; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(12, ly + 6); ctx.lineTo(30, ly + 6); ctx.stroke();
@@ -2647,8 +2905,11 @@
     }
     ctx.fillStyle = col('--muted', '#8b98a8'); ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.font = '11px Segoe UI';
     ctx.fillText(pairEdit ? T('Punkt ziehen = verschieben · Doppelklick = zurücksetzen')
-      : (d.hollow ? T('Klick auf den Querschnitt = Eindringpunkt (außen) setzen · Rad = Zoom · Ziehen = Verschieben')
-        : T('Klick auf den Querschnitt = Startpunkt setzen · Rad = Zoom · Ziehen = Verschieben')), W - 12, H - 10);
+      : pairSync ? (pairSyncPick ? T('➋ zugehörigen Punkt auf Sollkontur B (orange) anklicken · Esc = abbrechen')
+        : T('➊ Punkt auf Sollkontur A (blau) anklicken · Rad = Zoom · Ziehen = Verschieben'))
+      : pairStart ? (d.hollow ? T('Klick auf den Querschnitt = Eindringpunkt (außen) setzen · Rad = Zoom · Ziehen = Verschieben')
+        : T('Klick auf den Querschnitt = Startpunkt setzen · Rad = Zoom · Ziehen = Verschieben'))
+      : T('Rad = Zoom · Ziehen = Verschieben · Doppelklick = zurück'), W - 12, H - 10);
     ctx.textAlign = 'left';
   }
 
@@ -2676,7 +2937,7 @@
     // Schwenken/Zoomen ändert nur die Ansichts-Transformation, nicht die Pfade.
     const memoKey = JSON.stringify(pls.map(p => [p.seg, p.dh, p.dv]))
       + '|' + JSON.stringify([(prov.opt || {}).N, (prov.opt || {}).kerfMode, (prov.opt || {}).kerf, (prov.opt || {}).plateGap, (prov.opt || {}).machineWidth, (prov.opt || {}).blockZ,
-        (prov.opt || {}).start, (prov.opt || {}).startPt, (prov.opt || {}).startAng, (prov.opt || {}).reverse, (prov.opt || {}).startBySeg, (prov.opt || {}).swap, (prov.opt || {}).flip, (prov.opt || {}).edits])
+        (prov.opt || {}).start, (prov.opt || {}).startPt, (prov.opt || {}).startAng, (prov.opt || {}).reverse, (prov.opt || {}).startBySeg, (prov.opt || {}).syncBySeg, (prov.opt || {}).swap, (prov.opt || {}).flip, (prov.opt || {}).edits])
       + '|' + JSON.stringify((prov.opt || {}).plateConnEdits || {});
     let gc = null;
     if (plateGcMemo && plateGcMemo.key === memoKey) gc = plateGcMemo.gc;
@@ -2688,6 +2949,9 @@
     // Verbindungen aber immer sichtbar.
     const connsActive = plateEdit && plateEditMode === 'conns';
     const showTravel = M.plateTravel !== false || connsActive;
+    syncPlateToggles();
+    const psh = { sol: plateShowOn('sol'), cut: plateShowOn('cut'), block: plateShowOn('block') || (plateEdit && plateEditMode === 'pieces'),
+      labels: plateShowOn('labels'), nums: plateShowOn('nums'), legend: plateShowOn('legend') };
     const all = [[0, 0]];
     for (const pc of gc.pieces) { all.push([pc.bb[0], pc.bb[1]], [pc.bb[2], pc.bb[3]]); }
     if (showTravel) for (const cn of gc.conns) for (const p of cn.path) all.push(p);
@@ -2737,8 +3001,10 @@
         ctx.fillStyle = 'rgba(74,163,255,.10)';
         ctx.fillRect(tx(pc.bb[0] + ox), ty(pc.bb[3] + oy), (pc.bb[2] - pc.bb[0]) * sc, (pc.bb[3] - pc.bb[1]) * sc);
       }
-      ctx.strokeStyle = piecesActive ? col('--accent', '#4aa3ff') : col('--muted', '#8b98a8'); ctx.lineWidth = piecesActive ? 1.4 : 1; ctx.setLineDash([4, 3]);
-      ctx.strokeRect(tx(pc.bb[0] + ox), ty(pc.bb[3] + oy), (pc.bb[2] - pc.bb[0]) * sc, (pc.bb[3] - pc.bb[1]) * sc); ctx.setLineDash([]);
+      if (psh.block) {
+        ctx.strokeStyle = piecesActive ? col('--accent', '#4aa3ff') : col('--muted', '#8b98a8'); ctx.lineWidth = piecesActive ? 1.4 : 1; ctx.setLineDash([4, 3]);
+        ctx.strokeRect(tx(pc.bb[0] + ox), ty(pc.bb[3] + oy), (pc.bb[2] - pc.bb[0]) * sc, (pc.bb[3] - pc.bb[1]) * sc); ctx.setLineDash([]);
+      }
       // Plattenkonturen = Profil A UND Profil B (beide Plattenflächen), nicht die
       // extrapolierten Türme. B halbtransparent/dünner, damit A erkennbar bleibt.
       const drawOutline = (outline, lw, alpha) => {
@@ -2749,7 +3015,7 @@
       };
       // Querschnitte (Sollkontur, Segmentfarbe): A kräftig, B blasser; Löcher mit.
       const hasRaw = pc.RA && pc.RA.length;
-      if (hasRaw) {
+      if (hasRaw && psh.sol) {
         drawOutline(pc.RB, 1.1, 0.55); for (const inn of (pc.RIB || [])) drawOutline(inn, 1.1, 0.55);
         drawOutline(pc.RA, 1.6, 1);    for (const inn of (pc.RIA || [])) drawOutline(inn, 1.6, 1);
       }
@@ -2763,15 +3029,30 @@
         ctx.stroke(); ctx.restore();
       };
       // Abbrand in wahrer Dicke: Band (Spalt je Stirnfläche) unter die Schnittspur.
-      if (hasRaw && pc.kp && window.App && App.kerfBand && App.kerfTrueOn && App.kerfTrueOn('model')) {
+      if (psh.cut && hasRaw && pc.kp && window.App && App.kerfBand && App.kerfTrueOn && App.kerfTrueOn('model')) {
         const VB = { s: sc, X: x => tx(x + ox), Y: y => ty(y + oy) }, wc = col('--wire', '#ff5a3c');
         App.kerfBand(ctx, VB, [pc.PB || pc.R], { view: 'model', k: pc.kp.B, color: wc, alpha: 0.7 });
         App.kerfBand(ctx, VB, [pc.PA || pc.L], { view: 'model', k: pc.kp.A, color: wc });
       }
-      if (hasRaw) { drawCut(pc.PB || pc.R, [5, 3], 0.7); drawCut(pc.PA || pc.L, null, 1); }
-      else { drawOutline(pc.PB || pc.R, 1.1, 0.55); drawOutline(pc.PA || pc.L, 1.6, 1); }
-      ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('#' + (pc.seg + 1) + ' · ' + sectionName(pc.seg) + '–' + sectionName(pc.seg + 1), tx((pc.bb[0] + pc.bb[2]) / 2 + ox), ty((pc.bb[1] + pc.bb[3]) / 2 + oy));
+      if (hasRaw) { if (psh.cut) { drawCut(pc.PB || pc.R, [5, 3], 0.7); drawCut(pc.PA || pc.L, null, 1); } }
+      else if (psh.sol || psh.cut) { drawOutline(pc.PB || pc.R, 1.1, 0.55); drawOutline(pc.PA || pc.L, 1.6, 1); }
+      // Punktnummern je Stück (Index in seiner Bahn) + Drahtlinie A[i]–B[i].
+      const nA = pc.PA || pc.L, nB = pc.PB || pc.R;
+      if (psh.nums && nA && nB && nA.length) {
+        const nEvery = Math.max(1, Math.round(+(plateShowObj().n) || 10));
+        ctx.strokeStyle = col('--muted', '#8b98a8'); ctx.globalAlpha = 0.45; ctx.lineWidth = 0.8; ctx.beginPath();
+        for (let i = 0; i < Math.min(nA.length, nB.length); i += nEvery) { ctx.moveTo(tx(nA[i][0] + ox), ty(nA[i][1] + oy)); ctx.lineTo(tx(nB[i][0] + ox), ty(nB[i][1] + oy)); }
+        ctx.stroke(); ctx.globalAlpha = 1;
+        ctx.font = '10px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+        for (const [P, c] of [[nA, col('--accent', '#4aa3ff')], [nB, col('--accent2', '#ffb454')]]) {
+          ctx.fillStyle = c;
+          for (let i = 0; i < P.length; i += nEvery) { const X = tx(P[i][0] + ox), Y = ty(P[i][1] + oy); ctx.beginPath(); ctx.arc(X, Y, 2, 0, 6.3); ctx.fill(); ctx.fillText(i, X + 4, Y - 2); }
+        }
+      }
+      if (psh.labels) {
+        ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('#' + (pc.seg + 1) + ' · ' + sectionName(pc.seg) + '–' + sectionName(pc.seg + 1), tx((pc.bb[0] + pc.bb[2]) / 2 + ox), ty((pc.bb[1] + pc.bb[3]) / 2 + oy));
+      }
     }
     // Nullpunkt
     const ox = tx(0), oy = ty(0);
@@ -2782,9 +3063,9 @@
     // Titel + Hinweis
     ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(T('Platte — ') + gc.pieces.length + T(' Segmente · Dicke ') + gc.span.toFixed(1) + ' mm', 12, 10);
-    // Statuszeile.
+    // Statuszeile (Ansichtsmenü „Legende").
     ctx.fillStyle = col('--muted', '#8b98a8'); ctx.font = '11px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(showTravel ? T('Verbindungen automatisch kollisionsfrei (grün); manuell bearbeitet = orange.')
+    if (psh.legend) ctx.fillText(showTravel ? T('Verbindungen automatisch kollisionsfrei (grün); manuell bearbeitet = orange.')
                             : T('Querschnitte (Segmentfarbe) + Schnittspur (rot, abbrandkompensiert) · Fahrwege ausgeblendet („Fahrwege anzeigen").'), 12, 28);
     if (plateEdit) {
       ctx.fillStyle = col('--accent', '#4aa3ff');
@@ -2951,7 +3232,12 @@
       }
       if (!dragging) {
         // Segmentpaar: Fangpunkt unter der Maus anzeigen (nur über der Zeichenfläche).
-        if (M.view === 'pairs' && !pairEdit && pairX && e.target === canvas) {
+        if (M.view === 'pairs' && pairSync && pairX && e.target === canvas) {
+          const r = canvas.getBoundingClientRect();
+          const h = pairSyncSnap(e.clientX - r.left, e.clientY - r.top, pairSyncPick ? 'B' : 'A');
+          canvas.style.cursor = h ? 'crosshair' : '';
+          if (JSON.stringify(h) !== JSON.stringify(pairSyncHover)) { pairSyncHover = h; draw(); }
+        } else if (M.view === 'pairs' && pairStart && pairX && e.target === canvas) {
           const r = canvas.getBoundingClientRect();
           const h = nearestOuterPt(e.clientX - r.left, e.clientY - r.top, PAIR_PICK_TOL);
           canvas.style.cursor = h ? 'crosshair' : '';
@@ -2993,14 +3279,21 @@
         // Eindring-/Startpunkt auf der Außenkontur setzen.
         // Genau der angeklickte Konturpunkt (nicht über den Winkel, der bei
         // eingebuchteten/hohlen Querschnitten woanders landen kann).
-        if (M.view === 'pairs' && !pairEdit && !pairMoved && pairX) {
+        if (M.view === 'pairs' && pairSync && !pairMoved && pairX) {
+          const r = canvas.getBoundingClientRect();
+          pairSyncClick(e.clientX - r.left, e.clientY - r.top);
+        } else if (M.view === 'pairs' && pairStart && !pairMoved && pairX) {
           const r = canvas.getBoundingClientRect();
           const pt = nearestOuterPt(e.clientX - r.left, e.clientY - r.top, PAIR_PICK_TOL);
-          if (pt) { pairHover = null; pairApply({ start: 'custom', startPt: pt.slice(), startAng: Math.round(angleOfPoint(pairX.outer, pt) * 10) / 10 }); }
+          if (pt) { pairHover = null; pairStart = false; canvas.style.cursor = ''; pairApply({ start: 'custom', startPt: pt.slice(), startAng: Math.round(angleOfPoint(pairX.outer, pt) * 10) / 10 }); }
         }
         pairDown = null;
         draw();
       }
+    });
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && M.view === 'pairs' && pairSync && pairSyncPick) { pairSyncPick = null; pairSyncHover = null; draw(); }
+      else if (e.key === 'Escape' && pairStart) { setPairStart(false); if (window.App && App.buildSidebar) App.buildSidebar(); }
     });
     canvas.addEventListener('wheel', e => {
       e.preventDefault();
@@ -3074,6 +3367,7 @@
     if (pc) pc.onchange = () => { M.showPlanes = pc.checked; draw(); };
     bind('m3dViewToggle', () => { setView(M.view === 'profiles' ? '3d' : 'profiles'); });
     bind('m3dViewPairs', () => { setView(M.view === 'pairs' ? '3d' : 'pairs'); });
+    bindPairToggles(); bindPlateToggles();
     bind('m3dViewPlate', () => { setView(M.view === 'plate' ? '3d' : 'plate'); });
     syncViewToggle();
   }
@@ -3084,6 +3378,66 @@
     if (p) { p.textContent = T(M.view === 'pairs' ? '◫ 3D-Ansicht' : '◫ Segmentpaar'); p.classList.toggle('primary', M.view === 'pairs'); }
     const q = document.getElementById('m3dViewPlate');
     if (q) { q.textContent = T(M.view === 'plate' ? '▤ 3D-Ansicht' : '▤ Platte'); q.classList.toggle('primary', M.view === 'plate'); }
+    syncPairToggles();
+  }
+  // ---- Ansichtsmenü „◫ Segmentpaar" (#m3dPairToggles, wie im Kerndesign) ----
+  // Schalter liegen in modelGcode.pv (App.mgCfg, im Projekt gespeichert).
+  function pairShow() { const c = (window.App && App.mgCfg) ? App.mgCfg() : null; return (c && c.pv) || {}; }
+  function pairShowOn(k) { return pairShow()[k] !== false; }
+  // Ansichtsmenü „▤ Platte" (#m3dPlateToggles): Schalter in modelGcode.plv (fehlend = an,
+  // Punktnummern = aus; Abstand plv.n). Fahrwege = M.plateTravel.
+  function plateShowOn(k) { const c = (window.App && App.mgCfg) ? App.mgCfg() : null, v = (c && c.plv) || {}; return k === 'nums' ? v.nums === true : v[k] !== false; }
+  function plateShowObj() { const c = App.mgCfg(); if (!c.plv) c.plv = {}; return c.plv; }
+  function syncPlateToggles() {
+    const box = document.getElementById('m3dPlateToggles'); if (!box) return;
+    box.style.display = M.view === 'plate' ? '' : 'none';
+    if (M.view !== 'plate' || !window.App || !App.mgCfg) return;
+    box.querySelectorAll('input[data-plv]').forEach(cb => { cb.checked = plateShowOn(cb.dataset.plv); });
+    const nn = document.getElementById('m3dPlateNumN'); if (nn && document.activeElement !== nn) nn.value = plateShowObj().n || 10;
+    const tr = document.getElementById('m3dPlateTravel'); if (tr) tr.checked = M.plateTravel !== false;
+    const kt = box.querySelector('input[data-ktrue]'); if (kt && App.kerfTrueOn) kt.checked = App.kerfTrueOn('model');
+  }
+  function bindPlateToggles() {
+    const box = document.getElementById('m3dPlateToggles'); if (!box) return;
+    const after = () => { if (App.buildSidebar) App.buildSidebar(); draw(); };
+    box.querySelectorAll('input[data-plv]').forEach(cb => cb.addEventListener('change', () => { plateShowObj()[cb.dataset.plv] = cb.checked; after(); }));
+    const nn = document.getElementById('m3dPlateNumN');
+    if (nn) nn.addEventListener('change', () => { const v = Math.round(+nn.value); if (v >= 1) { plateShowObj().n = v; draw(); } else nn.value = plateShowObj().n || 10; });
+    const tr = document.getElementById('m3dPlateTravel'); if (tr) tr.addEventListener('change', () => { M.plateTravel = tr.checked; after(); });
+    const kt = box.querySelector('input[data-ktrue]'); if (kt) kt.addEventListener('change', () => draw());
+  }
+  function syncPairToggles() {
+    syncPlateToggles();
+    const box = document.getElementById('m3dPairToggles'); if (!box) return;
+    box.style.display = M.view === 'pairs' ? '' : 'none';
+    if (M.view !== 'pairs' || !window.App || !App.mgCfg) return;
+    const c = App.mgCfg(), pv = c.pv;
+    box.querySelectorAll('input[data-pv]').forEach(cb => { cb.checked = pv[cb.dataset.pv] !== false; });
+    const nn = document.getElementById('m3dPairNumN'); if (nn && document.activeElement !== nn) nn.value = c.pairNums;
+    const tw = document.getElementById('m3dPairTowers'); if (tw) tw.checked = M.pairTowers === true;
+    const kt = box.querySelector('input[data-ktrue]'); if (kt && App.kerfTrueOn) kt.checked = App.kerfTrueOn('model');
+    const sel = document.getElementById('m3dPairSeg');
+    if (sel) {
+      const n = M.bbox ? segCount() : 0;
+      if (sel.options.length !== n) { sel.innerHTML = ''; for (let i = 0; i < n; i++) { const o = document.createElement('option'); o.value = String(i); o.textContent = T('Segment ') + (i + 1) + ' / ' + n; sel.appendChild(o); } }
+      sel.value = String(Math.min(c.seg || 0, Math.max(0, n - 1)));
+    }
+  }
+  function bindPairToggles() {
+    const box = document.getElementById('m3dPairToggles'); if (!box) return;
+    const after = (sb) => { if (sb && App.buildSidebar) App.buildSidebar(); draw(); };
+    box.querySelectorAll('input[data-pv]').forEach(cb => cb.addEventListener('change', () => { App.mgCfg().pv[cb.dataset.pv] = cb.checked; after(cb.dataset.pv === 'nums'); }));
+    const nn = document.getElementById('m3dPairNumN');
+    if (nn) nn.addEventListener('change', () => { const v = Math.round(+nn.value); if (v >= 1) { App.mgCfg().pairNums = v; after(true); } else nn.value = App.mgCfg().pairNums; });
+    const tw = document.getElementById('m3dPairTowers');
+    if (tw) tw.addEventListener('change', () => { M.pairTowers = tw.checked; after(true); });
+    const kt = box.querySelector('input[data-ktrue]'); if (kt) kt.addEventListener('change', () => draw());
+    const sel = document.getElementById('m3dPairSeg');
+    if (sel) sel.addEventListener('change', () => {
+      App.mgCfg().seg = +sel.value; pairSyncPick = null;
+      if (App.state && App.state.cfg.gcodeSource === 'model' && App.render) App.render();
+      after(true);
+    });
   }
   function setView(v) {
     M.view = (v === 'profiles' || v === 'pairs' || v === 'plate') ? v : '3d';
@@ -3159,6 +3513,7 @@
     setView, getView: () => M.view, refresh,
     serialize, deserialize,
     setPairEdit, isPairEdit: () => pairEdit, pairInfo: () => pairX,
+    setPairSync, isPairSync: () => pairSync, isPairSyncPick: () => !!pairSyncPick, autoSyncSeg, setPairStart, isPairStart: () => pairStart,
     setPairTowers(on) { M.pairTowers = !!on; if (M.view === 'pairs') draw(); }, isPairTowers: () => M.pairTowers === true,
     setPlateTravel(on) { M.plateTravel = !!on; if (M.view === 'plate') draw(); }, isPlateTravel: () => M.plateTravel !== false,
     setSectionDensity(v) {

@@ -1770,6 +1770,8 @@
   // Gleiches für den Systemdialog-Weg (App.nativeSave, z. B. NAS): Pfad statt Handle.
   let projNativePath = null;
   function setProjFileHandle(h) { projFileHandle = (h && h.createWritable) ? h : null; projNativePath = null; }
+  // Rumpf-Pro: Rückgängig reicht nach dem Speichern nur bis zu diesem Stand
+  const projSaved = () => { if (window.RumpfPro && RumpfPro.histMarkSaved) { try { RumpfPro.histMarkSaved(); } catch (e) {} } };
   async function saveProject(opts) {
     const quick = !!(opts && opts.quick);
     const enc = p => ({ name: p.name, pts: p.map(q => [+q.x.toFixed(6), +q.y.toFixed(6)]) });
@@ -1827,19 +1829,19 @@
         if (await fsPerm(projFileHandle, 'readwrite')) {
           const w = await projFileHandle.createWritable(); await w.write(text); await w.close();
           toast('Gespeichert: ' + projFileHandle.name);
-          recordRecent(projFileHandle); return;
+          projSaved(); recordRecent(projFileHandle); return;
         }
       } catch (e) { /* Datei weg/gesperrt → Dialog */ }
     }
     if (quick && projNativePath && App.nativeSave && !App.demoSaveBlocked('svProject')) {
-      try { const r = await App.nativeSave(projFileBase() + '.json', text, projNativePath); if (r) { recordRecent(null, r.name); return; } }
+      try { const r = await App.nativeSave(projFileBase() + '.json', text, projNativePath); if (r) { projSaved(); recordRecent(null, r.name); return; } }
       catch (e) { /* Pfad nicht mehr beschreibbar → Dialog */ }
     }
     const t0 = Date.now();
     const fh = await exportViaPicker(projFileBase() + '.json', text, 'application/json', 'svProject');
-    if (fh) { setProjFileHandle(fh); recordRecent(fh); }
+    if (fh) { projSaved(); setProjFileHandle(fh); recordRecent(fh); }
     else if (App.lastNativeSave && App.lastNativeSave.t >= t0) {   // über den Systemdialog gespeichert
-      setProjFileHandle(null); projNativePath = App.lastNativeSave.path; recordRecent(null, App.lastNativeSave.name);
+      projSaved(); setProjFileHandle(null); projNativePath = App.lastNativeSave.path; recordRecent(null, App.lastNativeSave.name);
     }
   }
   function decProf(o) { const p = o.pts.map(a => ({ x: a[0], y: a[1] })); p.name = o.name || 'Profil'; return p; }
@@ -1864,6 +1866,7 @@
     if (window.Ausschnitt && Ausschnitt.reset) { try { Ausschnitt.reset(); } catch (e) {} }
     if (window.StlBody && StlBody.reset) { try { StlBody.reset(); } catch (e) {} }   // STL-Rumpfmodell des Vorprojekts verwerfen (kommt aus d.cfg.stlBody)
     if (window.Decals && Decals.reset) { try { Decals.reset(); } catch (e) {} }   // Altprojekte ohne cfg.decals: leer starten
+    if (window.RumpfPro && RumpfPro.histReset) { try { RumpfPro.histReset(); } catch (e) {} }   // Rumpf-Pro: Rückgängig nur bis zum geladenen Stand
     ['negStegeOn', 'negStegeList', 'negStegeGap', 'negStegeOnly'].forEach(k => {
       const v = PROJECT_DEFAULTS.cfg[k]; state.cfg[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
     });
