@@ -171,9 +171,10 @@
     {
       "id": "cad",
       "name": "CAD-Bearbeitung (2D-CAD-Editor mit Befehlszeile)",
-      "description": "Reiter „CAD-Bearbeitung“: eigener 2D-CAD-Editor (Linien, Bögen, Splines, Bemaßung, Layer, Objektfang, Offset, Trimmen) mit AutoCAD-artiger Befehlszeile; Übergabe an DXF-Formen und Fräse, DXF-Export.",
+      "description": "Reiter „CAD-Bearbeitung“: eigener 2D-CAD-Editor (Linien, Bögen, Splines, Bemaßung, Layer, Objektfang, Offset, Trimmen) mit AutoCAD-artiger Befehlszeile; Übergabe an DXF-Formen und Fräse, DXF-Export, PDF-Export auf A4…A0 gekachelt mit Passkreuzen.",
       "files": [
-        "cad.js"
+        "cad.js",
+        "cadpdf.js"
       ],
       "tabs": [
         "cad"

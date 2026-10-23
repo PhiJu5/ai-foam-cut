@@ -1097,6 +1097,13 @@
   }
 
   // Aufriss: waagerecht = Spannweite, senkrecht = Höhe (V-Form)
+  // Blockhöhe der Ansichten: im Tragflächendesigner die reine Konstruktionshöhe
+  // (cfg.designBlockH je Tragfläche, null = wie Kerndesign) — wirkt auf nichts sonst.
+  function viewBlockH(k) {
+    const v = state.cfg.designBlockH;
+    if (state.activeTab === 'wing' && v != null && isFinite(v) && +v > 0) return +v;
+    return App.blockH('wing', k);
+  }
   function drawElev() {
     const { ctx, w, h } = fitCanvas(document.getElementById('cElev'));
     ctx.clearRect(0, 0, w, h);
@@ -1118,8 +1125,8 @@
     ]);
     let blocks = [];
     if (state.cfg.showBlock) {
-      const bh = App.blockH('wing');
       state.segments.forEach((s, k) => {
+        const bh = viewBlockH(k);
         // Blöcke liegen IMMER auf gleicher Höhe (festes Datum 0). Das Paneel
         // klettert/sitzt relativ dazu — der Block wandert NICHT mit.
         blocks.push([
@@ -1418,7 +1425,7 @@
     const e = blockExt(s, cut.root.chord, cut.tip.chord);
     const cyR = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
     const cyT = (Math.min.apply(null, yt) + Math.max.apply(null, yt)) / 2;
-    const bh = App.blockH('wing');
+    const bh = viewBlockH(idx);
     // Block-Mitte = festes Datum (0). Die kumulierte V-Form steckt bereits in
     // den Schnittpunkten.
     const cy = blockCenterY(cut);
@@ -2482,8 +2489,8 @@
    * (Negativblock) sitzt mittig darin und wird über negMatShift der Höhe nach
    * verschoben (positiv = Formblock nach oben im Werkstoff) — für alle Segmente
    * gemeinsam. Cut-Koordinaten. */
-  function negMatBlock(root) {
-    const H = App.blockH('neg') || 0;
+  function negMatBlock(root, segIdx) {
+    const H = App.blockH('neg', segIdx) || 0;
     const cy = (root.yBot + root.yTop) / 2 - (state.cfg.negMatShift || 0);
     return { H, yBot: cy - H / 2, yTop: cy + H / 2, rect: rect(root.xBL, cy - H / 2, root.xBR, cy + H / 2) };
   }
@@ -2525,7 +2532,6 @@
     if (!App.wing || !App.wing.cuts || !App.wing.cuts.length || !App.segZ || !App.segZ.length) return [];
     const s2 = Math.max(0, +state.cfg.negSplit || 0) / 2;
     const H = +state.cfg.negBlockH || 0;
-    const MH = App.blockH('neg') || 0;
     const ext = pts => {
       let lo = Infinity, hi = -Infinity;
       pts.forEach(p => { if (p.y < lo) lo = p.y; if (p.y > hi) hi = p.y; });
@@ -2538,6 +2544,7 @@
       const rMid = negChordMidY(rPts), tMid = negChordMidY(tPts);
       const mcy = cy - (state.cfg.negMatShift || 0);   // Formblock im Werkstoff (heben/senken)
       const z = App.segZ[Math.min(k, App.segZ.length - 1)];
+      const MH = App.blockH('neg', k) || 0;   // Werkstoffhöhe je Segment (frei zugeordnet)
       return { k, z0: z.z0, z1: z.z1, r: ext(rPts), t: ext(tPts), rMid, tMid,
                bH: H, bBot: cy - H / 2, bTop: cy + H / 2,
                mH: MH, mBot: mcy - MH / 2, mTop: mcy + MH / 2 };
@@ -2942,11 +2949,11 @@
    * Rückgabe: { d, seg, side } mit dem kleinsten Abstand (negativ = ragt heraus). */
   const BLOCK_MARGIN_WARN = 5;   // mm
   function blockClearance() {
-    const bh = App.blockH('wing');
     let worst = null;
     const consider = (d, seg, side) => { if (worst === null || d < worst.d) worst = { d, seg, side }; };
     App.wing.cuts.forEach((cut, k) => {
       const seg = state.segments[Math.min(k, state.segments.length - 1)];
+      const bh = viewBlockH(k);
       const pr = App.projectCut(cut, seg);
       // Gemeinsame, waagrechte Blockhöhe (wie blockOrigin / Profil-Ansicht).
       const yr = cut.root.pts.map(p => p.y), yt = cut.tip.pts.map(p => p.y);

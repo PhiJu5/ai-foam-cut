@@ -29,7 +29,7 @@
     const blockMidFrac = (state.cfg.machineWidth / 2 - pr.zRoot) / ((pr.zTip - pr.zRoot) || 1);
     const opt = {
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
-      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), wireNote: heatNote(), safeY: safeHeight(), precision: state.cfg.precision,
+      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), wireNote: heatNote(), safeY: safeHeight(segIdx), precision: state.cfg.precision,
       blockMidFrac: Math.max(0, Math.min(1, blockMidFrac)),
       maxFeed: state.cfg.maxFeed || 0, outsideFeed: outsideFeed(),
       origin: origin,
@@ -197,7 +197,17 @@
   /* Guillotine: auf Höhe fahren, dort Pause (M0), dann auf der Schnittlinie runter
    * auf Y0, verweilen (meltDwell), optional Pause, in der Fuge rauf auf die
    * Rückfahrhöhe und waagrecht zurück auf X0. */
-  function guillotineGcode() {
+  // Blockzuschnitt: Guillotine ('guil') und Block horizontal ('blockHz') mit eigenem,
+  // immer frei wählbarem Werkstoff (Heizung/Abbrand aus diesem Kontext).
+  function withPrep(fn, ctx) {
+    return function () {
+      const prev = App.matCtxOverride; App.matCtxOverride = ctx;
+      try { return fn.apply(this, arguments); } finally { App.matCtxOverride = prev; }
+    };
+  }
+  const guillotineGcode = withPrep(guillotineGcode_, 'guil');
+  const blockHGcode = withPrep(blockHGcode_, 'blockHz');
+  function guillotineGcode_() {
     const gp = state.guillotine;
     const ax = { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV };
     const pr = state.cfg.precision != null ? state.cfg.precision : 2, f = v => v.toFixed(pr);
@@ -293,11 +303,11 @@
    * Richtung Nullpunkt); mode='topbottom' fährt durchgehend oben rein → hinten
    * runter → unten durch (fertige Scheibe zwischen yBot und yTop). Abbrand wird
    * nach außen (weg vom Gutteil) kompensiert, damit die Höhe exakt stimmt. */
-  function blockHGcode() {
+  function blockHGcode_() {
     const bp = state.blockH;
     const ax = { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV };
     const pr = state.cfg.precision != null ? state.cfg.precision : 2, f = v => v.toFixed(pr);
-    const feed = bp.feed || 300, k = App.kerfForSpeed(App.matIdFor('wing'), feed);
+    const feed = bp.feed || 300, k = App.kerfForSpeed(App.matIdFor('blockHz'), feed);
     const over = Math.max(0, +(bp.over != null ? bp.over : 10) || 0);   // X-Überlauf vor/hinter dem Block (Menü „Block horizontal")
     const d1 = bp.dist, d2 = bp.dist + bp.length;
     const xL = d1 - over, xR = d2 + over;          // X-Überlauf: Schnitt tritt beidseits aus dem Block aus
@@ -496,8 +506,8 @@
   }
   // Negativschalen: während der Erzeugung gilt die Werkstoff-Zuweisung „Negativschalen".
   function negGcode(idxArg) {
-    App.matCtxOverride = 'neg';
-    try { return negGcode_(idxArg); } finally { App.matCtxOverride = null; }
+    App.matCtxOverride = 'neg'; App.matSegOverride = idxArg != null ? idxArg : null;
+    try { return negGcode_(idxArg); } finally { App.matCtxOverride = null; App.matSegOverride = null; }
   }
   function negGcode_(idxArg) {
     const P = negProjection(idxArg);

@@ -1213,6 +1213,7 @@
 
   function segmentCutCard(seg, idx) {
     const card = segCard(idx); const box = card.body;
+    if (App.matFree && App.matFree() && mfSegMode(false)) mfHeightRow(box, false, idx, 'Blockhöhe (mm)');
 
     // --- Nasenleiste (NL) & Endleiste (EL) -----------------------------
     // Je Kante zwei Größen, jeweils getrennt für Wurzel/außen (+proportional):
@@ -1294,6 +1295,54 @@
   }
 
   // Auswahlmenü für das Segment (Vorschau / G-Code / Kernschneiden).
+  /* „Werkstoff frei zuordnen" (state.cfg.matFree): Blockhöhe der Tragfläche — für alle
+   * Segmente gleich (cfg.matHeight/negMatHeight) oder je Segment (seg.matH/seg.negMatH,
+   * cfg.matHMode/negMatHMode 'seg'). Wert/Schreiben für Segment idx (null = alle). */
+  function mfKeys(neg) {
+    return neg ? { mode: 'negMatHMode', all: 'negMatHeight', seg: 'negMatH' } : { mode: 'matHMode', all: 'matHeight', seg: 'matH' };
+  }
+  function mfSegMode(neg) { return state.cfg[mfKeys(neg).mode] === 'seg'; }
+  function mfHeightRow(body, neg, idx, label) {
+    const K = mfKeys(neg);
+    return numRow(body, label || 'Blockhöhe (mm)',
+      () => (idx != null ? App.blockH(neg ? 'neg' : 'wing', idx) : App.blockH(neg ? 'neg' : 'wing', -1)),
+      v => {
+        v = Math.max(0, +v || 0);
+        if (idx != null && mfSegMode(neg)) state.segments[idx][K.seg] = v; else state.cfg[K.all] = v;
+        if (neg && App.renderNeg) App.renderNeg();
+        render();
+      }, { min: 0, step: 1, norender: true, enter: true,
+        hint: 'Höhe (Dicke) des Werkstoff-Blocks. Der G-Code-Nullpunkt (Y) liegt an der Blockunterkante.' });
+  }
+  // Umschalter „für alle Segmente / je Segment" + Feld (bei „alle").
+  function mfHeightModeRows(body, neg) {
+    const K = mfKeys(neg);
+    selectRow(body, 'Blockhöhe', [['all', 'für alle Segmente gleich'], ['seg', 'je Segment separat']],
+      () => mfSegMode(neg) ? 'seg' : 'all',
+      v => {
+        if (v === 'seg') {   // Startwert je Segment = bisherige gemeinsame Höhe
+          const h = App.blockH(neg ? 'neg' : 'wing', -1);
+          state.segments.forEach(sg => { if (!(+sg[K.seg] > 0)) sg[K.seg] = h; });
+        }
+        state.cfg[K.mode] = v; buildSidebar(); if (neg && App.renderNeg) App.renderNeg(); render();
+      },
+      'Werkstoff frei zuordnen: Blockhöhe einmal für die ganze Tragfläche oder für jedes Segment einzeln.');
+    if (!mfSegMode(neg)) mfHeightRow(body, neg, null);
+  }
+  // Reiter „G-Code" unter Quelle/Segment: Werkstoff der gewählten Quelle (Blockhöhe in Kern-/Negativdesign).
+  function matFreeGcodeRows(body) {
+    const src = state.cfg.gcodeSource;
+    const key = { neg: 'negMatId', dxf: 'dxfMatId', model: 'modelMatId', plate: 'modelMatId', schrift: 'scMatId', ausschnitt: 'waMatId' }[src] || 'matId';
+    const ctx = { neg: 'neg', dxf: 'dxf', model: 'model', plate: 'model', schrift: 'schrift', ausschnitt: 'ausschnitt' }[src] || 'wing';
+    const mo = [['', '— kein Werkstoff —']].concat(App.matOptions ? App.matOptions() : []);
+    selectRow(body, 'Werkstoff', mo, () => App.matIdFor(ctx) || '',
+      v => { state.cfg[key] = v; if (App.syncAutoFeed) App.syncAutoFeed(); buildSidebar(); render(); },
+      'Werkstoff frei zuordnen: Werkstoff für diese G-Code-Quelle (Abbrand, Heizung, Vorschub automatisch). '
+      + 'Bei Kern-/Negativschalendesign gilt er für die gewählte Tragfläche.');
+    if (src === 'core' || src === 'neg')
+      hint(body, src === 'neg' ? 'Blockhöhe im Reiter „Negativschalendesign" (Gruppe „Negativschale").' : 'Blockhöhe im Reiter „Kerndesign" (Gruppe „Blockgeometrie").');
+  }
+
   function segmentSelectRow() {
     const r = document.createElement('div'); r.className = 'row';
     const l = document.createElement('label'); l.textContent = 'Segment';
@@ -1511,7 +1560,8 @@
     side.appendChild(gf.g);
 
     // --- Reiter „Kernschneiden" (core) --------------------------------
-    const sc = grp('Blockgeometrie (je Segment)', true, 'core');
+    const sc = grp('Blockgeometrie', true, 'core');
+    if (App.matFree && App.matFree()) mfHeightModeRows(sc.body, false);
     hint(sc.body, 'Segment im Grundriss anklicken zum Aktivieren – oder auf die Kopfzeile tippen. Nur das aktive Segment ist aufgeklappt.');
     state.segments.forEach((s, i) => sc.body.appendChild(segmentCutCard(s, i)));
     side.appendChild(sc.g);
@@ -1774,7 +1824,7 @@
         + '(Tasche / Tasche + Steg) sind immer Teil des Profilschnitts.';
       if (!state.cfg.sparOnly) (state.spars || []).forEach((sp, i) => {
         if (App.isPocket(sp)) return;
-        selectRow(hgc.body, 'Holm ' + (i + 1) + ' · Schnitt', modeOpts,
+        selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Schnitt'), modeOpts,
           () => App.sparModeOf(sp), v => { sp.cutMode = v; render(); }, modeHelp);
       });
       if (state.cfg.cutDir === 'front' && !state.cfg.sparOnly && (state.spars || []).some(sp => App.sparModeOf(sp) === 'afterTop'))
@@ -1952,6 +2002,7 @@
     } else {
       pv.body.appendChild(segmentSelectRow());
     }
+    if (App.matFree && App.matFree()) matFreeGcodeRows(pv.body);
     side.appendChild(pv.g);
 
     // --- Reiter „Negativschalendesign" (neg) --------------------------
@@ -1963,6 +2014,11 @@
     subhead(ng.body, 'Segment');
     ng.body.appendChild(segmentSelectRow());
 
+    if (App.matFree && App.matFree()) {
+      subhead(ng.body, 'Werkstoff-Blockhöhe');
+      mfHeightModeRows(ng.body, true);
+      if (mfSegMode(true)) state.segments.forEach((sg, k) => mfHeightRow(ng.body, true, k, T('Blockhöhe Segment ') + (k + 1) + ' (mm)'));
+    }
     subhead(ng.body, 'Formmaße und Schnittüberstände');
     numRow(ng.body, 'Formblockhöhe (mm)', () => state.cfg.negBlockH,
       v => { state.cfg.negBlockH = v; renderNeg(); }, { min: 1, norender: true,
@@ -2588,7 +2644,14 @@
       'Nummeriert die Profilpunkte (Sollkontur) im Profilfenster, jeden n-ten Punkt.');
     numRow(an.body, 'Nummer alle n Punkte', () => state.cfg.numEvery, v => state.cfg.numEvery = Math.max(1, v),
       { int: true, min: 1, max: 100, step: 1 });
-    boolRow(an.body, 'Styroporblock', () => state.cfg.showBlock, v => state.cfg.showBlock = v);
+    boolRow(an.body, 'Styroporblock', () => state.cfg.showBlock, v => { state.cfg.showBlock = v; buildSidebar(); });
+    if (state.cfg.showBlock)
+      numRow(an.body, 'Blockhöhe (mm, nur Konstruktion)',
+        () => (state.cfg.designBlockH != null && +state.cfg.designBlockH > 0) ? +state.cfg.designBlockH : App.blockH('wing'),
+        v => { state.cfg.designBlockH = v > 0 ? v : null; },
+        { min: 0, step: 1, hint: 'Nur zur Kontrolle beim Konstruieren: passt die Tragfläche in einen Block dieser Höhe? '
+          + 'Wirkt ausschließlich auf die Ansichten im Tragflächendesigner (und die Randwarnung dort) — nicht auf Kerndesign, '
+          + 'Negativschalen, G-Code oder Gewicht. 0 = wie im Kerndesign.' });
     boolRow(an.body, 'Bemaßung', () => state.cfg.showDim, v => state.cfg.showDim = v);
     boolRow(an.body, 'V-Form (Einbaulage)', () => state.cfg.showDihedral, v => state.cfg.showDihedral = v,
       'Zeigt Profile/Konturen auf ihrer echten Einbauhöhe. Reine Darstellung — der Schnitt bleibt flach.');

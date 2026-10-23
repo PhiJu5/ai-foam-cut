@@ -37,7 +37,7 @@
     // Holmauslegung (holm.js)
     'holm',
     // Werkstoff-Zuweisung (Reiter „Projektübersicht")
-    'design', 'matId', 'matHeight', 'negMatId', 'negMatHeight',
+    'design', 'matId', 'matHeight', 'negMatId', 'negMatHeight', 'matHMode', 'designBlockH',
     // Gewichtsabschätzung (Reiter „Projektübersicht")
     'wtCount', 'wtSheetMode', 'wtSheetDensity', 'wtSheetThick', 'wtSheetArea',
     'wtFab1Gsm', 'wtFab1Layers', 'wtFab2Gsm', 'wtFab2Layers', 'wtFiber', 'wtExtra'
@@ -428,7 +428,9 @@
       sel.onchange = () => { wingCfgSet(i, 'design', sel.value === 'neg' ? 'neg' : 'core'); refresh(true); };
       row.appendChild(sel);
     }
-    if (isNeg) {
+    if (state.cfg.matFree) {
+      hint(card, 'Werkstoff frei zuordnen ist an: Werkstoff im Reiter „G-Code" (unter Quelle und Segment), Blockhöhe in „Blockgeometrie" (Kerndesign) bzw. „Negativschale".');
+    } else if (isNeg) {
       matSel(card, 'Werkstoff Negativschalen', i, 'negMatId');
       heightNum(card, 'Blockdicke (mm)', i, 'negMatHeight');
     } else {

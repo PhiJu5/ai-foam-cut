@@ -68,7 +68,7 @@
     // Block liegt waagrecht: Unterkante bezogen auf die Block-Mitte (je nach
     // Ausrichtmodus gemeinsame Querschnittsmitte oder Bezugsmerkmal auf 0).
     const cy = blockCenterY(cut);
-    const y = cy - App.blockH() / 2 - (state.cfg.blockY || 0);
+    const y = cy - App.blockH(null, state.segments.indexOf(seg)) / 2 - (state.cfg.blockY || 0);
     // „Von vorne": Nullpunkt VOR der Nase (blockX Abstand zur Blockvorderkante),
     // Maschinen-X = x − origin.x (sx = +1) wächst zur Endleiste hin.
     if (cutFront()) return { x: blockFrontX(cut, seg) - (state.cfg.blockX || 0), y, sx: 1 };
@@ -92,7 +92,7 @@
     const over = Math.max(0, state.cfg.blockCutOver != null ? +state.cfg.blockCutOver || 0 : 1);
     return Math.max(0, (+state.cfg.blockY || 0) - over);
   }
-  function safeHeight() { return (state.cfg.blockY || 0) + App.blockH() + (state.material.safeH || 0); }
+  function safeHeight(segIdx) { return (state.cfg.blockY || 0) + App.blockH(null, segIdx) + (state.material.safeH || 0); }
   // Wirksamer Vorschub AUSSERHALB des Blocks (Anfahrt/Auslauf in Luft), gedeckelt
   // auf den Maschinen-Max.-Vorschub — dieser gilt fürs SCHNELLERE (äußere) Portal.
   function outsideFeed() {
@@ -158,7 +158,7 @@
    * Rückgabe: Schnitthöhen je Turm (l/r) + vordere Block-X je Turm (Auslauf). */
   function shellCutGeom(cut, seg, pr) {
     const k = App.cutKerf(cut.root.chord, cut.tip.chord);   // volle Kerf-Breite je Rippe
-    const h = App.blockH(), cy = blockCenterY(cut);
+    const h = App.blockH(null, state.segments.indexOf(seg)), cy = blockCenterY(cut);
     const yBo = cy + h / 2, yBu = cy - h / 2;            // Block Ober-/Unterkante
     const Dt = state.cfg.shellTop || 0, Db = state.cfg.shellBot || 0;
     const yTopR = yBo - Dt + k.root, yTopT = yBo - Dt + k.tip;
@@ -214,7 +214,7 @@
       // Waagrechter Block: gleiche Y-Höhe (gemeinsame Mitte) an Wurzel und Außen,
       // konstant über die Spannweite. Das Paneel (Wurzel −rise/2, Außen +rise/2)
       // liegt dadurch schräg im Block. blockOrigin.y = Mitte − H/2 -> untere Kante 0.
-      const bh = App.blockH();
+      const bh = App.blockH(null, i);
       const cyMid = blockCenterY(cut);
       const yBot = cyMid - bh / 2 - o.y, yTop = cyMid + bh / 2 - o.y;
       // X wie im G-Code gespiegelt (o.x − x): Block liegt in +X, Null dahinter.
@@ -389,7 +389,7 @@
     // der Blockunterkante — analog zum Profilschnitt (blockOrigin).
     // Y-Bezug ist die WERKSTOFF-Unterkante (Reiter „Werkstoff": Höhe), nicht die
     // Unterkante des Negativblocks — der Formblock sitzt mittig im Werkstoff.
-    const mat = App.negMatBlock(root);
+    const mat = App.negMatBlock(root, idx);
     const ox = root.xBR + (state.cfg.blockX || 0);
     const oy = mat.yBot - (state.cfg.blockY || 0);
     const core = state.cfg.negCore ? { sheeting } : null;

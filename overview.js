@@ -79,6 +79,24 @@
     }, { fixed: true });
   }
 
+  // ---------- Schalter „Werkstoff frei zuordnen" (ganz oben) ----------
+  // An: Werkstoff je G-Code-Quelle im Reiter „G-Code" (unter Quelle/Segment), Blockhöhe in
+  // „Blockgeometrie" (Kerndesign) bzw. „Negativschale" — für alle Segmente oder je Segment —,
+  // Werkstoff für Blockzuschnitt/Guillotine im Reiter „Schneiden". Hier entfallen dann die
+  // Werkstoff-/Dicken-Felder je Tragfläche und für DXF-Formen/3D-Modell.
+  function secMatFree(host) {
+    const on = !!state.cfg.matFree;
+    const bar = el('div', 'ov-bar');
+    const b = document.createElement('button');
+    b.className = on ? 'primary' : '';
+    b.textContent = (on ? '✓ ' : '') + T('Werkstoff frei zuordnen');
+    b.title = T('An: Werkstoff und Dicke werden nicht hier, sondern direkt im Reiter „G-Code" (unter Quelle und Segment), in der Blockgeometrie (Blockhöhe für alle oder je Segment) und beim Blockzuschnitt/Guillotine im Reiter „Schneiden" gewählt. Aus: Zuweisung hier je Tragfläche.');
+    b.onclick = () => { state.cfg.matFree = !on; refresh(true); };
+    bar.appendChild(b);
+    if (on) bar.appendChild(el('span', 'ov-sum', muted(T('Werkstoff im Reiter „G-Code", Blockhöhe in „Blockgeometrie" bzw. „Negativschale", Blockzuschnitt im Reiter „Schneiden".'))));
+    host.appendChild(bar);
+  }
+
   // ---------- Abschnitte je Tragfläche ----------
   function secWing(host, w, i, sums) {
     const act = i === state.activeWing;
@@ -341,6 +359,7 @@
       state._ovSel = 'wing:' + aw;
     }
     const sums = { total: 0, known: true };
+    secMatFree(host);
     secProject(host);
     host.appendChild(el('div', 'ov-group', T('Tragflächen und Werkstoffzuweisung') + ' (' + L.length + ')'));
     L.forEach((w, i) => secWing(host, w, i, sums));
@@ -368,7 +387,7 @@
         host.appendChild(bar);
       }
     }
-    secMatX(host);
+    if (!state.cfg.matFree) secMatX(host);
     secCut(host);
     // Feld-Nummern vergeben und Fokus zurückgeben
     let k = 0;

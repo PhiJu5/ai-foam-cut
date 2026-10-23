@@ -71,7 +71,7 @@
     if (!bd) {
       bd = document.createElement('div'); bd.className = 'modal-backdrop'; bd.id = 'safetyModal';
       bd.innerHTML = '<div class="modal" style="width:min(640px,94vw)"><div class="head"><h2></h2>'
-        + '<button class="close-x" title="Schließen">×</button></div>'
+        + '<button class="close-x" title="' + T('Schließen') + '">×</button></div>'
         + '<div class="body"></div><div class="foot"><div class="mrow"><span class="hint"></span>'
         + '<div class="sp"></div><button class="sf-cancel"></button>'
         + '<button class="primary sf-ok" disabled></button></div></div></div>';

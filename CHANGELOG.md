@@ -4,6 +4,24 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.96] — 2026-10-23
+### Werkstoff frei zuordnen
+- Neuer Schalter **„Werkstoff frei zuordnen“** oben im Reiter Projektübersicht. Ist er an, wird der Werkstoff im Reiter **G-Code** direkt unter Quelle, Tragfläche und Segment gewählt; die Dicke kommt aus Kerndesign bzw. Negativschalendesign.
+- Kerndesign (Gruppe jetzt **„Blockgeometrie“**) und Negativschalendesign: Blockhöhe **für alle Segmente gleich** oder **je Segment separat** (eigenes Feld in jeder Segmentkarte). Vorschau, Blockprüfung, Simulation und G-Code rechnen mit der Höhe des jeweiligen Segments.
+- Reiter **Schneiden**, Blockzuschnitt: **Guillotine**, **Block ablängen** und **Block horizontal** haben je ein eigenes Menü **Werkstoff** (immer frei wählbar); Standard „wie G-Code-Quelle (…)“.
+- Tragflächendesign, „Anzeige“: bei eingeschaltetem Styroporblock ein Feld **„Blockhöhe (mm, nur Konstruktion)“** — wirkt nur auf Ansicht und Randwarnung im Tragflächendesign.
+- Schalter aus = alles wie bisher; die Werte bleiben beim Umschalten erhalten.
+
+### CAD-Bearbeitung: PDF-Export auf mehrere Blätter, Druckvorschau
+- Neu im Block Export: **„Als PDF exportieren“** — echte Vektor-PDF im gewählten Maßstab (Standard 1:1), Papierformat A4 … A0, Letter, Tabloid, hoch/quer oder automatisch (wenigste Blätter).
+- Übergroße Zeichnungen werden gekachelt: einstellbare **Überlappung** mit **Passkreuzen** zum Übereinanderlegen und Kleben; jedes Blatt mit Bezeichnung (A1, A2 … B1 …), Maßstab, Nachbarblättern und 100-mm-Prüfmaß, vorne ein **Übersichtsblatt** mit Klebeplan. Leere Blätter entfallen.
+- Optionen: Rand, Linienbreite, Layerfarben oder schwarz; Linienarten und Texte werden übernommen. **„Blattaufteilung in der Ansicht zeigen“** blendet das Blattraster im CAD-Fenster ein.
+- **„🔍 Druckvorschau…“**: alle Blätter genau wie in der PDF, Miniaturen links, Zoom/Verschieben, Einstellungen direkt umstellbar, Export aus der Vorschau.
+- Beim Drucken „Tatsächliche Größe“ / 100 % wählen.
+
+### Englische Oberfläche
+- Fehlende Übersetzungen nachgetragen (u. a. „Kern zerteilen (Stege)“, Holmausschnitte, Negativschale, Profildatenbank/KFm-Gestalter, 3D-Modell Platte/Stapeln, Schneiden, G-Code-Kommentare); zusammengesetzte Texte werden jetzt stückweise übersetzt.
+
 ## [1.95] — 2026-10-21
 ### 3D-Modell: Synchronpunkte von Hand, Punktnummern, Menüs wie DXF-Formen
 - Neuer Abschnitt **Synchronpunkte** im 3D-Modell: in der Ansicht „◫ Segmentpaar“ erst einen Punkt auf Sollkontur A, dann den zugehörigen auf B anklicken (Fang an Stützpunkten, sonst an der Kante; Esc verwirft). Zwischen den Paaren laufen A und B gleichmäßig nach Bogenlänge — so liegen Ecken, Kanten und Nasen aufeinander und der Draht verdrillt nicht. Paare gelten je Segmentpaar, auch auf Löchern, und werden im Projekt gespeichert (`modelGcode.segSync`). Überkreuzte Paare werden rot markiert und ignoriert.

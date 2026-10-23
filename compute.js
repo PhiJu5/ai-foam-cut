@@ -423,9 +423,11 @@
     const f = autoFeedVal();
     if (!f) return false;
     state.cfg.feed = f;
-    if (state.guillotine) state.guillotine.feed = f;
-    if (state.block) state.block.feed = f;
-    if (state.blockH) state.blockH.feed = f;
+    // Blockzuschnitt: jeder Befehl mit eigenem Werkstoff (siehe matIdFor 'guil'/'blockV'/'blockHz').
+    const fOf = ctx => { const v = feedPair(matIdFor(ctx)).fast; return v > 0 ? v : f; };
+    if (state.guillotine) state.guillotine.feed = fOf('guil');
+    if (state.block) state.block.feed = fOf('blockV');
+    if (state.blockH) state.blockH.feed = fOf('blockHz');
     if (state.modelGcode) state.modelGcode.feed = f;
     return true;
   }
@@ -437,16 +439,39 @@
   // Kontexte: 'wing' (Kern), 'neg' (Negativschalen), 'dxf' (DXF-Formen), 'model' (3D-Modell/Platte), 'schrift' (Reiter „Schriften“).
   function matCtx() {
     if (App.matCtxOverride) return App.matCtxOverride;
+    return srcMatCtx();
+  }
+  // Kontext der im Reiter „G-Code" gewählten Quelle (ohne Override).
+  function srcMatCtx() {
     const src = state.cfg.gcodeSource;
     return src === 'neg' ? 'neg' : src === 'dxf' ? 'dxf' : (src === 'model' || src === 'plate') ? 'model' : src === 'schrift' ? 'schrift' : src === 'ausschnitt' ? 'ausschnitt' : 'wing';
   }
+  // „Werkstoff frei zuordnen" (state.cfg.matFree, Schalter oben im Reiter Projektübersicht):
+  // Werkstoff je G-Code-Quelle im Reiter „G-Code", Blockhöhe in „Blockgeometrie" bzw.
+  // „Negativschale" — für alle Segmente gleich oder je Segment (cfg.matHMode/negMatHMode
+  // 'seg' -> seg.matH / seg.negMatH). Blockzuschnitt im Reiter „Schneiden": Guillotine
+  // ('guil'), Block ablängen ('blockV'), Block horizontal ('blockHz') — Werkstoff IMMER frei
+  // wählbar (cfg.guilMatId/blockMatId/blockHzMatId), leer = Werkstoff der aktuellen G-Code-Quelle.
+  const PREP_MAT_KEYS = { guil: 'guilMatId', blockV: 'blockMatId', blockHz: 'blockHzMatId' };
+  function matFree() { return !!state.cfg.matFree; }
   function matIdFor(ctx) {
     ctx = ctx || matCtx();
+    const pk = PREP_MAT_KEYS[ctx];
+    if (pk) return state.cfg[pk] ? state.cfg[pk] : matIdFor(srcMatCtx());   // leer = Werkstoff der G-Code-Quelle
     const v = ctx === 'neg' ? state.cfg.negMatId : ctx === 'dxf' ? state.cfg.dxfMatId : ctx === 'model' ? state.cfg.modelMatId : ctx === 'schrift' ? state.cfg.scMatId : ctx === 'ausschnitt' ? state.cfg.waMatId : state.cfg.matId;
     return v != null ? v : (state.material.id || '');
   }
-  function blockH(ctx) {
+  // segIdx: Segment der Tragfläche (Standard: App.matSegOverride bzw. aktives Segment);
+  // zählt nur bei „Werkstoff frei zuordnen" mit Blockhöhe „je Segment".
+  function blockH(ctx, segIdx) {
     ctx = ctx || matCtx();
+    const neg = ctx === 'neg';
+    if (matFree() && (neg ? state.cfg.negMatHMode : state.cfg.matHMode) === 'seg') {
+      const i = segIdx != null && segIdx >= 0 ? segIdx : (App.matSegOverride != null ? App.matSegOverride : activeIdx());
+      const sg = state.segments[Math.min(i, state.segments.length - 1)];
+      const sv = sg && (neg ? sg.negMatH : sg.matH);
+      if (sv != null && isFinite(sv) && +sv > 0) return +sv;
+    }
     const v = ctx === 'neg' ? state.cfg.negMatHeight : state.cfg.matHeight;
     return (v != null && isFinite(v)) ? +v : (+state.material.height || 0);
   }
@@ -784,5 +809,5 @@
   Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor, matExtPower, relayLevel, extPowerText });
   Object.assign(App, { matPair, moveSeg, polyPerim, profIsAll, profSet, profShowIndices, profToggle, projectCut, rootAtRight });
   Object.assign(App, { recompute, removeSeg, setFeed, setHeat, setKerf, setMatField, setPair, sheetActive });
-  Object.assign(App, { matCtx, matIdFor, blockH, sheetFor, sparKerfHalf, splitSeg, startAtTop, updateFeedWarn });
+  Object.assign(App, { matCtx, srcMatCtx, matFree, matIdFor, blockH, sheetFor, sparKerfHalf, splitSeg, startAtTop, updateFeedWarn });
 })();

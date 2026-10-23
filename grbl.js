@@ -1597,7 +1597,7 @@
       let bd = document.getElementById('cutChecklistModal');
       if (!bd) {
         bd = document.createElement('div'); bd.className = 'modal-backdrop'; bd.id = 'cutChecklistModal';
-        bd.innerHTML = '<div class="modal" style="width:min(520px,94vw)"><div class="head"><h2></h2><button class="close-x" title="Schließen">×</button></div>'
+        bd.innerHTML = '<div class="modal" style="width:min(520px,94vw)"><div class="head"><h2></h2><button class="close-x" title="' + T('Schließen') + '">×</button></div>'
           + '<div class="body"></div><div class="foot"><div class="mrow"><span class="hint"></span><div class="sp"></div>'
           + '<button class="cl-cancel"></button><button class="primary cl-ok" disabled></button></div></div></div>';
         document.body.appendChild(bd);

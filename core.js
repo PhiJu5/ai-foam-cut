@@ -327,6 +327,13 @@
       // (Altprojekte). Zugriff nur über App.matIdFor(ctx) / App.blockH(ctx).
       // design = 'core' (Kern) | 'neg' (Negativschalen): welche der beiden Zuweisungen in der Projektübersicht gezeigt wird.
       design: 'core', matId: null, matHeight: null, negMatId: null, negMatHeight: null,
+      // „Werkstoff frei zuordnen" (projektweit, Schalter oben in der Projektübersicht): Werkstoff im
+      // Reiter „G-Code", Blockhöhe in Blockgeometrie/Negativschale; matHMode/negMatHMode 'all'|'seg'
+      // (je Tragfläche; 'seg' -> seg.matH/seg.negMatH), Blockzuschnitt-Werkstoffe siehe unten.
+      matFree: false, matHMode: 'all', negMatHMode: 'all',
+      // Werkstoff je Blockzuschnitt-Befehl (immer frei wählbar, null = wie Kern): Guillotine, Block ablängen, Block horizontal.
+      guilMatId: null, blockMatId: null, blockHzMatId: null,
+      designBlockH: null,                 // Blockhöhe nur zur Ansicht im Tragflächendesigner (null = wie Kerndesign)
       // Gewichtsabschätzung je Tragfläche (Reiter „Projektübersicht", wings.js wingWeight):
       // wtCount = Stückzahl (Hälften), wtSheetMode 'none'|'density'|'area' (Beplankung aus
       // Dichte×Dicke oder direkt g/m²), wtSheetThick null = Dicke aus dem Tragflächendesign,

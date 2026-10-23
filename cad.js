@@ -1782,6 +1782,7 @@
       if (t.rot) { ctx.save(); ctx.translate(px, py); ctx.rotate(-t.rot * Math.PI / 180); ctx.fillText(t.text, 0, 0); ctx.restore(); }
       else ctx.fillText(t.text, px, py);
     });
+    if (window.CadPdf) CadPdf.drawTiles(ctx, V);   // Blattaufteilung des PDF-Exports
     cadOverlay(ctx, V, w, h);
   }
   function cadDrawGrid(ctx, w, h, V) {
@@ -2639,6 +2640,7 @@
     const be = document.createElement('button'); be.className = 'primary'; be.textContent = T('Als DXF exportieren'); be.onclick = cadExportDxf; DEMO.btn(be); gx.body.appendChild(be);
     if (DEMO.on) App.hint(gx.body, DEMO.msg);
     const bf = document.createElement('button'); bf.textContent = T('In DXF-Formen übernehmen'); bf.title = T('Die (sichtbaren) Konturen in den Reiter DXF-Formen übergeben — z. B. für den Turmschnitt.'); bf.onclick = cadExportToDxfForms; gx.body.appendChild(bf);
+    if (window.CadPdf) CadPdf.sidebar(gx.body);   // PDF-Export, auf Blätter aufgeteilt (cadpdf.js)
     side.appendChild(gx.g);
 
     buildCadBgSidebar(side);

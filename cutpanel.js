@@ -32,9 +32,14 @@
     return (b.hSrc === 'manual' && +b.height > 0) ? +b.height : App.blockH('wing');
   }
   App.blockCutH = blockCutH;
+  // Werkstoff-Kontext 'blockV' (Block ablängen): Abbrand UND Heizung aus dessen eigenem Werkstoff.
   function renderBlock() {
+    const prev = App.matCtxOverride; App.matCtxOverride = 'blockV';
+    try { renderBlock_(); } finally { App.matCtxOverride = prev; }
+  }
+  function renderBlock_() {
     if (!window.BlockPrep) return;
-    const k = App.kerfForSpeed(App.matIdFor('wing'), state.block.feed);
+    const k = App.kerfForSpeed(App.matIdFor('blockV'), state.block.feed);
     const spec = { dist: state.block.dist, length: state.block.length, height: blockCutH(), kerf: k };
     const cuts = BlockPrep.cutsFor(spec);
     const safeY = blockCutH() + (state.material.safeH || 20);
@@ -136,7 +141,7 @@
       if (!bcam.drag) return;
       bcam.yaw = bcam.drag.yaw - (e.clientX - bcam.drag.x) * 0.01 * (Math.cos(bcam.drag.pitch) < 0 ? -1 : 1);   // invertiert (wie Simulator)
       bcam.pitch = bcam.drag.pitch - (e.clientY - bcam.drag.y) * 0.01;   // keine Kipp-Begrenzung
-      drawBlock3D(BlockPrep ? BlockPrep.cutsFor({ dist: state.block.dist, length: state.block.length, height: blockCutH(), kerf: App.kerfForSpeed(state.material.id, state.block.feed) }) : []);
+      drawBlock3D(BlockPrep ? BlockPrep.cutsFor({ dist: state.block.dist, length: state.block.length, height: blockCutH(), kerf: App.kerfForSpeed(App.matIdFor('blockV'), state.block.feed) }) : []);
     });
     window.addEventListener('mouseup', () => { if (bcam.drag) { bcam.drag = null; cv.style.cursor = 'grab'; } });
     cv.addEventListener('wheel', e => { e.preventDefault(); bcam.zoom *= Math.exp(-e.deltaY * 0.0015); renderBlock(); }, { passive: false });
@@ -148,6 +153,16 @@
 
   // ---------- Seitenleiste: Gruppen der Reiter „Schneiden" und „Maschine" ----------
   // Wird aus buildSidebar() (sidebar.js) an den bisherigen Stellen aufgerufen.
+  // Blockzuschnitt: Werkstoff je Befehl, immer frei wählbar (leer = wie G-Code-Quelle).
+  function prepMatRow(body, key, src, hintTxt) {
+    // Leer = Werkstoff der im Reiter „G-Code" gewählten Quelle (Kern, Negativschalen, DXF-Formen, 3D-Modell …).
+    const cur = App.matIdFor(App.srcMatCtx());
+    const curName = cur ? T(App.matField(cur, 'name', cur)) : T('kein Werkstoff');
+    const mo = [['', T('wie G-Code-Quelle') + ' (' + curName + ')']].concat(App.matOptions ? App.matOptions() : []);
+    selectRow(body, 'Werkstoff', mo, () => state.cfg[key] || '',
+      v => { state.cfg[key] = v || null; if (App.syncAutoFeed) App.syncAutoFeed(); buildSidebar(); if (src === 'block') renderBlock(); refreshCutSource(src); },
+      hintTxt);
+  }
   function sidebarMachine(side, part) {
     if (part === 'cut') {
       // --- Reiter „Schneiden" (cut): Blockzurichten integriert ----------
@@ -163,6 +178,7 @@
 
       // 1) Guillotine ---------------------------------------------------
       const zuG = grp('Guillotine', false, 'cut'); zuG.g.classList.add('grp-sub');
+      prepMatRow(zuG.body, 'guilMatId', 'guillotine', 'Werkstoff für den Guillotine-Schnitt (Heizung, Vorschub automatisch) — unabhängig von der übrigen Werkstoff-Zuordnung. „wie G-Code-Quelle" = Werkstoff der im Reiter „G-Code" gewählten Quelle.');
       numRow(zuG.body, 'Höhe (mm)', () => state.guillotine.height,
         v => { state.guillotine.height = v; refreshCutSource('guillotine'); }, { min: 1, norender: true,
         hint: 'Wie hoch der Schnitt reicht (ab Y0 bis Höhe). Der Draht durchtrennt bis Y0.' });
@@ -203,6 +219,7 @@
 
       // 2) Block ablängen (vertikal) ------------------------------------
       const zuV = grp('Block ablängen (vertikal)', false, 'cut'); zuV.g.classList.add('grp-sub');
+      prepMatRow(zuV.body, 'blockMatId', 'block', 'Werkstoff für „Block ablängen" (Abbrand, Heizung, Vorschub automatisch) — unabhängig von der übrigen Werkstoff-Zuordnung. „wie G-Code-Quelle" = Werkstoff der im Reiter „G-Code" gewählten Quelle.');
       numRow(zuV.body, '1. Schnitt: Abstand von Nullpunkt X (mm)', () => state.block.dist,
         v => { state.block.dist = v; renderBlock(); refreshCutSource('block'); }, { min: 0, norender: true,
         hint: 'Horizontaler Abstand des vorderen Schnitts vom Maschinen-Nullpunkt (X0).' });
@@ -265,14 +282,15 @@
       feedRow(zuV.body, 'Vorschub (mm/min)', () => state.block.feed,
         v => { state.block.feed = v; renderBlock(); refreshCutSource('block'); }, { min: 1, norender: true });
       hint(zuV.body, T('Zwei planare Vertikalschnitte, um Abbrand/2 nach außen versetzt (Abbrand-kompensiert) → Block misst exakt die Länge. Draht ')
-        + App.kerfForSpeed(App.matIdFor('wing'), state.block.feed).toFixed(2)
-        + (App.matExtPower(App.matIdFor('wing'))
-          ? T(' mm Abbrand · Externes Netzteil ') + App.extPowerText(App.matIdFor('wing')) + T('. Als G-Code-Quelle „Block" wählbar.')
-          : T(' mm Abbrand · Heizung ') + App.currentHeat() + T(' % (aus Werkstoff). Als G-Code-Quelle „Block" wählbar.')));
+        + App.kerfForSpeed(App.matIdFor('blockV'), state.block.feed).toFixed(2)
+        + (App.matExtPower(App.matIdFor('blockV'))
+          ? T(' mm Abbrand · Externes Netzteil ') + App.extPowerText(App.matIdFor('blockV')) + T('. Als G-Code-Quelle „Block" wählbar.')
+          : T(' mm Abbrand · Heizung ') + App.heatForSpeed(App.matIdFor('blockV'), state.block.feed) + T(' % (aus Werkstoff). Als G-Code-Quelle „Block" wählbar.')));
       side.appendChild(zuV.g);
 
       // 3) Block horizontal ---------------------------------------------
       const zuH = grp('Block horizontal', false, 'cut'); zuH.g.classList.add('grp-sub');
+      prepMatRow(zuH.body, 'blockHzMatId', 'blockH', 'Werkstoff für „Block horizontal" (Abbrand, Heizung, Vorschub automatisch) — unabhängig von der übrigen Werkstoff-Zuordnung. „wie G-Code-Quelle" = Werkstoff der im Reiter „G-Code" gewählten Quelle.');
       const bh = state.blockH;
       selectRow(zuH.body, 'Modus', [['height', 'Auf Höhe ablängen (nur oben)'], ['topbottom', 'Ober- und Unterseite']],
         () => bh.mode, v => { bh.mode = v; buildSidebar(); refreshCutSource('blockH'); },
@@ -341,8 +359,8 @@
         + 'Mit: um Abbrand/2 nach außen versetzt — das FERTIGE Rechteck sollte das Nennmaß haben (Kontrolle).');
       if (App.matExtPower(mid)) {
         // Externes Netzteil: Heizung fest am Netzteil -> nur Punkt 1+2 (Abbrand-Gerade).
-        hint(ca.body, 'Werkstoff mit externem Netzteil: vor dem Testschnitt am Netzteil ' + App.extPowerText(mid)
-          + ' einstellen. Der Heizstromausgang schaltet nur das Relais. Zwei Kalibrierpunkte (schnell/langsam) ergeben die Abbrand-Gerade.').classList.add('hint-open');
+        hint(ca.body, T('Werkstoff mit externem Netzteil: vor dem Testschnitt am Netzteil ') + App.extPowerText(mid)
+          + T(' einstellen. Der Heizstromausgang schaltet nur das Relais. Zwei Kalibrierpunkte (schnell/langsam) ergeben die Abbrand-Gerade.')).classList.add('hint-open');
         if (cb.speed === 'slowH') cb.speed = 'fast';
         selectRow(ca.body, 'Testschnitt', [['fast', '1: schnell'], ['slow', '2: langsam']],
           () => cb.speed, v => { cb.speed = v; refreshCutSource('calib'); });

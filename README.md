@@ -77,7 +77,7 @@ lassen sich als Profil speichern und wieder laden.
 Ohne Fenster geht es auch:
 
 ```
-python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.95
+python build_tool_electron.py --cli --name "AI Foam Cut" --version 1.96
 python build_tool_electron.py --cli --target linux
 ```
 

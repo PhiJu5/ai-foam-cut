@@ -24,7 +24,7 @@
     const seg = state.segments[Math.min(idx, state.segments.length - 1)];
     const pr = App.projectCut(cut, seg);
     const e = App.blockExt(seg, cut.root.chord, cut.tip.chord);
-    const H = App.blockH(), cy = App.blockCenterY(cut);
+    const H = App.blockH(null, idx), cy = App.blockCenterY(cut);
     const base = (ovF, ovR) => ({ H, blockCy: cy, ovF, ovR, split: 0, cores: [], supOffsets: [],
       noseExt: state.cfg.negNoseExt, teStyle: state.cfg.negTeStyle || 'horizontal' });
     // Stege aus der Kernkontur (nach Beplankungsabzug, wie der normale Kernschnitt).
