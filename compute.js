@@ -129,7 +129,59 @@
     return { mode, ctrl: Math.max(4, Math.round(c.ribCtrl || 18)), lambda: c.ribLambda != null ? Math.max(0, +c.ribLambda) : 1,
       tol: c.ribTol != null ? Math.max(0, +c.ribTol) : 0.02, nose: c.ribNoseFix === true };
   }
+  /* Strak-Profile wie im Planform Creator: ein Segment mit seg.strak bekommt sein
+   * Außenprofil aus dem nächsten GEGEBENEN Profil weiter innen (Wurzel zählt immer)
+   * und dem nächsten gegebenen weiter außen, gemischt nach der Lage in Spannweiten-
+   * richtung (t = Abstand zum inneren / Abstand innen–außen). Gegeben = geladen oder aus
+   * der Profildatenbank. Ohne äußeres gegebenes Profil: Kopie des inneren.
+   * Neu gemischt nur, wenn sich Nachbarprofil oder Anteil ändern (Cache je Segment). */
+  const strakCache = new WeakMap();
+  function cleanFoilName(p) { return String((p && p.name) || 'Profil').replace(/\s*\(Platzhalter[^)]*\)\s*$/i, '').trim(); }
+  // Anzeigename des Profils einer Rippe (state.root bzw. Segment = Außenrippe): Profilname
+  // (.dat-Name), bei noch fehlender Datei der vorgemerkte foilName. '' = unbenannt.
+  function foilLabel(o) {
+    if (!o) return '';
+    const p = o.profile;
+    if ((!p || !p.name || /Platzhalter/i.test(p.name)) && o.foilName) return String(o.foilName).trim();
+    return p && p.name ? cleanFoilName(p) : '';
+  }
+  // Schalter „Profilnamen" (Ansichtsmenü): fehlender Schlüssel = an.
+  function showFoilNames() { return state.cfg.showFoilNames !== false; }
+  function strakInfo(i) {
+    const segs = state.segments, z = []; let acc = 0;
+    segs.forEach(s => { acc += +s.span || 0; z.push(acc); });
+    let j = i - 1; while (j >= 0 && segs[j].strak) j--;
+    let m = i + 1; while (m < segs.length && segs[m].strak) m++;
+    const inner = j < 0 ? state.root : segs[j], zi = j < 0 ? 0 : z[j];
+    const outer = m < segs.length ? segs[m] : null;
+    const t = outer && (z[m] - zi) > 1e-9 ? Math.max(0, Math.min(1, (z[i] - zi) / (z[m] - zi))) : 0;
+    return { inner, outer, innerIdx: j, outerIdx: outer ? m : null, t };
+  }
+  function updateStraks() {
+    if (!window.PC2) return;
+    state.segments.forEach((s, i) => {
+      // Alte Fassung (foilStrak mit festen Namen) -> Strak-Schalter
+      if (s.foilStrak) { s.strak = true; delete s.foilStrak; }
+      if (!s.strak) return;
+      const inf = strakInfo(i), pa = inf.inner.profile, pb = inf.outer ? inf.outer.profile : null;
+      const tr = Math.round(inf.t * 1000) / 1000;
+      // Bearbeitung (Profil-Editor) wird nach jedem Mischen erneut angewendet.
+      const ed = s.strakEdit && App.editProfile ? s.strakEdit : null;
+      const edSig = ed ? JSON.stringify(ed) + '|' + s.chord : '';
+      const c = strakCache.get(s);
+      if (c && c.pa === pa && c.pb === pb && c.t === tr && c.ed === edSig && c.out === s.profile) return;
+      let mix;
+      if (!pb || tr <= 0) { mix = pa.map(q => ({ x: q.x, y: q.y })); mix.name = pa.name; }
+      else mix = PC2.strak(pa, pb, tr, PC2.strakName({ a: cleanFoilName(pa), b: cleanFoilName(pb), t: tr }));
+      const base = mix.map(q => ({ x: q.x, y: q.y })); base.name = mix.name;
+      if (state.profBase) state.profBase[String(i)] = base;
+      const out = ed ? App.editProfile(base, ed, +s.chord || 1) : mix;
+      s.profile = out; s.foilName = '';
+      strakCache.set(s, { pa, pb, t: tr, ed: edSig, out });
+    });
+  }
   function recompute() {
+    updateStraks();
     inheritRootExtensions();
     // Scharnierlinien-Pfeilung: berechnete LE-Versätze in geklonten Segmenten an
     // Wing.build geben; die manuell eingestellten seg.sweep bleiben erhalten.
@@ -480,6 +532,14 @@
   // Wirksame Heizung beim aktuellen Vorschub (konstant, solange kein zweiter
   // Heizungs-Kalibrierpunkt „langsam" eingetragen ist).
   function currentHeat() { return heatForSpeed(matIdFor(), state.cfg.feed); }
+  // Kopfkommentar „Werkstoff: …" für JEDEN G-Code — damit immer sichtbar ist, auf
+  // welchen Werkstoff sich Vorschub und Drahtheizung beziehen. Ohne id: aktueller
+  // Werkstoff-Kontext (matCtxOverride bzw. G-Code-Quelle).
+  function matNote(id) {
+    if (id == null) id = matIdFor();
+    const nm = id ? T(String(matField(id, 'name', id)).trim()) : T('(kein Werkstoff gewählt)');
+    return '; ' + T('Werkstoff: ') + nm + T(' — Vorschub und Drahtheizung beziehen sich auf diesen Werkstoff');
+  }
   // Heizung-Prozent -> S-Wert für M3, skaliert auf $30 (sMax) des aktiven
   // Firmware-Profils — GENAUSO wie die Handsteuerung (grbl.wire). Ohne diese
   // Skalierung sendet der G-Code den rohen Prozentwert (z. B. S40 = 4 % Duty
@@ -804,10 +864,11 @@
     if (cfg.extOverBlockClearTE == null) cfg.extOverBlockClearTE = 5;
   }
   migrateExtOverBlock(state.cfg);
-  Object.assign(App, { currentFeed, currentHeat, currentKerf, currentWireS, cutKerf, delMaterial, effSweep, extEffTip, migrateExtOverBlock });
+  Object.assign(App, { currentFeed, currentHeat, matNote, currentKerf, currentWireS, cutKerf, delMaterial, effSweep, extEffTip, migrateExtOverBlock });
   Object.assign(App, { ribFitCfg, feedPair, inheritRootExtensions, kerfForSpeed, kerfPair, lerpProfile, matField, matHeat, matOptions });
   Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor, matExtPower, relayLevel, extPowerText });
   Object.assign(App, { matPair, moveSeg, polyPerim, profIsAll, profSet, profShowIndices, profToggle, projectCut, rootAtRight });
+  Object.assign(App, { strakInfo, updateStraks, foilLabel, showFoilNames });
   Object.assign(App, { recompute, removeSeg, setFeed, setHeat, setKerf, setMatField, setPair, sheetActive });
   Object.assign(App, { matCtx, srcMatCtx, matFree, matIdFor, blockH, sheetFor, sparKerfHalf, splitSeg, startAtTop, updateFeedWarn });
 })();

@@ -11,7 +11,11 @@
  *   - Mehrere Dateien (Ordner-Dialog): Module rufen geschützt
  *     `if (App.stlPreview && !(await App.stlPreview(list))) return;`
  *     list = [{ name, data }] mit data = ArrayBuffer | String | Float32Array (Eckpunkte).
- *   - App.stlSaveMany(list, which): Vorschau + Ordner-Dialog + Download-Rückfall.
+ *   - App.stlSaveMany(list, which, opt): Vorschau + Speichern mehrerer Teile. Bei mehr als einem
+ *     Teil wählt man in der Vorschau das Format: 3MF (EINE Datei, jedes Teil ein eigenes Objekt mit
+ *     Namen — Slicer behalten die Teile getrennt) oder STL (eine Datei je Teil, Ordner-Dialog).
+ *     opt.name = Dateiname der 3MF (sonst gemeinsamer Anfang der Teilnamen).
+ *   - App.make3MF(list): 3MF-Datei (ArrayBuffer) aus [{ name, v | data }].
  *
  *   Ansicht: Z oben (Druckerkonvention), orthografisch, WebGL2 (Rückfall 2D).
  *   Links ziehen = drehen, rechts/Mitte ziehen = verschieben, Rad = Zoom zum Cursor,
@@ -116,10 +120,11 @@
     bd.innerHTML = '<div class="modal"><div class="head"><h2 class="sp-title"></h2><span style="flex:1"></span><button class="close-x sp-x">×</button></div>'
       + '<div class="sp-main"><div class="sp-view"><canvas class="sp-gl"></canvas><canvas class="sp-ov"></canvas><div class="sp-hint"></div></div><div class="sp-side"></div></div>'
       + '<div class="foot"><span class="sp-sum"></span><label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px"><input type="checkbox" class="sp-back" checked> <span class="sp-backl"></span></label>'
-      + '<button class="sp-cancel"></button><button class="primary sp-save"></button></div></div>';
+      + '<select class="sp-fmt" style="font-size:12px"></select><button class="sp-cancel"></button><button class="primary sp-save"></button></div></div>';
     document.body.appendChild(bd);
     const q = s => bd.querySelector(s);
-    dom = { bd, title: q('.sp-title'), x: q('.sp-x'), view: q('.sp-view'), gl: q('.sp-gl'), ov: q('.sp-ov'), hint: q('.sp-hint'), side: q('.sp-side'), sum: q('.sp-sum'), back: q('.sp-back'), backl: q('.sp-backl'), cancel: q('.sp-cancel'), save: q('.sp-save') };
+    dom = { bd, title: q('.sp-title'), x: q('.sp-x'), view: q('.sp-view'), gl: q('.sp-gl'), ov: q('.sp-ov'), hint: q('.sp-hint'), side: q('.sp-side'), sum: q('.sp-sum'), back: q('.sp-back'), backl: q('.sp-backl'), cancel: q('.sp-cancel'), save: q('.sp-save'), fmt: q('.sp-fmt') };
+    dom.fmt.onchange = () => { V.fmt = dom.fmt.value; try { localStorage.setItem('hw_multiFmt', V.fmt); } catch (e) {} saveLabel(); };
     dom.x.title = T('Abbrechen (Esc)');
     dom.back.onchange = () => { V.showBack = dom.back.checked; draw(); };
     dom.x.onclick = dom.cancel.onclick = () => close(false);
@@ -336,10 +341,25 @@
     if (!dom || !dom.bd.classList.contains('open')) return;
     dom.bd.classList.remove('open');
     freeGl(); const r = V.resolve; V.resolve = null; V.files = [];
+    V.fmtUsed = V.multi ? V.fmt : 'stl';
     if (r) r(!!ok);
   }
-  function open(list) {
+  function saveLabel() {
+    const n = V.files.length;
+    dom.save.textContent = n < 2 ? '💾 ' + T('Speichern…') : V.multi && V.fmt === '3mf' ? '💾 ' + T('Als 3MF speichern…') + ' (' + n + ' ' + T('Teile') + ')' : '💾 ' + n + ' ' + T('Dateien speichern…');
+  }
+  function open(list, multi) {
     build();
+    V.multi = !!multi && list.length > 1;
+    if (V.multi) {
+      let f = '3mf'; try { f = localStorage.getItem('hw_multiFmt') || '3mf'; } catch (e) {}
+      V.fmt = f === 'stl' ? 'stl' : '3mf';
+      dom.fmt.innerHTML = '';
+      [['3mf', T('3MF – eine Datei, Teile getrennt')], ['stl', T('STL – eine Datei je Teil')]].forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; dom.fmt.appendChild(o); });
+      dom.fmt.value = V.fmt;
+      dom.fmt.title = T('3MF: alle Teile in einer Datei, im Slicer einzeln verschieb- und einstellbar. STL: eine Datei je Teil.');
+    }
+    dom.fmt.style.display = V.multi ? '' : 'none';
     const files = list.map((it, i) => {
       const v = toVerts(it.data != null ? it.data : (it.v || (it.mesh && it.mesh.v)));
       return { name: it.name || 'modell.stl', v, bytes: it.data != null ? bytesOf(it.data) : 84 + v.length / 9 * 50, bb: boundsOf(v), col: COLORS[i % COLORS.length], on: true, check: undefined };
@@ -357,7 +377,7 @@
     dom.backl.textContent = T('Rückseiten rot');
     dom.back.checked = V.showBack;
     dom.cancel.textContent = T('Abbrechen');
-    dom.save.textContent = files.length > 1 ? '💾 ' + files.length + ' ' + T('Dateien speichern…') : '💾 ' + T('Speichern…');
+    saveLabel();
     dom.bd.classList.add('open');
     if (initGl()) for (const f of files) upload(f);
     sideList(); summary();
@@ -383,15 +403,20 @@
     return enqueue(() => open(list));
   }
 
-  // Mehrere STL-Dateien: Vorschau, dann Ordner-Dialog (sonst nacheinander als Download).
-  async function stlSaveMany(list, which) {
-    which = which || 'svStl';
+  // Mehrere Teile: Vorschau mit Formatwahl, dann 3MF (Speichern-Dialog) oder je Teil eine STL (Ordner-Dialog).
+  async function stlSaveMany(list, which, opt) {
+    which = which || 'svStl'; opt = opt || {};
     if (App.demoSaveBlocked && App.demoSaveBlocked(which)) return;
+    list = (list || []).filter(Boolean);
     if (!list.length) return;
-    const buf = it => it.data != null ? it.data : (App.stlBinary ? App.stlBinary(it.v) : it.v);
+    const buf = it => it.data != null ? it.data : stlBinary(it.v || it.mesh.v);
     return enqueue(async () => {
-      if (!(await open(list))) return;
+      if (!(await open(list, true))) return;
       if (list.length === 1) { await rawDownload(list[0].name, buf(list[0]), 'model/stl', which); return; }
+      if (V.fmtUsed === '3mf') {
+        const nm = (opt.name || commonName(list)).replace(/\.(stl|3mf)$/i, '') + '.3mf';
+        await rawDownload(nm, make3MF(list), 'model/3mf', which); return;
+      }
       if (App.FS_SUPPORTED && window.showDirectoryPicker) {
         const dh = App.dirHandles || {}; let root;
         try { root = await window.showDirectoryPicker({ mode: 'readwrite', startIn: dh[which] || dh.save || 'documents' }); } catch (e) { return; }
@@ -403,6 +428,71 @@
       }
       let i = 0; for (const it of list) setTimeout(() => App.anchorDownload(it.name, buf(it), 'model/stl', which), 300 * i++);
     });
+  }
+  // Gemeinsamer Anfang der Teilnamen (an _ / - / Leerzeichen gekürzt) als 3MF-Dateiname.
+  function commonName(list) {
+    const ns = list.map(it => String(it.name || '').replace(/\.stl$/i, ''));
+    let p = ns[0] || '';
+    for (const n of ns) { let k = 0; while (k < p.length && k < n.length && p[k] === n[k]) k++; p = p.slice(0, k); }
+    p = p.replace(/[_\-\s.]+$/, '');
+    return p.length >= 2 ? p : 'teile';
+  }
+
+  // ---------- 3MF (ZIP mit 3D/3dmodel.model, Einheit mm) ----------------------------------------
+  const xmlEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const num = x => { const r = Math.round(x * 1e5) / 1e5; return Object.is(r, -0) ? '0' : String(r); };
+  function make3MF(list) {
+    const objs = [], items = [];
+    list.forEach((it, oi) => {
+      const v = toVerts(it.data != null ? it.data : (it.v || (it.mesh && it.mesh.v)));
+      const ids = new Map(), vx = [], tr = [];
+      const idOf = i => {
+        const k = num(v[i]) + ' ' + num(v[i + 1]) + ' ' + num(v[i + 2]); let q = ids.get(k);
+        if (q === undefined) { q = ids.size; ids.set(k, q); vx.push('<vertex x="' + num(v[i]) + '" y="' + num(v[i + 1]) + '" z="' + num(v[i + 2]) + '"/>'); }
+        return q;
+      };
+      for (let t = 0; t + 8 < v.length; t += 9) {
+        const a = idOf(t), b = idOf(t + 3), c = idOf(t + 6);
+        if (a !== b && b !== c && a !== c) tr.push('<triangle v1="' + a + '" v2="' + b + '" v3="' + c + '"/>');   // 3MF verbietet entartete Dreiecke
+      }
+      if (!tr.length) return;
+      const id = oi + 1, nm = String(it.name || ('teil' + id)).replace(/\.stl$/i, '');
+      objs.push('<object id="' + id + '" name="' + xmlEsc(nm) + '" type="model"><mesh><vertices>' + vx.join('') + '</vertices><triangles>' + tr.join('') + '</triangles></mesh></object>');
+      items.push('<item objectid="' + id + '"/>');
+    });
+    const model = '<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="de-DE" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+      + '<metadata name="Application">AI Foam Cut</metadata><resources>' + objs.join('') + '</resources><build>' + items.join('') + '</build></model>';
+    const types = '<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>';
+    const rels = '<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>';
+    return zipStore([['[Content_Types].xml', types], ['_rels/.rels', rels], ['3D/3dmodel.model', model]]);
+  }
+  // Minimaler ZIP-Schreiber (unkomprimiert, „stored“) — reicht für 3MF, keine fremde Bibliothek.
+  let CRC = null;
+  function crc32(u) {
+    if (!CRC) { CRC = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRC[n] = c >>> 0; } }
+    let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 255] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zipStore(entries) {
+    const enc = new TextEncoder(), parts = [], cen = []; let off = 0;
+    for (const [name, txt] of entries) {
+      const nb = enc.encode(name), data = typeof txt === 'string' ? enc.encode(txt) : new Uint8Array(txt), crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+      h.setUint16(12, 0x21, true); h.setUint32(14, crc, true);
+      h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, nb.length, true);
+      const c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true);
+      c.setUint16(14, 0x21, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, nb.length, true); c.setUint32(42, off, true);
+      parts.push(new Uint8Array(h.buffer), nb, data); cen.push(new Uint8Array(c.buffer), nb);
+      off += 30 + nb.length + data.length;
+    }
+    const cs = cen.reduce((s, a) => s + a.length, 0), e = new DataView(new ArrayBuffer(22));
+    e.setUint32(0, 0x06054b50, true); e.setUint16(8, entries.length, true); e.setUint16(10, entries.length, true); e.setUint32(12, cs, true); e.setUint32(16, off, true);
+    const all = parts.concat(cen, [new Uint8Array(e.buffer)]), out = new Uint8Array(all.reduce((s, a) => s + a.length, 0));
+    let o = 0; for (const a of all) { out.set(a, o); o += a.length; }
+    return out.buffer;
   }
   // Binär-STL aus Eckpunkten (für stlSaveMany mit {v}).
   function stlBinary(v) {
@@ -442,5 +532,5 @@
   }
   wrap('download'); wrap('exportViaPicker');
 
-  Object.assign(App, { stlPreview, stlSaveMany, stlBinary });
+  Object.assign(App, { stlPreview, stlSaveMany, stlBinary, make3MF });
 })();

@@ -52,6 +52,11 @@
     if (hf.posMode == null) hf.posMode = 'pct'; // 'pct' (ab Nase) | 'mm'
     if (hf.frontPos == null) hf.frontPos = 30;  // Trennung vorderer Teil
     if (hf.rearPos == null) hf.rearPos = 60;    // Trennung hinterer Teil
+    // Schräge Wurzelrippe des ersten Segments (z. B. Rumpf mit Einschnürung):
+    // Winkel im Grundriss (°, + = Nase nach außen, − = Endleiste nach außen). Die Schräge geht
+    // immer zu Lasten des Werkstücks: das hintere bzw. vordere Ende bleibt an der Wurzel stehen.
+    if (r.rootSkew == null) r.rootSkew = 0;
+    if (r.rootShift == null) r.rootShift = 0;   // Wurzelrippe parallel nach außen eingerückt (mm, Spannweite)
     return r;
   }
   // Setzt die Handpositionen aus den aktuell berechneten Stationen (beim ersten
@@ -106,11 +111,66 @@
   function ribOutline(st) {
     const cut = App.wing.cuts[Math.min(st.seg, App.wing.cuts.length - 1)];
     const r = cut.root.pts, tp = cut.tip.pts, N = Math.min(r.length, tp.length);
+    const sk = ribRootSkew(st);
+    if (sk) {
+      // Schräger Schnitt durch das (geradlinige) Paneel des ersten Segments.
+      // Je Profilpunkt i liegt die Fläche auf der Geraden r_i → tp_i; die Rippen-
+      // ebene im Grundriss ist z = -(x - xP)·tanα. Beides linear in t → exakt
+      // auflösbar (t ≥ 0, die Rippe liegt im Werkstück).
+      // x der Rippe = wahre Länge in der Rippenebene (nicht gestreckt).
+      let pts = [];
+      for (let i = 0; i < N; i++) {
+        const t = sk.tAt(r[i].x, tp[i].x - r[i].x);
+        pts.push({ x: (r[i].x + (tp[i].x - r[i].x) * t - sk.xP) / sk.cb, y: r[i].y + (tp[i].y - r[i].y) * t });
+      }
+      pts = ribProcessOutline(pts);
+      const xs = pts.map(p => p.x);
+      return { pts, chord: Math.max.apply(null, xs) - Math.min.apply(null, xs), skew: sk };
+    }
     let pts = [];
     for (let i = 0; i < N; i++) pts.push({ x: r[i].x + (tp[i].x - r[i].x) * st.t, y: r[i].y + (tp[i].y - r[i].y) * st.t });
     const chord = cut.root.chord + (cut.tip.chord - cut.root.chord) * st.t;
     pts = ribProcessOutline(pts);
     return { pts, chord };
+  }
+  // Drehpunkt der schrägen Wurzelrippe (Anteil der Sehne ab Nase): das Ende, das an der
+  // Wurzel bleibt, damit die Rippe ganz im Werkstück liegt (+ → Endleiste, − → Nase).
+  function ribRootSkewRef(a) { return a > 0 ? 1 : 0; }
+  // Parallelverschiebung der Wurzelrippe nach außen (mm), höchstens 90 % des ersten Segments.
+  function ribRootShift() {
+    const span = (state.segments[0] && state.segments[0].span) || 0;
+    return Math.max(0, Math.min(0.9 * span, +ribCfg().rootShift || 0));
+  }
+  // Schrägstellung/Einrückung der Wurzelrippe (nur Station an der Wurzel des ersten Segments).
+  // Rippenebene im Grundriss: z = zS − (x − xP)·tanα, zS = Parallelverschiebung, xP = Drehpunkt
+  // auf der Sehne bei zS (lokale Paneel-x). tAt(x0, dx) = Paneel-Parameter t, an dem die
+  // Gerade x0 + dx·t die Rippenebene trifft.
+  function ribRootSkew(st) {
+    const rc = ribCfg(), a = +rc.rootSkew || 0;
+    if (st.seg !== 0 || st.z > 0.5 || !App.wing || !App.wing.cuts.length) return null;
+    const cut = App.wing.cuts[0], span = (state.segments[0] && state.segments[0].span) || 0;
+    if (!(span > 0)) return null;
+    const zS = ribRootShift();
+    if (!a && !zS) return null;
+    const ext = pts => { const xs = pts.map(p => p.x); return [Math.min.apply(null, xs), Math.max.apply(null, xs)]; };
+    const [leR, teR] = ext(cut.root.pts), [leT, teT] = ext(cut.tip.pts), tS = zS / span;
+    const le = leR + (leT - leR) * tS, te = teR + (teT - teR) * tS;
+    const f = ribRootSkewRef(a);
+    const k = Math.tan(a * Math.PI / 180), cb = Math.cos(a * Math.PI / 180), xP = le + f * (te - le);
+    const tAt = (x0, dx) => { const den = span + dx * k; return Math.abs(den) > 1e-6 ? (zS - (x0 - xP) * k) / den : tS; };
+    return { angle: a, shift: zS, k, cb, xP, span, tAt };
+  }
+  // Holmlage ab Nase (mm) in der Rippe. Bei schräger Wurzelrippe dort, wo die
+  // Rippenebene die Holmachse schneidet, als wahre Länge in der Rippenebene.
+  function ribSparFL(sp, st, o) {
+    const fr = sparFromLE(sp, st.seg, 'root'), ft = sparFromLE(sp, st.seg, 'tip');
+    const sk = o && o.skew;
+    if (!sk) return fr + (ft - fr) * st.t;
+    const cut = App.wing.cuts[0];
+    const leR = Math.min.apply(null, cut.root.pts.map(p => p.x)), leT = Math.min.apply(null, cut.tip.pts.map(p => p.x));
+    const x0 = leR + fr, dx = (leT - leR) + (ft - fr), t = sk.tAt(x0, dx);
+    const u = (x0 + dx * t - sk.xP) / sk.cb;
+    return u - Math.min.apply(null, o.pts.map(p => p.x));
   }
   // Endleistendicke (stumpfe EL) + Neuabtastung mit rib-eigener Profilpunktzahl.
   // Beides gilt NUR im Rippendesigner (ändert die Tragfläche nicht).
@@ -394,6 +454,12 @@
   }
 
   // --- STL: Umriss (ggf. mit Nummer-Taschen) extrudieren ---------------
+  // Dreiecks-Array [[A,B,C],…] → Eckpunktfeld (für App.stlSaveMany)
+  function trisToVerts(F) {
+    const v = new Float32Array(F.length * 9); let o = 0;
+    for (const t of F) for (const P of t) { v[o++] = P[0]; v[o++] = P[1]; v[o++] = P[2]; }
+    return v;
+  }
   function stlFacet(A, B, C) {
     let nx = (B[1] - A[1]) * (C[2] - A[2]) - (B[2] - A[2]) * (C[1] - A[1]);
     let ny = (B[2] - A[2]) * (C[0] - A[0]) - (B[0] - A[0]) * (C[2] - A[2]);
@@ -466,7 +532,14 @@
     // Wie „Projekt speichern": immer der Windows-Explorer-Dialog zur Wahl des
     // Speicherorts (nicht still in einen gemerkten Ordner schreiben).
     const wt = App.wingFileTag ? App.wingFileTag() : '';   // mehrere Tragflächen: Name voranstellen
-    App.exportViaPicker((wt ? wt + '_' : '') + 'nasenschablonen.stl', ribTemplateSTL(templates), 'model/stl', 'save');
+    const nm = (wt ? wt + '_' : '') + 'nasenschablonen';
+    if (App.stlSaveMany && templates.length > 1) {   // je Schablone ein eigenes Teil (3MF oder STL je Teil)
+      const tp = ribCfg().tpl, Tt = Math.max(1, tp.thick), depth = Math.min(tp.numDepth, Tt - 0.5);
+      let yOff = 0;
+      const list = templates.map((tpl, i) => { const v = trisToVerts(templateTris(tpl, Tt, depth, yOff)); yOff += (tpl.rect.yT - tpl.rect.yB) + 15; return { name: nm + '_' + String(i + 1).padStart(2, '0') + '.stl', v }; });
+      App.stlSaveMany(list, 'save', { name: nm }); return;
+    }
+    App.exportViaPicker(nm + '.stl', ribTemplateSTL(templates), 'model/stl', 'save');
   }
 
   // ===== Rippen als STL (Volumenkörper) ================================
@@ -505,7 +578,7 @@
       const sparFull = [];
       if (rc.stlSpars) (state.spars || []).forEach((sp, j) => {
         if (rc.sparHide[j] || !sparAppliesTo(sp, st.seg)) return;
-        const fl = sparFromLE(sp, st.seg, 'root') + (sparFromLE(sp, st.seg, 'tip') - sparFromLE(sp, st.seg, 'root')) * st.t;
+        const fl = ribSparFL(sp, st, o);
         const g = sparOnProfile(sp, o.pts, null, fl, sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, ribSheet(st, list.indexOf(st))));
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
@@ -542,8 +615,17 @@
     const bodies = ribCollectBodies();
     if (!bodies.length) { alert(T('Keine Rippen.')); return; }
     const Tk = Math.max(0.5, ribCfg().stlThick || 3);
-    const wt = App.wingFileTag ? App.wingFileTag() : '';
-    App.exportViaPicker((wt ? wt + '_' : '') + 'rippen.stl', ribBodySTL(bodies, Tk), 'model/stl', 'save');
+    const wt = App.wingFileTag ? App.wingFileTag() : '', nm = (wt ? wt + '_' : '') + 'rippen';
+    if (App.stlSaveMany && bodies.length > 1) {   // je Rippe ein eigenes Teil (3MF oder STL je Teil)
+      let yOff = 0;
+      const list = bodies.map((b, i) => {
+        const outer = b.outer.map(p => ({ x: p.x - b.minx, y: p.y - b.miny })), holes = b.holes.map(h => h.map(p => ({ x: p.x - b.minx, y: p.y - b.miny })));
+        const v = trisToVerts(ribBodyTris(outer, holes, Tk, yOff)); yOff += b.h + 15;
+        return { name: nm + '_' + (b.name || String(i + 1).padStart(2, '0')) + '.stl', v };
+      });
+      App.stlSaveMany(list, 'save', { name: nm }); return;
+    }
+    App.exportViaPicker(nm + '.stl', ribBodySTL(bodies, Tk), 'model/stl', 'save');
   }
   // 3D-Vorschau der Rippen-STL (nutzt denselben Mini-Renderer/Modal).
   function ribBodyPreviewOpen() {
@@ -717,6 +799,40 @@
         v => { rc.atJoints = v; renderRib(); },
         'Erzwingt zusätzlich eine Rippe an der Wurzel, an jedem Segmentstoß und am '
         + 'Randbogen — unabhängig von der Verteilung.');
+    // Wurzelrippe parallel nach außen einrücken (z. B. Abstand zur Rumpfwand).
+    App.numRowEnter(gv.body, 'Wurzelrippe parallel eingerückt (mm)', () => rc.rootShift,
+      v => { rc.rootShift = Math.max(0, v || 0); App.buildSidebar(); renderRib(); },
+      { step: 1, min: 0, norender: true,
+        hint: 'Verschiebt die Wurzelrippe des ersten Segments parallel um dieses Maß in Spannweitenrichtung '
+          + 'nach außen (ins Werkstück). Eine Schrägstellung wird ab dieser Lage gezählt. 0 = an der Wurzel.' });
+    // Schräge Wurzelrippe (z. B. Rumpf mit Einschnürung im Flächenbereich).
+    App.numRowEnter(gv.body, 'Wurzelrippe schräg (°)', () => rc.rootSkew,
+      v => { rc.rootSkew = Math.max(-45, Math.min(45, v || 0)); App.buildSidebar(); renderRib(); },
+      { step: 0.5, min: -45, max: 45, norender: true,
+        hint: 'Stellt die Wurzelrippe des ersten Segments im Grundriss schräg, z. B. wenn der Rumpf im '
+          + 'Flächenbereich eine Einschnürung hat. Die Schräge geht immer zu Lasten des Werkstücks: '
+          + '+ = Endleiste bleibt an der Wurzel, die Nase wandert nach außen; − = Nase bleibt, die '
+          + 'Endleiste wandert nach außen. Die Rippe ist der wahre Schnitt durch die Fläche in dieser '
+          + 'schrägen Ebene (nicht gestreckt). 0 = senkrecht.' });
+    // Dasselbe als Maß: wie weit Nase bzw. Endleiste an der Wurzel nach außen eingerückt ist
+    // (Spannweitenrichtung im Grundriss). Setzt den Winkel; das jeweils andere Feld zeigt 0.
+    const skewEnds = () => App.wing && App.wing.stations && App.wing.stations.length > 1 ? ribRootPlanEnds({ seg: 0, z: 0 }, ribLeTeArr()) : null;
+    const setInset = (d, nose) => {
+      const arr = App.wing && App.wing.stations && App.wing.stations.length > 1 ? ribLeTeArr() : null;
+      d = Math.max(0, d || 0);
+      if (!arr || !d) { rc.rootSkew = 0; return; }
+      const a0 = arr[0], a1 = arr[1], dz = (a1.z - a0.z) || 1, zS = ribRootShift();
+      const c = (a0.te - a0.le) + zS * ((a1.te - a0.te) - (a1.le - a0.le)) / dz;   // Sehne bei zS
+      // ab der Parallelverschiebung zS gezählt — Nase: zL − zS = c·k/(1 + sL·k) = d  |  Endleiste: zT − zS = −c·k/(1 + sT·k) = d
+      const k = nose ? d / (c - d * (a1.le - a0.le) / dz) : -d / (c + d * (a1.te - a0.te) / dz);
+      rc.rootSkew = Math.max(-45, Math.min(45, Math.round(Math.atan(k) * 180 / Math.PI * 1000) / 1000));
+    };
+    App.numRowEnter(gv.body, 'Nase eingerückt (mm)', () => { const e = rc.rootSkew > 0 && skewEnds(); return e ? Math.round((e.zL - ribRootShift()) * 10) / 10 : 0; },
+      v => { setInset(v, true); App.buildSidebar(); renderRib(); },
+      { step: 1, min: 0, norender: true, hint: 'Alternativ zum Winkel: Abstand (mm, in Spannweitenrichtung), um den die Nasenleiste der Wurzelrippe nach außen rückt; die Endleiste bleibt an der Wurzel.' });
+    App.numRowEnter(gv.body, 'Endleiste eingerückt (mm)', () => { const e = rc.rootSkew < 0 && skewEnds(); return e ? Math.round((e.zT - ribRootShift()) * 10) / 10 : 0; },
+      v => { setInset(v, false); App.buildSidebar(); renderRib(); },
+      { step: 1, min: 0, norender: true, hint: 'Alternativ zum Winkel: Abstand (mm, in Spannweitenrichtung), um den die Endleiste der Wurzelrippe nach außen rückt; die Nase bleibt an der Wurzel.' });
     side.appendChild(gv.g);
 
     // --- Profil (nur Rippendesigner): Punktzahl + Endleistendicke ---------
@@ -879,6 +995,19 @@
     }
     return arr[arr.length - 1];
   }
+  // Enden (Nase/Endleiste) der schrägen Wurzelrippe im Grundriss (absolute Sehnen-x):
+  // Nasen-/Endleiste des ersten Segments geradlinig (auch über die Wurzel hinaus)
+  // mit der Rippenebene geschnitten. null = Rippe steht senkrecht.
+  function ribRootPlanEnds(st, arr) {
+    const sk = ribRootSkew(st); if (!sk || arr.length < 2) return null;
+    const a0 = arr[0], a1 = arr[1], dz = (a1.z - a0.z) || 1;
+    const sL = (a1.le - a0.le) / dz, sT = (a1.te - a0.te) / dz;
+    const zS = sk.shift, leS = a0.le + sL * zS, teS = a0.te + sT * zS;
+    const xP = leS + ribRootSkewRef(sk.angle) * (teS - leS);
+    const hit = (x0, s) => { const den = 1 + s * sk.k; return Math.abs(den) > 1e-6 ? (zS - (x0 - xP) * sk.k) / den : zS; };
+    const zL = hit(a0.le, sL), zT = hit(a0.te, sT);
+    return { zL, xL: a0.le + sL * zL, zT, xT: a0.te + sT * zT };
+  }
   // Grundriss der Rippen-Ansicht: Planform mit einer Chord-Linie je Rippe und den
   // ausgewählten Holmen als Linien über ihren Segmentbereich. LE liegt oben.
   function renderRibPlan() {
@@ -888,7 +1017,9 @@
     const rc = ribCfg(), arr = ribLeTeArr();
     const le = arr.map(s => ({ x: s.z, y: -s.le })), te = arr.map(s => ({ x: s.z, y: -s.te }));
     const outline = le.concat(te.slice().reverse());
-    const V = App.makeView(w, h, App.bounds(outline), 40, App.nav.ribplan);
+    // Schräge Wurzelrippe darf über die Wurzel nach innen reichen → mit in den Ausschnitt.
+    const rootPE = ribRootPlanEnds({ seg: 0, z: 0 }, arr);
+    const V = App.makeView(w, h, App.bounds(rootPE ? outline.concat([{ x: rootPE.zL, y: -rootPE.xL }, { x: rootPE.zT, y: -rootPE.xT }]) : outline), 40, App.nav.ribplan);
     App.grid(ctx, w, h, V);
     // Planform-Fläche
     App.poly(ctx, V, outline, true);
@@ -926,10 +1057,21 @@
     ctx.font = '10px system-ui';
     list.forEach((st, i) => {
       const lt = ribLeTeAt(st.z, arr);
+      let zL = st.z, zT = st.z, xL = lt.le, xT = lt.te;
+      const pe = ribRootPlanEnds(st, arr);
+      if (pe) {
+        const a0 = arr[0];
+        ({ zL, xL, zT, xT } = pe);
+        // Reicht die Rippe über die Wurzel nach innen, die Kanten dorthin gestrichelt verlängern.
+        ctx.strokeStyle = App.PAL.profInner; ctx.lineWidth = 1; ctx.setLineDash([4, 3]);
+        if (zL < 0) { ctx.beginPath(); ctx.moveTo(V.X(0), V.Y(-a0.le)); ctx.lineTo(V.X(zL), V.Y(-xL)); ctx.stroke(); }
+        if (zT < 0) { ctx.beginPath(); ctx.moveTo(V.X(0), V.Y(-a0.te)); ctx.lineTo(V.X(zT), V.Y(-xT)); ctx.stroke(); }
+        ctx.setLineDash([]);
+      }
       ctx.strokeStyle = App.PAL.profOuter; ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.moveTo(V.X(st.z), V.Y(-lt.le)); ctx.lineTo(V.X(st.z), V.Y(-lt.te)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(V.X(zL), V.Y(-xL)); ctx.lineTo(V.X(zT), V.Y(-xT)); ctx.stroke();
       ctx.fillStyle = '#e6ebf1';
-      ctx.fillText('R' + (i + 1), V.X(st.z) - 6, V.Y(-lt.le) - 4);
+      ctx.fillText('R' + (i + 1), V.X(zL) - 6, V.Y(-xL) - 4);
     });
     ctx.fillStyle = '#8b98a8'; ctx.font = '11px system-ui';
     ctx.fillText(T('▲ Flugrichtung'), 12, 18);
@@ -954,7 +1096,7 @@
       const sparFull = [];
       if (rc.showSpars) (state.spars || []).forEach((sp, j) => {
         if (rc.sparHide[j] || !sparAppliesTo(sp, st.seg)) return;
-        const fl = sparFromLE(sp, st.seg, 'root') + (sparFromLE(sp, st.seg, 'tip') - sparFromLE(sp, st.seg, 'root')) * st.t;
+        const fl = ribSparFL(sp, st, o);
         const g = sparOnProfile(sp, o.pts, null, fl, sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, sh));
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
@@ -969,7 +1111,7 @@
         const t2 = ribTemplate2D(o.pts);
         if (t2.ok) tpl = { ring: t2.ring.map(norm), nums: numberRects(idx + 1, t2.region).map(rc2 => rc2.map(norm)) };
       }
-      return { pieces, tpl, chord: o.chord, z: st.z, w: maxx - minx, h: maxy - miny };
+      return { pieces, tpl, chord: o.chord, z: o.skew ? o.skew.shift : st.z, skew: o.skew ? o.skew.angle : 0, w: maxx - minx, h: maxy - miny };
     });
     const cols = Math.max(1, Math.ceil(Math.sqrt(ribs.length)));
     const cellW = Math.max.apply(null, ribs.map(r => r.w)) + 25;
@@ -1006,7 +1148,7 @@
         });
       }
       ctx.fillStyle = '#e6ebf1'; ctx.font = '11px system-ui';
-      ctx.fillText('R' + (i + 1) + '  z=' + r.z.toFixed(0) + T('  Sehne ') + r.chord.toFixed(1) + ' mm',
+      ctx.fillText('R' + (i + 1) + '  z=' + r.z.toFixed(0) + T('  Sehne ') + r.chord.toFixed(1) + ' mm' + (r.skew ? '  ' + T('schräg') + ' ' + r.skew.toFixed(1) + '°' : ''),
         V.X(r.px), V.Y(r.py - r.h / 2) + 14);
     });
     if (info) info.innerHTML = '<b>' + ribs.length + '</b>' + T(' Rippen · Spannweite ')
@@ -1041,5 +1183,5 @@
   Object.assign(App, { ribBodyTrisAll, ribCfg, ribCollectBodies, ribCollectTemplates, ribCutX, ribHalfSpecs, ribInset, ribLeTeArr });
   Object.assign(App, { ribInset, ribLeTeAt, ribModeLabel, ribOutline, ribProcessOutline, ribReseedManual, ribSeedManual, ribSheet, ribStations });
   Object.assign(App, { ribStlPreviewClose, ribStlPreviewOpen, ribTemplate2D, ribTemplateSTL, ribTemplateTris, setupStlPreviewNav, stlFacet, stlView });
-  Object.assign(App, { templateTris, triangulate });
+  Object.assign(App, { templateTris, triangulate, ribRootShift, ribRootSkew, ribSparFL, ribRootPlanEnds });
 })();

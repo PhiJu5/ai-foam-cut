@@ -78,6 +78,8 @@
     formWlSweep: 28,           // Pfeilung der Nasenlinie (°)
     formWlToe: 2.5,            // Toe-out (Nase nach außen) an der Winglet-Wurzel (°)
     formWlTwist: -2,           // Schränkung zur Spitze (°, negativ = Auswaschung)
+    formWlLeBow: 0,            // Schwung der Nasenleiste im senkrechten Teil (Seitenansicht): größte Auswölbung nach vorn in % der Wurzeltiefe (negativ = hohl)
+    formWlLeBowPos: 40,        // Lage der größten Auswölbung in % der Länge des senkrechten Teils
     formWlMidPos: 50,          // Lage des mittleren Profils in % der Winglet-Länge (ab Übergangsende)
     formWlTipLen: 10,          // Rundung der Winglet-Spitze (mm)
     formWlTipMode: 'ellipse',  // Spitzenform: 'ellipse' | 'sichel' | 'custom' (frei parametrisch)
@@ -97,6 +99,7 @@
     formTeThk: 0,              // globale Endleistendicke (mm, 0 = Profil unverändert); gilt für Tragfläche, Randbogen und Winglet
     formTeEdge: 'out',         // Negativform / geteiltes Urmodell: Endleiste 'out' steht mit halber Dicke über die Trennfläche (Sehnenmitte) | 'blend' läuft in die Trennfläche aus (Keil) | 'flush' bündig je Hälfte auf dem eigenen Endleistenpunkt (wie vor 2026-09-06)
     formMirror: false,         // Urmodell: beide Hälften (gespiegelt an der Wurzel)
+    formViewMirror: false,     // nur Ansicht: gespiegelte Gegenseite inkl. Randbogen/Winglet mitzeichnen
     formUp: 'z',               // 'y' wie im Programm | 'z' hoch (Druck/Fräse)
     formOrigin: 'min',         // 'min' Ecke | 'keep' unverändert
     formOvF: 30, formOvR: 30,  // Negativform: Überstand vorn/hinten (= Flanschbreite)
@@ -826,11 +829,17 @@
     // fortgesetzt: der Smoothstep des Rücksprungs läuft damit direkt in die Verjüngung ein (C1, keine
     // Plateau-/S-Form an der Nase).
     const cTarget = t => Tt <= tEnd ? cR : cR + (cT - cR) * (t - tEnd) / (Tt - tEnd);
-    const cAt = t => {
+    // Schwung der Nasenleiste (Seitenansicht, z. B. Ventus 3): im senkrechten Teil wird die Nase um
+    // bow·sin²(π·g(v)) nach vorn gewölbt (Endleiste bleibt). sin² hat an beiden Enden Steigung 0 ->
+    // stetiger Anschluss an Bogen und Spitze; g(v) = v^k legt das Maximum auf leBowPos.
+    const bowA = cR * (w.leBow || 0) / 100, bowK = Math.log(0.5) / Math.log((w.leBowPos || 40) / 100);
+    const bowAt = t => { if (!bowA || Ls <= 0) return 0; const v = (t - Lf - Lb) / Ls; if (v <= 0 || v >= 1) return 0; const sn = Math.sin(Math.PI * Math.pow(v, bowK)); return bowA * sn * sn; };
+    const cAt0 = t => {
       if (t < t0) return cLine(t);
       if (t < tEnd) { const cl = cLine(t); return cl + (cTarget(t) - cl) * sm2((t - t0) / Lr); }
       return cTarget(t);
     };
+    const cAt = t => Math.max(0.05 * c0, cAt0(t) + bowAt(t));
     // s = Bogenlänge ab Ende des waagrechten Teils (negativ = im waagrechten Teil).
     const secAt = s => {   // Mittellinie (Winkel th, Nasenpunkt y/z) sowie Profil P und Anstellung a, noch ohne Höhenausgleich
       let th, y, z, P, a;
@@ -3024,7 +3033,7 @@
       tipDih: Math.min(60, Math.max(-45, +C('formTipDih') || 0)), tipRef: +C('formTipRef') || 0, tipRise: +C('formTipRise') || 0, tipTwist: +C('formTipTwist') || 0, tipThk: +C('formTipThk') || 100,
       wl: { step: Math.max(0, +C('formWlStep') || 0), stepAt: Math.max(0, +C('formWlStepAt') || 0), flatWing: C('formWlFlatWing') !== false, teWing: C('formWlTeWing') !== false, teSweep: Math.min(60, Math.max(-30, +C('formWlTeSweep') || 0)), teSweepH: Math.min(60, Math.max(-30, +C('formWlTeSweepH') || 0)), flatLen: Math.max(0, +C('formWlFlatLen') || 0), flatSweep: Math.min(70, Math.max(-30, +C('formWlFlatSweep') || 0)), len: +C('formWlLen') || 0, R: Math.max(0, +C('formWlR')), cant: Math.min(85, Math.max(-30, +C('formWlCant') || 0)),
         cRoot: Math.max(5, +C('formWlCRoot') || 0), cTip: Math.max(2, +C('formWlCTip') || 0), sweep: Math.min(70, Math.max(-30, +C('formWlSweep') || 0)),
-        toe: +C('formWlToe') || 0, twist: +C('formWlTwist') || 0, midPos: +C('formWlMidPos') || 50, tipLen: Math.max(0, +C('formWlTipLen')), tipP: +C('formWlTipP') || 2,
+        toe: +C('formWlToe') || 0, twist: +C('formWlTwist') || 0, midPos: +C('formWlMidPos') || 50, leBow: Math.min(60, Math.max(-60, +C('formWlLeBow') || 0)), leBowPos: Math.min(90, Math.max(10, +C('formWlLeBowPos') || 40)), tipLen: Math.max(0, +C('formWlTipLen')), tipP: +C('formWlTipP') || 2,
         tipMode: C('formWlTipMode') || 'ellipse', tipPLE: +C('formWlTipPLE') || 2, tipPTE: +C('formWlTipPTE') || 2, tipRef: +C('formWlTipRef') || 0, tipThk: +C('formWlTipThk') || 100 },
       wlProf: C('formWlProf') || {},
       wlDrawMode: C('formWlDrawMode') === 'pline' ? 'pline' : 'spline', wlDrawRootAt: +C('formWlDrawRootAt') || 30,
@@ -3704,22 +3713,11 @@
     if (mesh.screws) for (const q of out) q.screws = mesh.screws;   // Vorschau der Stücke: Glättungsgruppe der Schraublöcher
     return out;
   }
-  // Mehrere STL-Dateien in einen im Explorer gewählten Ordner schreiben (sonst nacheinander als Download).
-  async function saveSTLMany(list) {
+  // Mehrere Teile: Vorschau, dann 3MF (eine Datei, Teile getrennt) oder je Teil eine STL (Ordner-Dialog).
+  async function saveSTLMany(list, name) {
     if (demoBlocked()) return;
     if (!list.length) return;
-    if (App.stlPreview && !(await App.stlPreview(list))) return;   // 3D-Vorschau aller Stücke vor dem Ordner-Dialog
-    if (App.FS_SUPPORTED && window.showDirectoryPicker) {
-      const dh = App.dirHandles || {};
-      let root;
-      try { root = await window.showDirectoryPicker({ mode: 'readwrite', startIn: dh.svStl || dh.save || 'documents' }); }
-      catch (e) { return; }   // Abbruch
-      try {
-        for (const it of list) { const fh = await root.getFileHandle(it.name, { create: true }); const w = await fh.createWritable(); await w.write(toBinarySTL(it.mesh.v)); await w.close(); }
-        if (App.toast) App.toast(T('Gespeichert: ') + list.length + ' ' + T('Dateien') + '  (' + (root.name || T('Ordner')) + ')');
-      } catch (e) { alert(T('Speichern fehlgeschlagen: ') + (e && e.message ? e.message : e)); }
-      return;
-    }
+    if (App.stlSaveMany) { await App.stlSaveMany(list.map(it => ({ name: it.name, v: it.mesh.v })), 'svStl', { name }); return; }
     let i = 0; for (const it of list) setTimeout(() => App.anchorDownload(it.name, toBinarySTL(it.mesh.v), 'model/stl'), 300 * i++);
   }
   /* Export eines Körpers: ohne Segmentierung eine STL (Speichern-Dialog), mit Segmentierung je
@@ -3730,7 +3728,7 @@
     const so = segOpts(), planes = so.on ? segPlanes(so) : [];
     if (!planes.length) { saveSTL(exportTransform(mesh, opt, cavityFlip), name); return; }
     const list = outList(mesh, opt, cavityFlip, name, body, true);
-    if (list) saveSTLMany(list);
+    if (list) saveSTLMany(list, name);
   }
   // Dateiliste eines Körpers (mit Segmentierung je Druckstück eine Datei); null = Teilung fehlgeschlagen
   function outList(mesh, opt, cavityFlip, name, body, toast) {
@@ -3761,7 +3759,7 @@
     try { if (App.withBusy) await App.withBusy(T('Bauteile werden aufgebaut …'), run); else run(); }
     catch (e) { console.error(e); alert(T('Export fehlgeschlagen: ') + (e && e.message ? e.message : e)); }
     finally { S('formGrpSel', keep); model = keepModel; }
-    if (list.length) saveSTLMany(list);
+    if (list.length) saveSTLMany(list, projBase() + '_bauteile');
   }
 
   // ---------- Schnittansicht -------------------------------------------------
@@ -4376,12 +4374,13 @@
       : halves ? [['h:both', 'beide Hälften'], ['h:top', 'nur obere Form'], ['h:bot', 'nur untere Form']] : [];
     items.push(['ps', 'Trennfläche']);
     items.push(['wire', 'Drahtgitter']);
+    if (!(model.opt && model.opt.mirror)) items.push(['mir', 'Gespiegelt']);
     // Mit gemeinsamem Ansichtswürfel (viewcube.js: 104 px hoch, 4 px vom oberen Rand) darunter beginnen.
     const bw = 104, bh = 18, x = W - 8 - bw; let y = window.ViewCube ? 4 + 104 + 8 : gizmo.cy + gizmo.r + 10;
     const fg = col('--txt', '#dde'), line = col('--line', '#556');
     ctx.save(); ctx.font = '10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 1;
     for (const [k, t] of items) {
-      const on = k === 'wire' ? !!C('formWire') : k === 'ps' ? !!C('formPsShow') : k.startsWith('h:') ? k.slice(2) === curH : k === cur;
+      const on = k === 'mir' ? !!C('formViewMirror') : k === 'wire' ? !!C('formWire') : k === 'ps' ? !!C('formPsShow') : k.startsWith('h:') ? k.slice(2) === curH : k === cur;
       ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, bw, bh, 4) : ctx.rect(x, y, bw, bh);
       ctx.fillStyle = on ? 'rgba(70,130,220,.85)' : 'rgba(60,70,90,.55)'; ctx.fill(); ctx.strokeStyle = on ? 'rgba(120,170,255,.9)' : line; ctx.stroke();
       ctx.fillStyle = fg; ctx.globalAlpha = on ? 1 : 0.8; ctx.fillText(T(t), x + bw / 2, y + bh / 2 + 0.5); ctx.globalAlpha = 1;
@@ -4527,6 +4526,15 @@
           src.push(Object.assign({ mesh: m.ur.wing, body: 'other', dz }, cw));
           src.push(Object.assign({ mesh: m.ur.wl, body: 'other', dz }, cl));
         } else if (m.ur) src.push(Object.assign({ mesh: m.ur, body: 'other', dz }, m.ur.isTip ? cl : cw));
+      }
+    }
+    // Nur Anzeige: gespiegelte Gegenseite (inkl. Randbogen/Winglet) an der Wurzelebene z=0, Export bleibt unberührt
+    if (C('formViewMirror') && !o.mirror) {
+      const flipR = r => ({ pts: r.pts.map(p => p.z == null ? p : { x: p.x, y: p.y, z: -p.z }), z: -r.z });
+      for (const s of src.slice()) {
+        if (!s.mesh) continue;
+        const m = s.mesh._mir || (s.mesh._mir = transformMesh(s.mesh, (x, y, z) => [x, y, -z], true));
+        src.push(Object.assign({}, s, { mesh: m, dz: -(s.dz || 0), body: 'mirror', rings: s.rings ? s.rings.map(flipR) : null }));
       }
     }
     const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
@@ -5111,7 +5119,7 @@
         if (now - midT < 450 && Math.hypot(q.x - midX, q.y - midY) <= 5) { midT = 0; if (setPivotAt(q.x, q.y)) draw(); e.preventDefault(); return; }
         midT = now; midX = q.x; midY = q.y;
       }
-      if (e.button === 0 && C('formView') === '3d') { const q = local(e), k = showBtnHit(q.x, q.y); if (k) { if (k === 'wire') S('formWire', !C('formWire')); else if (k === 'ps') S('formPsShow', !C('formPsShow')); else if (k.startsWith('h:')) S('formHalf', k.slice(2)); else if (k.startsWith('gap')) setGap(k); else S('formShow', k); draw(); e.preventDefault(); return; } }
+      if (e.button === 0 && C('formView') === '3d') { const q = local(e), k = showBtnHit(q.x, q.y); if (k) { if (k === 'mir') S('formViewMirror', !C('formViewMirror')); else if (k === 'wire') S('formWire', !C('formWire')); else if (k === 'ps') S('formPsShow', !C('formPsShow')); else if (k.startsWith('h:')) S('formHalf', k.slice(2)); else if (k.startsWith('gap')) setGap(k); else S('formShow', k); draw(); e.preventDefault(); return; } }
       dragging = true; dragMode = (e.shiftKey || e.button === 1 || C('formView') !== '3d') ? 'pan' : 'rot';
       if (e.button === 0 && !e.shiftKey && onGizmo(e)) dragMode = 'gizmo';
       measDown = dragMode === 'rot' && measActive();   // Messpunkt erst beim Loslassen ohne Ziehen
@@ -6353,6 +6361,10 @@
         'Die Endleiste ist im waagrechten Teil und im senkrechten Teil je eine Gerade; im Übergangsbogen geht die Pfeilung stetig über (kein Knick). Ein: der waagrechte Teil setzt die Endleistenlinie der Tragfläche fort. Aus: eigene Pfeilung im waagrechten Teil. Die Nasenlinie ergibt sich aus Endleiste minus Tiefe und ist immer stetig, ohne Knicke.');
       if (C('formWlTeWing') === false) numRow(t.body, 'Pfeilung Endleiste waagrecht (°)', () => C('formWlTeSweepH'), v => { S('formWlTeSweepH', v); rr(); }, { step: 1, min: -30, max: 60, norender: true,
         hint: 'Pfeilung der Endleiste im waagrechten Teil (positiv = nach hinten).' });
+      numRow(t.body, 'Schwung Nasenleiste (% Wurzeltiefe)', () => C('formWlLeBow'), v => { S('formWlLeBow', v); rr(); }, { step: 2, min: -60, max: 60, norender: true,
+        hint: 'Geschwungene Nasenleiste im senkrechten Teil (Seitenansicht), wie beim Ventus 3: größte Auswölbung nach vorn in % der Wurzeltiefe; die Endleiste bleibt. Läuft an Bogen und Spitze tangential aus. 0 = gerade, negativ = hohl.' });
+      if (+C('formWlLeBow')) numRow(t.body, 'Lage der Auswölbung (% Länge)', () => C('formWlLeBowPos'), v => { S('formWlLeBowPos', v); rr(); }, { step: 5, min: 10, max: 90, norender: true,
+        hint: 'Wo entlang des senkrechten Teils die Nase am weitesten vorsteht (klein = bauchig unten, groß = Schwung zur Spitze).' });
       numRow(t.body, 'Pfeilung Endleiste senkrecht (°)', () => C('formWlTeSweep'), v => { S('formWlTeSweep', v); rr(); }, { step: 1, min: -30, max: 60, norender: true,
         hint: 'Pfeilung der Endleiste im senkrechten Teil gegen die Winglet-Mittellinie (positiv = nach hinten). Wird im Bogen stetig aus der waagrechten Pfeilung entwickelt.' });
       numRow(t.body, 'Toe-out an der Wurzel (°)', () => C('formWlToe'), v => { S('formWlToe', v); rr(); }, { step: 0.5, norender: true,
@@ -6843,6 +6855,9 @@
     hint(v.body, 'Tragfläche / Winglet: Urmodell. Formfläche: Kavität bzw. Profilhälfte der Negativform und des geteilten Urmodells (inkl. Stirnwände); der Randbogen-Bereich (ab der letzten Rippe) in eigener Farbe. Formenrand / Hinterbau: Flansch, Trennplatte, Sicke, Rückseite, Stirnseiten und Passlöcher; die untere Hälfte wird etwas dunkler gezeichnet.');
     boolRow(v.body, 'Drahtgitter', () => C('formWire'), v => { S('formWire', v); draw(); },
       'Nur Vorschau: Netz als Drahtgitter statt schattiert (auch über den Knopf unter dem Würfel umschaltbar).');
+    if (!C('formMirror'))
+      boolRow(v.body, 'Gespiegelte Seite zeigen', () => C('formViewMirror'), v => { S('formViewMirror', v); draw(); },
+        'Nur Vorschau: zeigt die an der Wurzel gespiegelte Gegenseite inkl. Randbogen/Winglet mit an. Der Export bleibt unverändert (dafür „Beide Hälften“ einschalten).');
     boolRow(v.body, 'Trennfläche zeigen', () => C('formPsShow'), v => { S('formPsShow', v); draw(); },
       'Trennfläche gelb und halbdurchsichtig in der 3D-Ansicht, in der Schnittansicht als gelbe Linie (Punkte = Trennlinie an Nase und Endleiste). Derselbe Schalter wie im Block „Trennfläche“ und unter dem Ansichtswürfel; auch beim Urmodell (zeigt, wo die spätere Form geteilt wird).');
     selectRow(v.body, 'Darstellung', [['fine', 'fein (glatt, volle Auflösung)'], ['fast', 'schnell (flach, geringere Auflösung)'], ['2d', 'kompatibel (ohne WebGL)']], () => renderMode(), v => { S('formRender', v); draw(); },

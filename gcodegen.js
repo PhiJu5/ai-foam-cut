@@ -29,7 +29,7 @@
     const blockMidFrac = (state.cfg.machineWidth / 2 - pr.zRoot) / ((pr.zTip - pr.zRoot) || 1);
     const opt = {
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
-      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), wireNote: heatNote(), safeY: safeHeight(segIdx), precision: state.cfg.precision,
+      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), wireNote: heatNote(), matNote: App.matNote(), safeY: safeHeight(segIdx), precision: state.cfg.precision,
       blockMidFrac: Math.max(0, Math.min(1, blockMidFrac)),
       maxFeed: state.cfg.maxFeed || 0, outsideFeed: outsideFeed(),
       origin: origin,
@@ -177,6 +177,7 @@
     em('; ' + T('Achsen: L=') + ax.x + ax.y + '  R=' + ax.u + ax.v);
     em('; ' + T('erzeugt: ') + new Date().toISOString());
     em('G21 ; mm'); em('G90 ; absolut');
+    if (opt.matNote) em(opt.matNote);
     if (opt.wireHeat != null) {
       em('; ' + T('Drahtheizung: ') + opt.wireHeat + (opt.wireNote || T(' % (konstant während des Schnitts)')));
       em('M3 S' + (opt.wireS != null ? opt.wireS : (+opt.wireHeat).toFixed(0)) + ' ; Drahtheizung EIN');
@@ -248,6 +249,7 @@
     // Startvorschub schon VOR der ersten Bewegung setzen: der erste G1 kommt evtl.
     // erst nach der M0-Pause, sonst meldet der Controller error:22 (Vorschub undefiniert).
     em('F' + feed.toFixed(0) + ' ; Startvorschub setzen');
+    em(App.matNote());
     const heat = App.currentHeat();
     // Draht nur einschalten, wenn er schon beim Rauffahren heiß sein soll.
     if (heat != null && upHeat) em('M3 S' + App.currentWireS() + ' ; Draht EIN (rauffahren, ' + (+heat).toFixed(0) + ' %)');
@@ -326,6 +328,7 @@
     em('G21 ; mm'); em('G90 ; absolut'); em('G94 ; Vorschub in mm/min');
     // Startvorschub VOR der ersten Bewegung setzen -> verhindert error:22 (Vorschub undefiniert).
     em('F' + feed.toFixed(0) + ' ; Startvorschub setzen');
+    em(App.matNote());
     const heat = App.currentHeat();
     const wireOn = () => { if (heat != null) em('M3 S' + App.currentWireS() + ' ; Draht EIN (' + (+heat).toFixed(0) + ' %)'); };
     // Ablauf-Wahl nur bei „Auf Höhe ablängen": rapidCut = Eilgang über die Oberkante
@@ -541,6 +544,7 @@
       + P.stege.map(pc => (pc.st.sleeve || pc.st.capTop || pc.st.capBot) ? ' · S' + (pc.k + 1) + T(': Glasschlauch ') + pc.st.sleeve + T(' / Holmgurt ') + pc.st.capTop + '+' + pc.st.capBot : '').join(''));
     em('; ' + T('erzeugt: ') + new Date().toISOString());
     em('G21 ; mm'); em('G90 ; absolut');
+    em(App.matNote());
     if (heat != null) { em('M3 S' + App.currentWireS() + ' ; ' + T('Drahtheizung EIN (') + heat + ' %)'); }
     if (state.cfg.header) state.cfg.header.split('\n').forEach(l => em(l));
     em(`G0 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} ; Start am Maschinennullpunkt (hinten/unten)`);
@@ -1073,7 +1077,7 @@
     const withBlock = order !== 'none' && P.blockCut;
     return HotWire.gcode(P, {
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
-      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), safeY, precision: state.cfg.precision,
+      feed: state.cfg.feed, wireHeat: App.currentHeat(), wireS: App.currentWireS(), matNote: App.matNote(), safeY, precision: state.cfg.precision,
       maxFeed: state.cfg.maxFeed || 0, outsideFeed: outsideFeed(),
       origin: P.origin, cutMode: withBlock ? order : 'none', blockCut: withBlock ? P.blockCut : null, blockCutY: App.blockCutY(),
       // Die waagrechte Anfahrt vom hinteren Blockende bis zur Form läuft durch die

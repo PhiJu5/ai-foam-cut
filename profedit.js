@@ -125,12 +125,36 @@
     out.name = pts.name;
     return out;
   }
+  /* Bearbeitung als reine Funktion (für Strak-Segmente, compute.js updateStraks):
+   * ed = { points, thickF, camF, teMM } — Dicke/Wölbung als FAKTOR auf das Mischprofil,
+   * damit sie beim Nachführen des Straks (andere Spannweite/Nachbarprofile) mitwandern. */
+  function editProfile(base, ed, chord) {
+    const n = Math.max(20, Math.min(600, (ed.points | 0) || base.length));
+    let pts = Airfoil.resample(base, n);
+    const ts = ed.thickF != null ? ed.thickF : 1, cs = ed.camF != null ? ed.camF : 1;
+    if (Math.abs(ts - 1) > 1e-6 || Math.abs(cs - 1) > 1e-6) pts = scaleThickCam(pts, ts, cs);
+    if (ed.teMM != null && ed.teMM >= 0) pts = thickenTE(pts, ed.teMM / (chord || 1));
+    pts.name = base.name;
+    return pts;
+  }
+  const strakSeg = id => (id !== 'root' && state.segments[id] && state.segments[id].strak) ? state.segments[id] : null;
   // Editiertes Profil aus dem Ausgangsprofil neu berechnen und in den Slot
   // schreiben (der Tragflächendesigner nutzt es direkt weiter).
   function applyProfEdit() {
     const id = profNormTarget();
     const base = profBaseFor(id);
     const n = Math.max(20, Math.min(600, state.profEdit.points | 0));
+    const sg = strakSeg(id);
+    if (sg) {
+      // Strak: Bearbeitung am Segment merken; updateStraks (über render -> recompute) wendet sie an.
+      const bm0 = profMetrics(Airfoil.resample(base, n)), pe = state.profEdit;
+      sg.strakEdit = { points: n,
+        thickF: pe.thickPct != null && bm0.thickMax > 1e-6 ? (pe.thickPct / 100) / bm0.thickMax : 1,
+        camF: pe.camPct != null && Math.abs(bm0.camMax) > 1e-6 ? (pe.camPct / 100) / bm0.camMax : 1,
+        teMM: pe.teMM != null && pe.teMM >= 0 ? pe.teMM : null };
+      render(); renderProfEdit();
+      return;
+    }
     let pts = Airfoil.resample(base, n);
     // Dicke/Wölbung auf Zielwerte (% der Sehne) skalieren.
     const bm = profMetrics(pts);
@@ -153,6 +177,7 @@
   }
   function profReset() {
     const id = state.profEdit.target, base = profBaseFor(id);
+    { const sg = strakSeg(id); if (sg) sg.strakEdit = null; }   // Strak: reines Mischprofil
     const cp = base.map(p => ({ x: p.x, y: p.y })); cp.name = base.name;
     profEditSetProf(id, cp);
     state.profEdit.points = base.length;
@@ -169,9 +194,17 @@
   function openProfModal(id) {
     state.profEdit.target = id;
     profNormTarget(); id = state.profEdit.target;
-    const key = String(id), fresh = !state.profBase[key];
+    const key = String(id), sg = strakSeg(id);
+    if (sg && App.updateStraks) App.updateStraks();      // Mischprofil (Basis) aktuell
+    const fresh = !state.profBase[key] || !!sg;          // Strak: Werte immer aus Basis + eigener Bearbeitung
     const base = profBaseFor(id);
-    if (fresh) {
+    if (sg && sg.strakEdit) {
+      const ed = sg.strakEdit, n = ed.points || base.length, bm = profMetrics(Airfoil.resample(base, n));
+      state.profEdit.points = n;
+      state.profEdit.thickPct = +(bm.thickMax * (ed.thickF != null ? ed.thickF : 1) * 100).toFixed(1);
+      state.profEdit.camPct = +(bm.camMax * (ed.camF != null ? ed.camF : 1) * 100).toFixed(2);
+      state.profEdit.teMM = ed.teMM != null ? ed.teMM : +(bm.teFrac * profEditChord(id)).toFixed(2);
+    } else if (fresh) {
       const bm = profMetrics(base);
       state.profEdit.points = base.length;
       state.profEdit.teMM = +(bm.teFrac * profEditChord(id)).toFixed(2);
@@ -247,6 +280,7 @@
 
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----
   Object.assign(App, { applyProfEdit, buildProfEditControls, closeLoadedTE, closeProfModal, openProfModal, profBaseFor, profEditChord, profEditGet });
+  Object.assign(App, { editProfile });
   Object.assign(App, { profEditSetProf, profEditTargets, profMetrics, profNormTarget, profReset, scaleThickCam, thickenTE });
   Object.defineProperty(App, 'profModalOpen', { get: () => profModalOpen, set: v => { profModalOpen = v; }, enumerable: true, configurable: true });
 })();

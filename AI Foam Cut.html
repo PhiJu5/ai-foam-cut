@@ -332,6 +332,7 @@
   /* ---------- Maschinen-Ansicht (grblHAL) ---------- */
   #machineView{overflow:auto;padding:12px}
   #cutView{overflow:auto;padding:12px}
+  #materialView,#matdbView{overflow:auto;padding:12px}
   /* Reiter „Fräse": gleiche Aufteilung wie „Schneiden" (Vorschau links, Bedienung rechts) */
   #fraeseView{overflow:auto;padding:12px}
   #fraeseView input[type=text],#fraeseView input[type=number],#fraeseView select{
@@ -708,6 +709,7 @@
               <label title="Band in der echten Breite des Schnittspalts unter der Abbrandlinie (nur diese Ansicht; Deckkraft unter Einstellungen → Farben)"><input type="checkbox" data-ktrue="core"> Abbrand in wahrer Dicke</label>
               <label><input type="checkbox" data-cfg="showBlock"> Styroporblock</label>
               <label><input type="checkbox" data-cfg="showNums"> Punktnummern</label>
+              <label title="Profilnamen (.dat) an den Rippen in Draufsicht und Aufriss"><input type="checkbox" data-cfg="showFoilNames"> Profilnamen</label>
               <label><input type="checkbox" data-cfg="showDim"> Bemaßung</label>
               <button type="button" class="to-gcode" id="coreToGcode" data-gsrc="core" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
               <button type="button" id="coreMeas" style="align-self:flex-start" title="Messwerkzeug: Abstand, Kette, Winkel und Radius direkt in der Ansicht messen (Klick setzt Punkte, Fang auf Konturpunkte und -kanten)">📏 Messen</button>
@@ -996,6 +998,7 @@
           <span class="pane-label">Ausschnitte — Kontur, Block, Anfahrt und Schnittbahn (Ansicht von vorne)</span>
           <div class="simlegend" id="ausInfo" style="left:10px;right:auto;top:34px;max-width:460px;z-index:3">Kein Profil.</div>
           <canvas id="cAusschnitt" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <canvas id="cAusschnitt3d" style="position:absolute;inset:0;width:100%;height:100%;z-index:2;display:none"></canvas>
           <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
             <button id="ausFit" title="Ansicht einpassen (auch Doppelklick in die Ansicht)">⬚ Einpassen</button>
             <label class="ck" title="Block (Umriss, Maße, Anfahrfläche) ein- oder ausblenden"><input type="checkbox" id="ausShowBlock" checked> Block</label>
@@ -1005,6 +1008,7 @@
             <label class="ck" title="Band in der echten Breite des Schnittspalts unter der Schnittbahn"><input type="checkbox" id="ausShowKerfTrue" data-ktrue="ausschnitt"> Abbrand in wahrer Dicke</label>
             <button id="ausPickStart" title="Befehl: danach einen Punkt der Profilkontur anklicken — dort beginnt der Schnitt (Esc = abbrechen)">▶ Startpunkt wählen</button>
             <button id="ausAutoStart" title="Gewählten Startpunkt verwerfen — Start wieder automatisch an der Anfahrseite">Startpunkt automatisch</button>
+            <button id="ausView3d" title="3D-Vorschau: Block, Segment (falls geladen) und Ausschnitte räumlich">◩ 3D-Vorschau</button>
             <button id="ausReverse" title="Schnittrichtung umkehren (Uhrzeigersinn / gegen den Uhrzeigersinn)">⇄ Richtung</button>
             <button type="button" class="to-gcode primary" id="ausToGcode" data-gsrc="ausschnitt" title="Zum Reiter „G-Code“ wechseln und diese Quelle dort erzeugen (Strg+G)">⚙ G-Code</button>
             <span class="hint" style="align-self:center">Ziehen = schieben · Rad = Zoom · Doppelklick = einpassen</span>
@@ -1634,21 +1638,21 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261023mf5"></script>
+<script src="i18n.js?v=20261027vm2"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261022tr2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
 <script src="profilfit.js?v=20261011dat"></script>
 <script src="materials.js?v=20261004gerade2"></script>
-<script src="blockprep.js?v=20261004gerade2"></script>
+<script src="blockprep.js?v=20261025wn"></script>
 <script src="wing.js?v=20261010prof"></script>
 <script src="ribvergleich.js?v=20261010scr"></script>
 <script src="flz.js?v=20261010xflpos"></script>
 <script src="xflr5.js?v=20261010xflm"></script>
-<script src="pc2.js?v=20261004gerade2"></script>
+<script src="pc2.js?v=20261025strak2"></script>
 <script src="dxf.js?v=20261004gerade2"></script>
 <script src="hotwire.js?v=20261004gerade2"></script>
-<script src="hotwire_gcode.js?v=20261008bcl"></script>
+<script src="hotwire_gcode.js?v=20261025wn"></script>
 <script src="sweeprot.js?v=20261004gerade2"></script>
 <script src="earcut.js?v=20261004gerade2"></script>
 <script src="grbl.js?v=20261022tr2"></script>
@@ -1658,45 +1662,46 @@
 <script src="occt-import-js.js?v=20261018asm"></script>
 <script src="occt_wasm.js?v=20261018asm"></script>
 <script src="model3d.js?v=20261021ap2"></script>
-<script src="model3d_gcode.js?v=20261021ap1"></script>
+<script src="model3d_gcode.js?v=20261025wn"></script>
 <script src="core.js?v=20261023mf4"></script>
-<script src="cad.js?v=20261022pdf1"></script>
+<script src="cad.js?v=20261026skew"></script>
 <script src="cadpdf.js?v=20261023pv2"></script>
 <script src="gcode.js?v=20261023mf"></script>
 <script src="spars.js?v=20261004gerade2"></script>
-<script src="ribs.js?v=20261017theme2"></script>
+<script src="ribs.js?v=20261027mf3"></script>
 <script src="dxfshapes.js?v=20261021uni4"></script>
 <script src="wingimport.js?v=20261010xflm"></script>
-<script src="filesys.js?v=20261021rpu1"></script>
-<script src="stlpreview.js?v=20261017theme2"></script>
+<script src="filesys.js?v=20261025strak2"></script>
+<script src="stlpreview.js?v=20261027mf3"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
 <script src="gmfc.js?v=20261017theme2"></script>
-<script src="render.js?v=20261023mf2"></script>
+<script src="render.js?v=20261027hs1"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261023mf2"></script>
+<script src="sidebar.js?v=20261025strak4"></script>
 <script src="pathpreview.js?v=20261008bcl"></script>
-<script src="gcodegen.js?v=20261023mf4"></script>
-<script src="cutpanel.js?v=20261023mf5"></script>
+<script src="gcodegen.js?v=20261025wn"></script>
+<script src="cutpanel.js?v=20261025wn"></script>
 <script src="stege.js?v=20261004gerade2"></script>
-<script src="kernteile.js?v=20261023mf"></script>
+<script src="kernteile.js?v=20261025wn"></script>
 <script src="pc2wing.js?v=20261010tol"></script>
 <script src="stepexport.js?v=20261010prof"></script>
-<script src="formenbau.js?v=20261018grp4"></script>
+<script src="formenbau.js?v=20261027vm2"></script>
 <script src="rumpf.js?v=20261017theme2"></script>
-<script src="fraese.js?v=20261004gerade2"></script>
+<script src="fraese.js?v=20261026skew"></script>
 <script src="schrift_fonts.js?v=20261004gerade2"></script>
 <script src="schrift.js?v=20261004gerade2"></script>
-<script src="ausschnitt.js?v=20261004khfrei"></script>
-<script src="schrift_gcode.js?v=20261006schale7"></script>
-<script src="ausschnitt_gcode.js?v=20261006schale7"></script>
+<script src="ausschnitt.js?v=20261027ref1"></script>
+<script src="ausschnitt_seg.js?v=20261027seg4"></script>
+<script src="schrift_gcode.js?v=20261025wn"></script>
+<script src="ausschnitt_gcode.js?v=20261026blk"></script>
 <script src="kfm.js?v=20261008align"></script>
-<script src="foildb.js?v=20261017theme2"></script>
-<script src="compute.js?v=20261023mf5"></script>
+<script src="foildb.js?v=20261025strak2"></script>
+<script src="compute.js?v=20261025strak4"></script>
 <script src="wings.js?v=20261023mf2"></script>
 <script src="overview_bg.js?v=20261004gerade2"></script>
 <script src="overview.js?v=20261023mf"></script>
 <script src="ptedit.js?v=20261011dat"></script>
-<script src="profedit.js?v=20261004gerade2"></script>
+<script src="profedit.js?v=20261025strak4"></script>
 <script src="tabmenu.js?v=20261019tm1"></script>
 <script src="app.js?v=20261019me1"></script>
 </body>

@@ -205,7 +205,9 @@
       const closed = App.closeLoadedTE(prof);
       const orig = prof.map(p => ({ x: p.x, y: p.y })); orig.name = prof.name;
       state.profBase[String(tid)] = orig;
-      if (t.type === 'root') state.root.profile = closed; else state.segments[t.idx].profile = closed;
+      const holder = t.type === 'root' ? state.root : state.segments[t.idx];
+      holder.profile = closed;
+      holder.strak = false; holder.foilMix = null; holder.foilName = '';   // eigenes Profil ersetzt Strak/Import-Zuordnung
       if (App.profModalOpen && String(state.profEdit.target) === String(tid)) {
         state.profEdit.points = orig.length;
         state.profEdit.teMM = 0;
@@ -359,32 +361,50 @@
       + (miss.length ? ('\n\n' + T('Noch offen (kein passendes .dat gefunden): ')
           + '\n• ' + miss.join('\n• ')) : ('\n\n' + T('Alle Profile zugeordnet.'))));
   }
-  // Weist Profile aus state.xflrFoils allen Rippen mit passendem .foilName zu.
-  // Rückgabe { assigned, missing:[Name] }.
+  // Profil per Namen suchen: zuerst die zugeordneten .dat (state.xflrFoils), dann die
+  // Profildatenbank (Profil- oder Dateiname). Vergleich wie beim XFLR5-Import über normName.
+  function foilByName(name) {
+    if (!name) return null;
+    const norm = (window.XFLR5 && XFLR5.normName) || (s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, ''));
+    const k = norm(name), lib = state.xflrFoils || {};
+    if (lib[k]) return lib[k];
+    if (window.FoilDB && FoilDB.list) {
+      const r = FoilDB.list().find(x => norm(x.name) === k || (x.file && norm(String(x.file).replace(/\.[^.]+$/, '')) === k));
+      if (r) return FoilDB.profile(r.id);
+    }
+    return null;
+  }
+  // Weist Profile aus state.xflrFoils (bzw. der Profildatenbank) allen Rippen mit passendem
+  // .foilName zu. Rückgabe { assigned, missing:[Name] }.
   function applyFoilsToWing() {
-    const lib = state.xflrFoils || {};
     let assigned = 0; const missing = [];
-    const use = (holder, setter) => {
-      // Strak aus dem Planform-Creator-Import: Mischprofil der beiden Nachbarn, sobald beide geladen sind.
-      const sk = holder.foilStrak;
-      if (sk && sk.a && sk.b && window.PC2) {
-        const ha = lib[XFLR5.normName(sk.a)], hb = lib[XFLR5.normName(sk.b)];
-        if (ha && hb) { setter(PC2.strak(ha, hb, +sk.t || 0, PC2.strakName(sk))); assigned++; }
-        [[sk.a, ha], [sk.b, hb]].forEach(([n, h]) => { if (!h && missing.indexOf(n) < 0) missing.push(n); });
+    const use = (holder, key) => {
+      // Strak-Segmente werden aus den Nachbarn gemischt (App.updateStraks in recompute).
+      if (holder.strak) return;
+      // Feste Mischung aus dem .pc2-Import (Nachbarprofile sind dort keine Rippen).
+      const fm = holder.foilMix;
+      if (fm && fm.a && fm.b && window.PC2) {
+        const ha = foilByName(fm.a), hb = foilByName(fm.b);
+        [[fm.a, ha], [fm.b, hb]].forEach(([n, h]) => { if (!h && missing.indexOf(n) < 0) missing.push(n); });
+        if (!ha || !hb) return;
+        const p = PC2.strak(ha, hb, +fm.t || 0, PC2.strakName(fm));
+        const orig = p.map(q => ({ x: q.x, y: q.y })); orig.name = p.name;
+        state.profBase[String(key)] = orig;
+        const c = App.closeLoadedTE(p); c.name = p.name; holder.profile = c; assigned++;
         return;
       }
       const fn = holder.foilName; if (!fn) return;
-      const hit = lib[XFLR5.normName(fn)];
-      if (hit) { const c = hit.map(p => ({ x: p.x, y: p.y })); c.name = fn; setter(c); assigned++; }
-      else if (missing.indexOf(fn) < 0) missing.push(fn);
+      const hit = foilByName(fn);
+      if (!hit) { if (missing.indexOf(fn) < 0) missing.push(fn); return; }
+      // Endleiste beim Laden auf 0 schließen (wie bei .dat); Original als Editier-Basis behalten.
+      const orig = hit.map(q => ({ x: q.x, y: q.y })); orig.name = fn;
+      state.profBase[String(key)] = orig;
+      const c = App.closeLoadedTE(orig.map(q => ({ x: q.x, y: q.y }))); c.name = fn;
+      holder.profile = c; assigned++;
     };
-    // Endleiste beim Laden auf 0 schließen (wie bei .dat); Original als Editier-Basis behalten.
-    const setLoaded = (key, apply) => (p) => {
-      const orig = p.map(q => ({ x: q.x, y: q.y })); orig.name = p.name;
-      state.profBase[key] = orig; apply(App.closeLoadedTE(p));
-    };
-    use(state.root, setLoaded('root', p => { state.root.profile = p; }));
-    state.segments.forEach((s, i) => use(s, setLoaded(String(i), p => { s.profile = p; })));
+    use(state.root, 'root');
+    state.segments.forEach((s, i) => use(s, i));
+    if (App.recompute) App.recompute();
     return { assigned, missing };
   }
   // Mehrere .dat wählen (FS-Access-Picker mit multiple; sonst Datei-Input).
@@ -2254,6 +2274,7 @@
   Object.assign(App, { closePc2, closeSaveMenu, closeSettings, colGroupHead, colSection, collectSettings, colorRow, decProf });
   Object.assign(App, { dirHandles, dxfToProfileDat, exportProfileDat, exportProfileDxf, exportViaPicker, fmtRecentTime, fsDel, fsGet });
   Object.assign(App, { fsIdb, fsPerm, fsSet, isPlaceholderProfile, layersToProfileDat, loadDat, loadDirHandles, loadFlz });
+  Object.assign(App, { foilByName });
   Object.assign(App, { loadFoilDats, loadPc2, loadProfileAny, loadProfileDxf, processProfileFile, loadProfileSvg, loadProject, loadProjectDialog, loadRecentMeta, loadSettingsDialog });
   Object.assign(App, { loadSettingsFromExeFolder, loadSettingsLocal, loadVia, loadXflr, mkMenuHead, mkMenuItem, newProject, openMenuAt });
   Object.assign(App, { openPc2Dialog, openRecent, openSettings, pc2DoImport, pc2Regen, pc2SortedStations, pickDir, pickTextFile });

@@ -73,6 +73,7 @@
     ktWarnings(G).forEach(w => em('; ' + w));
     em('; ' + T('erzeugt: ') + new Date().toISOString());
     em('G21 ; mm'); em('G90 ; absolut');
+    if (App.matNote) em(App.matNote());
     if (heat != null) em('M3 S' + App.currentWireS() + ' ; ' + T('Drahtheizung EIN (') + heat + ' %)');
     if (state.cfg.header) state.cfg.header.split('\n').forEach(l => em(l));
     em(`G0 ${ax.x}${f(0)} ${ax.y}${f(0)} ${ax.u}${f(0)} ${ax.v}${f(0)} ; Start am Maschinennullpunkt`);

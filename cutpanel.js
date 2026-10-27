@@ -45,7 +45,7 @@
     const safeY = blockCutH() + (state.material.safeH || 20);
     const g = BlockPrep.gcode({
       dist: spec.dist, length: spec.length, H: spec.height, kerf: k,
-      feed: state.block.feed, heat: App.currentHeat(), heatS: App.currentWireS(), safeY, precision: state.cfg.precision,
+      feed: state.block.feed, heat: App.currentHeat(), heatS: App.currentWireS(), matNote: App.matNote && App.matNote(), safeY, precision: state.cfg.precision,
       meltDwell: +state.material.meltDwell || 0,
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV }, cuts
     });

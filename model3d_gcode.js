@@ -75,6 +75,7 @@
     out.push('G21 ; mm');
     out.push('G90 ; ' + T('absolut'));
     out.push('; ' + T('Nullpunkt: linke untere Ecke (per Set Home der Maschine setzen)'));
+    if (o.matNote) out.push(o.matNote);
     if (mt.heat > 0) out.push(wireOn(o, mt.heat));
     r.moves.forEach(m => {
       if (m.k === 'backX' && mt.heat > 0) out.push('M5 ; ' + T('Draht aus'));
@@ -90,6 +91,7 @@
     out.push('; ' + T('Verbindungswege kollisionsfrei (nur durch Freiraum zwischen den Teilen)'));
     out.push('G21 ; mm'); out.push('G90 ; ' + T('absolut'));
     // Verbindungen laufen durch den Schaum der Platte -> Draht bleibt bis zum Ende heiß.
+    if (o.matNote) out.push(o.matNote);
     const heat = o.heat > 0;
     if (heat) out.push(wireOn(o, o.heat));
     r.moves.forEach(m => out.push(line(o, m)));

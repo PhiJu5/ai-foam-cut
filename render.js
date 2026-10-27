@@ -939,6 +939,40 @@
     }
   }
 
+  // Profilnamen unter Bildschirm-Ankerpunkten {x, y, text}: waagerecht, wenn sich nichts
+  // überdeckt, sonst senkrecht nach unten; was dann noch kollidiert, entfällt.
+  function drawFoilLabels(ctx, items, opt) {
+    opt = opt || {};
+    items = items.filter(it => it.text);
+    if (!items.length) return;
+    ctx.save();
+    ctx.font = '11px Segoe UI';
+    const gap = 6, hgt = 13;
+    const box = (it, rot) => {
+      const w = ctx.measureText(it.text).width;
+      return rot ? { x0: it.x - hgt / 2, x1: it.x + hgt / 2, y0: it.y + gap, y1: it.y + gap + w }
+                 : { x0: it.x - w / 2, x1: it.x + w / 2, y0: it.y + gap, y1: it.y + gap + hgt };
+    };
+    const hit = (a, b) => a.x0 < b.x1 + 3 && b.x0 < a.x1 + 3 && a.y0 < b.y1 && b.y0 < a.y1;
+    const flat = items.map(it => box(it, false));
+    const rot = flat.some((a, i) => flat.some((b, j) => j > i && hit(a, b)));
+    const drawn = [];
+    ctx.fillStyle = opt.color || '#c9d4e2'; ctx.strokeStyle = 'rgba(12,15,19,.85)'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+    items.forEach(it => {
+      const b = box(it, rot);
+      if (drawn.some(d => hit(d, b))) return;
+      drawn.push(b);
+      ctx.save(); ctx.translate(it.x, it.y + gap);
+      if (rot) { ctx.rotate(-Math.PI / 2); ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; }
+      else { ctx.textAlign = 'center'; ctx.textBaseline = 'top'; }
+      ctx.strokeText(it.text, 0, 0); ctx.fillText(it.text, 0, 0);
+      ctx.restore();
+    });
+    ctx.restore();
+  }
+  // Profilname der Station i (0 = Wurzel, sonst Außenrippe von Segment i-1).
+  function stationFoil(i) { return App.foilLabel(i === 0 ? state.root : state.segments[i - 1]); }
+
   // ---------- Ansichten -----------------------------------------------
   // Grundriss: waagerecht = Spannweite, senkrecht = Sehne, Flugrichtung OBEN
   // (Nase oben) -> wir plotten -x nach oben.
@@ -1067,6 +1101,8 @@
     ctx.fillStyle = '#8b98a8'; ctx.font = '11px Segoe UI';
     // Warnbanner (Holmlage/Tasche nicht proportional) -> im Profil-Ansichtsfenster (drawSparWarnings).
     leTe.forEach(s => ctx.fillText(Math.round(s.z) + 'mm', V.X(s.z) - 10, V.Y(-s.le) - 6));
+    // Profilnamen unter der Endleiste jeder Rippe (Ansichtsmenü „Profilnamen").
+    if (App.showFoilNames()) drawFoilLabels(ctx, leTe.map((s, i) => ({ x: V.X(s.z), y: V.Y(-s.te), text: stationFoil(i) })));
 
     // Transformation & Segmentgrenzen für die Klick-Auswahl merken.
     planPick = { inv: V.inv, segZ: App.segZ.slice(), spars: sparPick };
@@ -1090,6 +1126,12 @@
       if (state.activeTab === 'wing') {
         // Tragflächendesigner: alle Segmente bemaßen.
         for (let k = 0; k < leTe.length - 1; k++) dimSeg(k, k === 0);
+        // Gesamte Halbspannweite (Wurzel bis Randrippe) unter den Segmentmaßen.
+        if (leTe.length > 2) {
+          const f = leTe[0], l = leTe[leTe.length - 1];
+          const yB = -Math.max.apply(null, leTe.map(s => s.te));
+          dim(ctx, V, f.z, yB, l.z, yB, mm(l.z - f.z), { off: 64, color: '#57d38c' });
+        }
       } else {
         dimSeg(Math.min(App.activeIdx(), leTe.length - 2), true);
       }
@@ -1183,6 +1225,10 @@
       ctx.fillText('+' + Math.round(App.wing.stations[k + 1].yRise) + 'mm / ' + (App.wing.stations[k + 1].dihAngle || 0).toFixed(1) + '°',
         V.X(g.z1) - 24, V.Y(g.tTop) - 8);
     });
+    // Profilnamen unter der Unterkante jeder Rippe (Ansichtsmenü „Profilnamen").
+    if (App.showFoilNames() && G.length) drawFoilLabels(ctx, G.map((g, k) => ({ z: g.z0, bot: k ? Math.min(g.rBot, G[k - 1].tBot) : g.rBot, i: k }))
+      .concat([{ z: G[G.length - 1].z1, bot: G[G.length - 1].tBot, i: G.length }])
+      .map(s => ({ x: V.X(s.z), y: V.Y(s.bot), text: stationFoil(s.i) })));
     // Bemaßung: von den drei gewünschten Maßen liegt im Aufriss nur die
     // Spannweite in der Zeichenebene (Sehne/Rückpfeilung stehen senkrecht dazu).
     if (state.cfg.showDim && G.length) {
@@ -1192,6 +1238,9 @@
           { off: 34, color: '#57d38c' });
       if (state.activeTab === 'wing') {
         for (let k = 0; k < G.length; k++) dimSeg(k);
+        // Gesamte Halbspannweite unter den Segmentmaßen.
+        if (G.length > 1) dim(ctx, V, G[0].z0, yBase, G[G.length - 1].z1, yBase,
+            mm(G[G.length - 1].z1 - G[0].z0), { off: 64, color: '#57d38c' });
       } else {
         dimSeg(Math.min(App.activeIdx(), G.length - 1));
       }
@@ -1818,9 +1867,9 @@
     // Block/Schnittspur/Nummern/Bemaßung sind Fertigungshilfen und nur im
     // Reiter „Kernschneiden" (core) einstellbar.
     const mfg = state.activeTab !== 'wing';
-    const wingToggles = ['showCore', 'showBlock', 'showNums'];   // im Tragflächendesigner sichtbar
+    const wingToggles = ['showCore', 'showBlock', 'showNums', 'showFoilNames'];   // im Tragflächendesigner sichtbar
     document.querySelectorAll('#profToggles input[data-cfg]').forEach(cb => {
-      cb.checked = !!state.cfg[cb.dataset.cfg];
+      cb.checked = cb.dataset.cfg === 'showFoilNames' ? App.showFoilNames() : !!state.cfg[cb.dataset.cfg];
       let show = wingToggles.includes(cb.dataset.cfg) ? true : mfg;
       // „Abbrand-Verteilung farbig" nur bei Abbrand aus Bahngeschwindigkeit.
       if (cb.dataset.cfg === 'kerfHeat' && state.cfg.kerfMode !== 'speed') show = false;

@@ -2279,7 +2279,7 @@
           const spars = [];
           if (withSpars) (state.spars || []).forEach(sp => {
             if (!App.sparAppliesTo(sp, st.seg)) return;
-            const fl = App.sparFromLE(sp, st.seg, 'root') + (App.sparFromLE(sp, st.seg, 'tip') - App.sparFromLE(sp, st.seg, 'root')) * st.t;
+            const fl = App.ribSparFL ? App.ribSparFL(sp, st, o) : App.sparFromLE(sp, st.seg, 'root') + (App.sparFromLE(sp, st.seg, 'tip') - App.sparFromLE(sp, st.seg, 'root')) * st.t;
             const g = App.sparOnProfile(sp, o.pts, null, fl, App.sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, sh));
             App.sparPolys(g).forEach(pl => spars.push(pl));
           });

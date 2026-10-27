@@ -1006,7 +1006,8 @@
     closed.name = prof.name;
     const tid = t.type === 'root' ? 'root' : t.idx;
     if (state.profBase) state.profBase[String(tid)] = orig;
-    if (t.type === 'root') state.root.profile = closed; else if (state.segments[t.idx]) state.segments[t.idx].profile = closed;
+    const h = t.type === 'root' ? state.root : state.segments[t.idx];
+    if (h) { h.profile = closed; h.strak = false; h.foilMix = null; h.foilName = ''; }   // ersetzt Strak/Import-Zuordnung
     if (App.buildSidebar) App.buildSidebar(); if (App.render) App.render();
   }
   function exportDat(r) {

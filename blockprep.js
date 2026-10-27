@@ -37,6 +37,7 @@
     em('; ' + T('Abbrand ') + (opt.kerf || 0).toFixed(2) + T(' mm kompensiert · Bezug Höhe = Maschinen-Nullpunkt (Y0)'));
     em('; ' + T('planare Vertikalschnitte (beide Türme identisch) · Vorschub ') + feed + ' mm/min');
     em('G21 ; mm'); em('G90 ; absolut');
+    if (opt.matNote) em(opt.matNote);
     if (opt.heat != null) { em('; ' + T('Drahtheizung ') + opt.heat + ' %'); em('M3 S' + (opt.heatS != null ? opt.heatS : (+opt.heat).toFixed(0)) + ' ; Draht EIN'); }
     g0(0, 0, 'Start am Maschinennullpunkt (X0/Y0)');
     g0(0, safeY, 'hoch auf Sicherheitshöhe');

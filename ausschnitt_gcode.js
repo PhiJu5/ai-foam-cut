@@ -9,13 +9,14 @@
   const App = (window.App = window.App || {});
   const T = s => (window.I18N ? window.I18N.t(s) : s);
   const AP = { top: 'von oben', bottom: 'von unten', front: 'von vorne (Nasenseite)', rear: 'von hinten (Endleistenseite)' };
-  function note(m, canopy) {
+  const AP_RECT = { top: 'von oben', bottom: 'von unten', front: 'von links', rear: 'von rechts' };
+  function note(m, canopy, rect) {
     if (canopy && m.k === 'cut') return T('Haubenlinie (Schnittvorschub)');
     switch (m.k) {
       case 'start': return T('Start am Nullpunkt (0,0)');
       case 'air': return T('in Luft (außerhalb des Blocks)');
       case 'enter': return T('Anfahrt zum Startpunkt (Schnittvorschub)');
-      case 'cut': return T('Profilkontur');
+      case 'cut': return T(rect ? 'Rechteckkontur' : 'Profilkontur');
       case 'exit': return T('Abfahrt auf demselben Weg');
       default: return '';
     }
@@ -26,21 +27,29 @@
     const c = App.state.cfg, P = c.precision != null ? c.precision : 3, f = v => (+v).toFixed(P);
     const ax = [c.axX || 'X', c.axY || 'Y', c.axU || 'Z', c.axV || 'A'], m = mm.meta, out = [];
     const em = s => out.push(window.I18N && window.I18N.tc ? window.I18N.tc(s) : s);
-    const canopy = m.kind === 'canopy';
-    if (canopy) {
+    const canopy = m.kind === 'canopy', rect = m.kind === 'rect' && m.rect;
+    if (m.parts) {
+      em('; AI Foam Cut · ' + T('Ausschnitte im selben Block') + ' · ' + m.parts.length + ' ' + T('nacheinander'));
+      m.parts.forEach((q, i) => em('; ' + (i + 1) + '. ' + String(q.name).slice(0, 40) + ' · ' + String(q.label).slice(0, 60) + ' · ' + T('Schnittlänge ') + (q.cutLen / 1000).toFixed(2) + ' m'));
+    } else if (canopy) {
       const q = m.kh;
       em('; AI Foam Cut · ' + T('Kabinenhaubenausschnitt'));
       if (q.free) em('; ' + T('Freier Linienzug') + ' · ' + q.n + ' ' + T('Punkte') + ' · ' + T('Länge') + ' ' + Math.abs(q.x1 - q.x0).toFixed(1) + ' mm · ' + T('Tiefe') + ' ' + q.depth.toFixed(1) + ' mm');
       else em('; ' + T('Untere Linie') + ' ' + q.len.toFixed(1) + ' mm / ' + q.slope.toFixed(1) + '° · ' + T('vorne') + ' ' + q.angF.toFixed(1) + '° · ' + T('hinten') + ' ' + q.angR.toFixed(1) + '° · '
         + T('Radien') + ' ' + q.radF.toFixed(1) + ' / ' + q.radR.toFixed(1) + ' mm');
+    } else if (rect) {
+      const q = m.rect;
+      em('; AI Foam Cut · ' + T('Rechteckausschnitt') + ' · ' + q.w.toFixed(1) + ' x ' + q.h.toFixed(1) + ' mm' + (q.r > 0 ? ' · ' + T('Eckenradius') + ' ' + q.r.toFixed(1) + ' mm' : ''));
+      em('; ' + T('Drehwinkel') + ' ' + m.angle.toFixed(1) + '° · '
+        + T(m.keep === 'block' ? 'Ausschnitt (Block bleibt)' : 'Rechteckstück bleibt') + (m.clear > 0 ? ' · ' + T('Spiel ') + m.clear.toFixed(2) + ' mm' : ''));
     } else {
     em('; AI Foam Cut · ' + T('Tragflächenausschnitt') + ' · ' + String(m.name).slice(0, 60));
     em('; ' + T('Profiltiefe ') + m.chord.toFixed(1) + ' mm · ' + T('Einstellwinkel ') + m.angle.toFixed(1) + '° · '
       + T(m.keep === 'block' ? 'Ausschnitt (Block bleibt)' : 'Profilstück bleibt') + (m.clear > 0 ? ' · ' + T('Spiel ') + m.clear.toFixed(2) + ' mm' : ''));
     }
     em('; ' + T('Block ') + m.block.w.toFixed(1) + ' x ' + m.block.h.toFixed(1) + ' x ' + m.block.d.toFixed(1) + ' mm · ' + T('Lage X/Y ') + (+m.block.x).toFixed(1) + ' / ' + (+m.block.y).toFixed(1) + ' mm');
-    if (canopy) em('; ' + T(m.fwd ? 'Schnitt von vorne nach hinten' : 'Schnitt von hinten nach vorne') + ' · ' + T({ canopy: 'Haube maßhaltig', fus: 'Rumpf maßhaltig', mid: 'Draht auf der Linie' }[m.keep]));
-    else em('; ' + T('Anfahrt ') + T(AP[m.approach] || m.approach) + ' · ' + T(m.dirCW ? 'im Uhrzeigersinn' : 'gegen den Uhrzeigersinn') + ' · '
+    if (m.parts) { /* je Ausschnitt in den Abschnittskommentaren */ } else if (canopy) em('; ' + T(m.fwd ? 'Schnitt von vorne nach hinten' : 'Schnitt von hinten nach vorne') + ' · ' + T({ canopy: 'Haube maßhaltig', fus: 'Rumpf maßhaltig', mid: 'Draht auf der Linie' }[m.keep]));
+    else em('; ' + T('Anfahrt ') + T((rect ? AP_RECT : AP)[m.approach] || m.approach) + ' · ' + T(m.dirCW ? 'im Uhrzeigersinn' : 'gegen den Uhrzeigersinn') + ' · '
       + T(m.startPicked ? 'Startpunkt gewählt' : 'Startpunkt automatisch'));
     em('; ' + T('Abbrand ') + m.kerf.toFixed(2) + ' mm · ' + T('Schnittlänge ') + (m.cutLen / 1000).toFixed(2) + ' m');
     em('; ' + T('Nullpunkt: links unten vor dem Block (Blocklage X/Y), beide Portale fahren dieselbe Bahn'));
@@ -48,6 +57,7 @@
     em('G21 ; mm');
     em('G90 ; absolut');
     if (c.header) String(c.header).split('\n').forEach(l => em(l));
+    if (App.matNote) em(App.matNote(App.matIdFor('ausschnitt')));
     if (m.heat != null) {
       em('; ' + T('Drahtheizung: ') + m.heat + ' %');
       em('M3 S' + (m.wireS != null ? m.wireS : Math.round(m.heat)) + ' ; ' + T('Drahtheizung EIN'));
@@ -55,7 +65,8 @@
     let lastK = '';
     mm.moves.forEach((mv, i) => {
       const x = f(mv.X), y = f(mv.Y);
-      const cm = mv.k !== lastK ? note(mv, canopy) : '';
+      if (mv.title) { em('; --- ' + T('Ausschnitt') + ' ' + mv.title + ' ---'); lastK = ''; }
+      const cm = mv.k !== lastK ? note(mv, mv.kind ? mv.kind === 'canopy' : canopy, mv.kind ? mv.kind === 'rect' : rect) : '';
       lastK = mv.k;
       em((i === 0 ? 'G0 ' : 'G1 ') + ax[0] + x + ' ' + ax[1] + y + ' ' + ax[2] + x + ' ' + ax[3] + y + (i === 0 ? '' : ' F' + Math.round(mv.F)) + (cm ? ' ; ' + cm : ''));
     });

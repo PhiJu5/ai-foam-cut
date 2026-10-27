@@ -521,11 +521,20 @@
     return i;
   }
   function profilePicker(body, getProf, importKey) {
+    if (App.updateStraks) App.updateStraks();   // Strak-Profile vor der Anzeige nachführen
     const p = getProf(); const th = (Airfoil.maxThickness(p) * 100).toFixed(1);
     const info = document.createElement('div'); info.style.color = 'var(--txt)';
     info.innerHTML = T('Profil') + ': <b>' + p.name + '</b> (' + th + '%)';
     body.appendChild(info);
     const profId = importKey.type === 'root' ? 'root' : importKey.idx;
+    const editBtn = () => {
+      const r2 = document.createElement('div'); r2.className = 'row full';
+      const be = document.createElement('button'); be.textContent = T('Profil bearbeiten…');
+      be.onclick = () => App.openProfModal(profId);
+      r2.appendChild(be); body.appendChild(r2);
+    };
+    // Strak: Profil wird gemischt, nicht geladen — bearbeiten geht trotzdem (seg.strakEdit).
+    if (strakRows(body, importKey)) { editBtn(); return; }
     // Ein Lade-Button für alle Profilformate, darunter Profil bearbeiten.
     const rl = document.createElement('div'); rl.className = 'row full';
     const bd = document.createElement('button'); bd.textContent = T('Profil laden…');
@@ -533,12 +542,47 @@
     rl.appendChild(bd); body.appendChild(rl);
     // Aufklappmenü der Profildatenbank (optionales Feature foildb.js): Gruppen als Abschnitte.
     if (App.foildbPickerRow) App.foildbPickerRow(body, importKey);
-    hint(body, 'Profil laden: .dat (Selig/Lednicer), .bez (Bézier-Kontrollpunkte, wird abgetastet) oder DXF/SVG '
+    hint(body, 'Profil laden:.dat (Selig/Lednicer), .bez (Bézier-Kontrollpunkte, wird abgetastet) oder DXF/SVG '
       + '(größte Kontur der Datei). Reihenfolge/Skalierung werden automatisch normalisiert.');
-    const r2 = document.createElement('div'); r2.className = 'row full';
-    const be = document.createElement('button'); be.textContent = T('Profil bearbeiten…');
-    be.onclick = () => App.openProfModal(profId);
-    r2.appendChild(be); body.appendChild(r2);
+    editBtn();
+  }
+
+  /* Strak-Profil wie im Planform Creator (nur Segment-Außenprofile): Schalter seg.strak.
+   * Das Profil wird automatisch aus dem nächsten gegebenen Profil innen und dem nächsten
+   * gegebenen außen gemischt, Anteil nach Lage in Spannweitenrichtung (App.updateStraks,
+   * compute.js). Gegebene Profile werden wie immer geladen oder aus dem Katalog gewählt.
+   * Rückgabe true = Strak aktiv (Lade-/Katalog-Zeilen entfallen dann). */
+  function strakRows(body, importKey) {
+    if (importKey.type === 'root' || !App.strakInfo || !window.PC2) return false;
+    const idx = importKey.idx, h = state.segments[idx];
+    if (!h) return false;
+    boolRow(body, 'Strak-Profil (aus Nachbarprofilen gemischt)', () => !!h.strak, v => {
+      h.strak = !!v; h.foilMix = null; h.strakEdit = null;
+      App.recompute(); buildSidebar();
+    }, 'Wie im Planform Creator: das Profil wird aus dem nächsten gegebenen Profil weiter innen und dem nächsten '
+      + 'gegebenen weiter außen gemischt — der Anteil ergibt sich aus der Lage in Spannweitenrichtung. Gegebene Profile '
+      + 'lädst du wie gewohnt oder wählst sie aus der Profildatenbank. Ändern sich Spannweiten oder Nachbarprofile, '
+      + 'wird der Strak automatisch nachgeführt. Aus = das aktuelle Mischprofil bleibt als festes Profil stehen.');
+    if (!h.strak) return false;
+    const inf = App.strakInfo(idx);
+    const nm = p => String((p && p.name) || '?');
+    const where = k => k < 0 ? T('Wurzel') : 'Segment ' + (k + 1);
+    const w = document.createElement('div'); w.style.cssText = 'color:var(--muted);font-size:12px;line-height:1.4';
+    if (inf.outer) {
+      const pct = Math.round(inf.t * 1000) / 10;
+      w.innerHTML = T('Innen') + ': <b>' + nm(inf.inner.profile) + '</b> (' + where(inf.innerIdx) + ') · '
+        + T('außen') + ': <b>' + nm(inf.outer.profile) + '</b> (' + where(inf.outerIdx) + ')<br>'
+        + T('Anteil außen') + ': <b>' + pct + ' %</b>';
+    } else {
+      w.innerHTML = T('Kein gegebenes Profil weiter außen — Strak = innerstes Profil') + ' <b>' + nm(inf.inner.profile) + '</b> (' + where(inf.innerIdx) + ').';
+    }
+    if (h.strakEdit) {
+      const e = document.createElement('div'); e.style.cssText = 'color:var(--muted);font-size:12px';
+      e.textContent = T('Bearbeitet (Dicke/Wölbung/Endleiste) — wird beim Nachführen mit übernommen.');
+      w.appendChild(document.createElement('br')); w.appendChild(e);
+    }
+    body.appendChild(w);
+    return true;
   }
 
   // ---------- Sidebar --------------------------------------------------
@@ -608,7 +652,7 @@
     profilePicker(box, () => seg.profile, { type: 'seg', idx });
     // Innenprofil (Wurzel bzw. Stoß = Außenprofil des Vorsegments) ins Außenprofil
     // übernehmen -> konstantes Profil über das Segment (nur die Sehne kann sich ändern).
-    {
+    if (!seg.strak) {
       const innerProf = () => idx === 0 ? state.root.profile : state.segments[idx - 1].profile;
       const rr = document.createElement('div'); rr.className = 'row full';
       const bc = document.createElement('button');
@@ -618,7 +662,7 @@
         const src = innerProf();
         const copy = src.map(pt => ({ x: pt.x, y: pt.y }));
         copy.name = src.name;
-        seg.profile = copy;
+        seg.profile = copy; seg.foilMix = null; seg.foilName = '';
         App.recompute(); buildSidebar(); render();
       };
       rr.appendChild(bc); box.appendChild(rr);
@@ -1401,10 +1445,10 @@
     };
     rpc.appendChild(bpc); b.appendChild(rpc);
     // Profil-Zuordnung (nur nach XFLR5-Import mit gespeicherten Foil-Namen).
-    const hasFoilNames = (state.root && state.root.foilName) || state.segments.some(s => s.foilName);
+    const hasFoilNames = (state.root && (state.root.foilName || state.root.foilMix)) || state.segments.some(s => s.foilName || s.foilMix);
     if (hasFoilNames) {
-      const openCnt = (state.root && state.root.foilName && isPlaceholderProfile(state.root.profile) ? 1 : 0)
-        + state.segments.filter(s => s.foilName && isPlaceholderProfile(s.profile)).length;
+      const openCnt = (state.root && (state.root.foilName || state.root.foilMix) && isPlaceholderProfile(state.root.profile) ? 1 : 0)
+        + state.segments.filter(s => (s.foilName || s.foilMix) && isPlaceholderProfile(s.profile)).length;
       hint(b, 'Mehrere Profil-.dat auf einmal wählen. Die Zuordnung erfolgt über den '
         + 'Foil-Namen (Dateiname ODER Profilname in der Datei = XFLR5-Name, Groß/Klein und '
         + 'Sonderzeichen egal). Passende Profile ersetzen die Platzhalter automatisch.');
@@ -2732,7 +2776,7 @@
     // als S-Wert auf $30 skaliert (fehlte bisher -> kein M3 im 3D-Modell-G-Code).
     const heat = App.heatForSpeed(mid, c.feed);
     return { axX: state.cfg.axX, axY: state.cfg.axY, axU: state.cfg.axU, axV: state.cfg.axV,
-      feed: c.feed, safe: c.safe, heat: heat != null ? heat : 0, heatS: App.wireSFor(heat), prec: state.cfg.precision || 3, maxFeed: state.cfg.maxFeed || 0,
+      feed: c.feed, safe: c.safe, heat: heat != null ? heat : 0, heatS: App.wireSFor(heat), matNote: App.matNote && App.matNote(mid), prec: state.cfg.precision || 3, maxFeed: state.cfg.maxFeed || 0,
       N: c.N, swap: c.swap, flip: c.flip, start: c.start, startPt: c.startPt, startAng: c.startAng, reverse: c.reverse, startBySeg: c.segStart,
       syncBySeg: c.segSync, edits: c.edits, leadIn: c.leadIn,
       // eigene Abbrand-Berechnung des 3D-Modells; „Abbrand kompensieren" aus = Sollkontur

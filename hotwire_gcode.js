@@ -77,6 +77,7 @@
     em('G90 ; absolut');
     // Drahtheizung: bleibt während des gesamten Schnitts konstant. S = Prozent
     // der Heizleistung (Duty = S / $30; bei $30 = 100 entspricht S direkt %).
+    if (opt.matNote) em(opt.matNote);
     if (opt.wireHeat != null) {
       em('; ' + T('Drahtheizung: ') + opt.wireHeat + (opt.wireNote || T(' % (konstant während des Schnitts)')));
       // S = auf $30 skalierter Wert (wie Handsteuerung). Fallback auf rohen

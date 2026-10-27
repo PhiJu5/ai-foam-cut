@@ -56,15 +56,24 @@
     waPosMode: 'manual',    // 'manual' (Standard) | 'center'
     waPosX: 40,             // Nase ↔ Blockvorderseite (Nasenseite) (mm)
     waPosY: 50,             // Nasenhöhe über Blockunterkante (mm)
+    waYRef: 'nose',         // Höhe gilt für 'nose' (Nase) | 'low' (tiefster Profilpunkt) über der Blockunterkante
+    waXRef: 'block',        // Lage in X ab 'block' (Blockseite) | 'seg' (Beginn des ersten Bezugssegments)
     waApproach: 'top',      // 'top' | 'bottom' | 'front' (Nasenseite) | 'rear' (Endleistenseite)
     waApproachDist: 10,     // Anfahrpunkt vor der Blockfläche (mm)
     waStart: null,          // Startpunkt: Bogenlängen-Anteil 0…1 der Kontur, null = automatisch
     waDir: 'cw',            // Umlauf 'cw' (Uhrzeigersinn) | 'ccw' — wie in der Ansicht
     waView: { block: true, fill: true, cut: true, arrows: true, dims: true },
     // --- Kabinenhaubenausschnitt (waKind 'canopy'): vordere, untere („waagrechte") und hintere Linie ---
-    waKind: 'wing',         // 'wing' (Profil) | 'canopy' (Kabinenhaube)
+    waKind: 'wing',         // 'wing' (Profil) | 'rect' (Rechteck) | 'canopy' (Kabinenhaube)
+    waSeg: null,            // Segment als Bezug (ausschnitt_seg.js): { src dxf|model, k, name, A, B, span, blk, orient long|side|top, flip }
+    // --- Rechteckausschnitt (waKind 'rect'): Lage/Block/Anfahrt wie beim Profil, Drehung um die Mitte ---
+    rcW: 100,               // Breite (mm)
+    rcH: 40,                // Höhe (mm)
+    rcR: 0,                 // Eckenradius (mm)
     khX: 60,                // vordere Ecke ↔ Blockvorderseite (mm)
     khDepth: 40,            // Tiefe der vorderen Ecke unter der Blockoberkante (mm)
+    khYRef: 'top',          // Höhenbezug 'top' (Tiefe unter Oberkante) | 'bottom' (Höhe über Unterkante, khHB bzw. Punkt-y)
+    khHB: 60,               // Höhe der vorderen Ecke über der Blockunterkante (mm, bei khYRef 'bottom')
     khLen: 150,             // Länge der unteren Linie (mm)
     khSlope: 0,             // Neigung der unteren Linie (°), + = hinten höher
     khAngF: 60, khAngR: 60, // Winkel vordere/hintere Linie zur Waagrechten (90 = senkrecht, kleiner = öffnet nach außen)
@@ -78,7 +87,7 @@
     khMode: 'std',          // 'std' (drei Linien) | 'free' (Linienzug)
     khPts: null             // [{ x (ab Blockvorderseite), y (Tiefe unter Oberkante), r, t line|spline|foil, curv, pos, fSrc naca|wing|dat, fThk, fProf, fSide, fNose a|b, fScale }]
   };
-  if (App.GRP_OPEN_DEFAULT && App.GRP_OPEN_DEFAULT.add) ['wa_prof', 'wa_path', 'kh_form'].forEach(k => App.GRP_OPEN_DEFAULT.add(k));
+  if (App.GRP_OPEN_DEFAULT && App.GRP_OPEN_DEFAULT.add) ['wa_list', 'wa_prof', 'wa_path', 'kh_form'].forEach(k => App.GRP_OPEN_DEFAULT.add(k));
   function C(k) {
     if (state.cfg[k] == null) {
       const d = DEF[k];
@@ -118,16 +127,17 @@
   }
   function wingLabel(i) { return App.wingName ? App.wingName(i) : T('Tragfläche'); }
   // → { name, pts:[{x,y}] (normiert, Selig), chord } oder null
+  // Rechteck L × t (Eckenradius r): Umlauf wie ein Profil — Hinterkante Mitte, Oberseite, Vorderkante, Unterseite.
+  function rectSrc(L, t, rr) {
+    const h = t / 2 / L, r = Math.max(0, Math.min(rr, t / 2 - 1e-3, L / 2 - 1e-3)) / L, U = [[1, 0]];
+    const corner = (cx, cy, a0) => { if (r < 1e-9) { U.push([cx, cy]); return; } const n = 8, mx = cx + (cx > 0.5 ? -r : r), my = cy + (cy > 0 ? -r : r); for (let i = 0; i <= n; i++) { const a = a0 + Math.PI / 2 * i / n; U.push([mx + r * Math.cos(a), my + r * Math.sin(a)]); } };
+    corner(1, h, 0); corner(0, h, Math.PI / 2); U.push([0, 0]); const iLE = U.length - 1; corner(0, -h, Math.PI); corner(1, -h, 1.5 * Math.PI);
+    const f = v => (Math.round(v * 10) / 10).toString();
+    return { name: T('Rechteck') + ' ' + f(L) + ' × ' + f(t) + ' mm', chord: L, U, iLE, rect: { w: L, h: t, r: r * L } };
+  }
   function profileSrc() {
-    if (C('waSrc') === 'rect') {
-      // Rechteck (z. B. Plattenleitwerk): Umlauf wie ein Profil — Hinterkante Mitte, Oberseite, Vorderkante, Unterseite.
-      const L = Math.max(1, num('waRectL', 100)), t = Math.max(0.1, num('waRectT', 6)), h = t / 2 / L;
-      const r = Math.max(0, Math.min(num('waRectR', 0), t / 2 - 1e-3, L / 2 - 1e-3)) / L, U = [[1, 0]];
-      const corner = (cx, cy, a0) => { if (r < 1e-9) { U.push([cx, cy]); return; } const n = 8, mx = cx + (cx > 0.5 ? -r : r), my = cy + (cy > 0 ? -r : r); for (let i = 0; i <= n; i++) { const a = a0 + Math.PI / 2 * i / n; U.push([mx + r * Math.cos(a), my + r * Math.sin(a)]); } };
-      corner(1, h, 0); corner(0, h, Math.PI / 2); U.push([0, 0]); const iLE = U.length - 1; corner(0, -h, Math.PI); corner(1, -h, 1.5 * Math.PI);
-      const f = v => (Math.round(v * 10) / 10).toString();
-      return { name: T('Rechteck') + ' ' + f(L) + ' × ' + f(t) + ' mm', chord: L, U, iLE };
-    }
+    if (isRectKind()) return rectSrc(Math.max(1, num('rcW', 100)), Math.max(0.1, num('rcH', 40)), Math.max(0, num('rcR', 0)));
+    if (C('waSrc') === 'rect') return rectSrc(Math.max(1, num('waRectL', 100)), Math.max(0.1, num('waRectT', 6)), Math.max(0, num('waRectR', 0)));
     if (C('waSrc') === 'own') {
       const p = C('waProf');
       if (!p || !Array.isArray(p.pts) || p.pts.length < 5) return null;
@@ -207,6 +217,8 @@
   // ======================================================================
   let lastRes = null;
   const isCanopy = () => C('waKind') === 'canopy';
+  const isRectKind = () => C('waKind') === 'rect';
+  const kindOf = () => isCanopy() ? 'canopy' : isRectKind() ? 'rect' : 'wing';
 
   // ---------- Kabinenhaubenausschnitt: Geometrie ------------------------------
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
@@ -384,37 +396,46 @@
   }
   // Freier Linienzug: lokal mit Ursprung an der Blockvorderseite oben (kx = dep = 0).
   function buildCanopyFree() {
-    const warns = [], notes = [], src = C('khPts');
+    const warns = [], notes = [], src0 = C('khPts'), mg = Math.max(0, num('waMargin', 40));
+    // Höhe über Unterkante: Blockhöhe zuerst, dann y je Innenpunkt in Tiefe unter Oberkante umrechnen.
+    let Hb = null, src = src0;
+    if (khBottom()) {
+      Hb = forceWH ? forceWH[1] : num('waBlockH', 0) > 0 ? num('waBlockH', 0) : Math.max(10, Math.max(0, ...src0.map(q => +q.y || 0)) + mg);
+      src = src0.map((q, i) => (i === 0 || i === src0.length - 1) ? q : Object.assign({}, q, { y: Hb - (+q.y || 0) }));
+    }
     const R = khFreeLine(src, warns);
     if (R.err) return { empty: true, msg: R.err };
     const N = R.N; if (N.length < 2) return { empty: true, msg: T('Kabinenhaube zu klein.') };
     let mx = 0, my = 0; N.forEach(p => { mx = Math.max(mx, p[0]); my = Math.max(my, -p[1]); });
-    const mg = Math.max(0, num('waMargin', 40));
-    const W = num('waBlockW', 0) > 0 ? num('waBlockW', 0) : Math.max(10, mx + mg);
-    const H = num('waBlockH', 0) > 0 ? num('waBlockH', 0) : Math.max(10, my + mg);
-    const B = localBlock(0, 0, W, H);
+    const W = forceWH ? forceWH[0] : num('waBlockW', 0) > 0 ? num('waBlockW', 0) : Math.max(10, mx + mg);
+    const H = Hb != null ? Hb : forceWH ? forceWH[1] : num('waBlockH', 0) > 0 ? num('waBlockH', 0) : Math.max(10, my + mg);
+    const sx = segX0(), kx = sx ? (C('waNose') === 'right' ? W - sx.x : sx.x) : 0;
+    const B = localBlock(kx, 0, W, H);
     for (let i = 1; i < R.Pn.length - 1; i++) if (!B.inside(R.Pn[i])) return { empty: true, msg: T('Punkt') + ' ' + (i + 1) + ': ' + T('liegt außerhalb des Blocks — X, Tiefe oder Blockmaße anpassen.') };
-    if (R.Pn[0][0] >= W || R.Pn[R.Pn.length - 1][0] >= W) return { empty: true, msg: T('Die Endpunkte der Haubenlinie liegen außerhalb des Blocks — X oder Blockbreite anpassen.') };
+    if (R.Pn[0][0] + kx >= W || R.Pn[R.Pn.length - 1][0] + kx >= W) return { empty: true, msg: T('Die Endpunkte der Haubenlinie liegen außerhalb des Blocks — X oder Blockbreite anpassen.') };
     const Pn = R.Pn, depth = Math.max(0, ...Pn.map(p => -p[1]));
     // Abbrandseite gilt für die Laufrichtung vorne → hinten: von hinten eingegebene Punkte umdrehen.
     if (Pn[0][0] > Pn[Pn.length - 1][0]) N.reverse();
-    return canopyFinish({ N, kx: 0, dep: 0, W, H, B, warns, notes, handles: R.H, corners: Pn,
-      loc: { free: true, Pn, S: R.S, kx: 0, dep: 0 }, chord: Math.abs(Pn[Pn.length - 1][0] - Pn[0][0]), angle: 0,
+    return canopyFinish({ N, kx, dep: 0, W, H, B, warns, notes, handles: R.H, corners: Pn,
+      loc: { free: true, Pn, S: R.S, kx, dep: 0 }, chord: Math.abs(Pn[Pn.length - 1][0] - Pn[0][0]), angle: 0,
       kh: { free: true, n: Pn.length, x0: Pn[0][0], x1: Pn[Pn.length - 1][0], depth } });
   }
   function buildCanopy() {
     if (isFree()) return buildCanopyFree();
     const warns = [], notes = [], rad = Math.PI / 180;
-    const kx = num('khX', 60), dep = num('khDepth', 40), L = Math.max(5, num('khLen', 150));
+    const khx = num('khX', 60), dep0 = num('khDepth', 40), hb = num('khHB', 60), L = Math.max(5, num('khLen', 150));
     const sl = Math.max(-60, Math.min(60, num('khSlope', 0))) * rad;
     const aF = Math.max(10, Math.min(170, num('khAngF', 60))) * rad, aR = Math.max(10, Math.min(170, num('khAngR', 60))) * rad;
     const P2 = [0, 0], P3 = [L * Math.cos(sl), L * Math.sin(sl)];
     const dF = [-Math.cos(aF), Math.sin(aF)], dR = [Math.cos(aR), Math.sin(aR)];
     // Block: fest oder automatisch (Haube + Rand hinten und unten).
     const mg = Math.max(0, num('waMargin', 40));
-    const rearTop = P3[0] + Math.max(0, dep - P3[1]) * Math.cos(aR) / Math.sin(aR);
-    const W = num('waBlockW', 0) > 0 ? num('waBlockW', 0) : Math.max(10, kx + Math.max(P3[0], rearTop) + mg);
-    const H = num('waBlockH', 0) > 0 ? num('waBlockH', 0) : Math.max(10, dep + Math.max(0, -P3[1]) + mg);
+    const rearTop = P3[0] + Math.max(0, dep0 - P3[1]) * Math.cos(aR) / Math.sin(aR);
+    const W = forceWH ? forceWH[0] : num('waBlockW', 0) > 0 ? num('waBlockW', 0) : Math.max(10, khx + Math.max(P3[0], rearTop) + mg);
+    // Höhe über Unterkante: automatische Blockhöhe = Eckhöhe + Tiefe-Vorgabe.
+    const H = forceWH ? forceWH[1] : num('waBlockH', 0) > 0 ? num('waBlockH', 0) : khBottom() ? Math.max(10, hb + dep0) : Math.max(10, dep0 + Math.max(0, -P3[1]) + mg);
+    const dep = khBottom() ? H - hb : dep0;
+    const sx = segX0(), xs = sx ? sx.x + sx.dir * khx : khx, kx = sx ? (C('waNose') === 'right' ? W - xs : xs) : khx;
     const LB = localBlock(kx, dep, W, H), inside = LB.inside, exitT = LB.exitT;
     if (!inside(P2) || !inside(P3)) return { empty: true, msg: T('Die Ecken der Kabinenhaube liegen außerhalb des Blocks — Lage, Tiefe, Länge oder Blockmaße anpassen.') };
     const tF = exitT(P2, dF), tR = exitT(P3, dR);
@@ -438,7 +459,7 @@
   // Gemeinsamer Schluss: Abbrand-Versatz, Überlauf, Maschinenkoordinaten, Luftwege.
   function canopyFinish(o) {
     const { N, kx, dep, W, H, warns, notes } = o, exitT = o.B.exitT, noseRight = C('waNose') === 'right';
-    const D = Math.max(1, num('waDepth', 100));
+    const D = segV ? segV.D : Math.max(1, num('waDepth', 100));
     const blk = { x0: blockX(), y0: blockY(), w: W, h: H, d: D }; blk.x1 = blk.x0 + W; blk.y1 = blk.y0 + H;
     // Schnittbahn: Abbrand auf die Seite, die NICHT maßhaltig sein muss (links der Laufrichtung = Haube).
     const k = kerf(), keep = ['canopy', 'fus', 'mid'].indexOf(C('khKeep')) >= 0 ? C('khKeep') : 'canopy';
@@ -478,7 +499,68 @@
     };
   }
 
+  // ---------- Gemeinsamer Block (cfg.waShared) ----------------------------------
+  // Alle Ausschnitte liegen im selben Block: Blockgröße = größte Einzelgröße (bzw. fest),
+  // jeder Ausschnitt wird darin berechnet (forceWH), lastAll = alle Ergebnisse in Listenfolge.
+  let forceWH = null, lastAll = null;
+  const sharedOn = () => state.cfg.waShared === true && cutList().length > 1;
+  const gcAll = () => sharedOn() && state.cfg.waGcAll !== 'one';
+  // Ohne gemeinsamen Block: alle übrigen Ausschnitte mitrechnen; 2D und 3D zeigen sie immer, relativ
+  // zur eigenen Blockecke (das Bezugssegment gilt für alle Ausschnitte).
+  let seg3d = null;
+  function segMates() {
+    const L = cutList(), a = activeIdx();
+    if (L.length < 2) return null;
+    const out = [];
+    L.forEach((c, i) => {
+      if (i === a) return;
+      let r = null; try { r = withCut(i, build1); } catch (e) { r = null; }
+      if (r && !r.empty) out.push({ i, name: c.name || (T('Ausschnitt') + ' ' + (i + 1)), r });
+    });
+    return out.length ? out : null;
+  }
   function build() {
+    forceWH = null; lastAll = null; seg3d = null;
+    if (!sharedOn()) { seg3d = segMates(); return (lastRes = build1()); }
+    const L = cutList(), a = activeIdx();
+    const own = L.map((c, i) => withCut(i, build1));
+    let W = 0, H = 0;
+    own.forEach(r => { if (r && !r.empty) { W = Math.max(W, r.block.w); H = Math.max(H, r.block.h); } });
+    if (!(W > 0 && H > 0)) return (lastRes = own[a]);
+    forceWH = [W, H];
+    try { lastAll = L.map((c, i) => ({ i, name: c.name || (T('Ausschnitt') + ' ' + (i + 1)), r: withCut(i, build1) })); }
+    finally { forceWH = null; }
+    const r = lastAll[a].r;
+    if (r && !r.empty) {
+      // Überschneidung mit anderen Ausschnitten im Block (Schnittbahnen kreuzen sich)?
+      lastAll.forEach(o => {
+        if (o.i === a || !o.r || o.r.empty) return;
+        const P = r.loop, Q = o.r.loop; let hit = false;
+        for (let p = 0; p < P.length - 1 && !hit; p++) for (let q = 0; q < Q.length - 1; q++) if (segX(P[p], P[p + 1], Q[q], Q[q + 1])) { hit = true; break; }
+        if (hit) r.warns.push(T('Die Schnittbahn kreuzt die von') + ' „' + o.name + '" — ' + T('Lage im gemeinsamen Block anpassen.'));
+      });
+      r.shared = { n: L.length, all: gcAll(), idx: a };
+    }
+    return (lastRes = r);
+  }
+  // Segment als Bezug (cfg.waSeg): Blockbreite/-höhe/-dicke kommen aus dem Segment in seiner Lage.
+  let segV = null;
+  const segOf = () => (window.AusSeg && C('waSeg')) ? AusSeg.view(C('waSeg')) : null;
+  // Lage in X ab Beginn des ersten Segments (waXRef 'seg'): Block-X des Anfangs + Richtung in das Segment.
+  function segX0() {
+    if (C('waXRef') !== 'seg' || !segV || !segV.parts || !segV.parts.length) return null;
+    const p = segV.parts.find(q => q.z0 === 0) || segV.parts[0];
+    if (segV.orient === 'long') return { x: Math.min.apply(null, p.A.map(a => segV.map(a[0], a[1], p.z0)[0])), dir: 1 };
+    return { x: segV.map(p.A[0][0], p.A[0][1], p.z0)[0], dir: segV.flip ? -1 : 1 };
+  }
+  const khBottom = () => C('khYRef') === 'bottom';
+  function build1() {
+    segV = segOf();
+    const f0 = forceWH; if (!forceWH && segV) forceWH = [segV.W, segV.H];
+    try { const r = buildCore(); if (r && !r.empty && segV) r.seg = segV; return r; }
+    finally { forceWH = f0; }
+  }
+  function buildCore() {
     if (isCanopy()) { lastRes = buildCanopy(); return lastRes; }
     const warns = [], notes = [];
     const src = profileSrc();
@@ -496,11 +578,14 @@
     const sN = sArr.map(s => s / sTot);
     // Maßstab, Einstellwinkel (Drehpunkt Endleiste (c,0), + = Nase hoch), Nasenrichtung.
     const c = src.chord, al = num('waAngle', 0) * Math.PI / 180, ca = Math.cos(al), sa = Math.sin(al);
-    const noseRight = C('waNose') === 'right';
+    // Rechteckausschnitt: Bezug = linke Kante (keine Nasenrichtung, kein Spiegeln), Drehpunkt Mitte,
+    // Höhe der Lage = Unterkante (intern Mitte der linken Kante = „Nase").
+    const rk = isRectKind(), pv = rk ? c / 2 : c, rh = rk ? src.rect.h : 0;
+    const noseRight = !rk && C('waNose') === 'right';
     // Profil-Grundlage: Nase bei x=0, Endleiste bei +x (fliegt nach −x). Bei „Nase rechts" spiegeln.
     // „Gespiegelt": an der Sehne (vor der Drehung), die Oberseite liegt dann unten.
-    const flip = C('waFlip') === 'yes';
-    const loc = U.map(([u, v]) => { const x = u * c - c, y = (flip ? -v : v) * c; const xr = c + x * ca + y * sa, yr = -x * sa + y * ca; return [noseRight ? -xr : xr, yr]; });
+    const flip = !rk && C('waFlip') === 'yes';
+    const loc = U.map(([u, v]) => { const x = u * c - pv, y = (flip ? -v : v) * c; const xr = pv + x * ca + y * sa, yr = -x * sa + y * ca; return [noseRight ? -xr : xr, yr]; });
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     loc.forEach(p => { bx0 = Math.min(bx0, p[0]); bx1 = Math.max(bx1, p[0]); by0 = Math.min(by0, p[1]); by1 = Math.max(by1, p[1]); });
     const pw = bx1 - bx0, ph = by1 - by0;
@@ -510,22 +595,25 @@
     // = Abstand Nase/Nasenhöhe + Profil bis zur fernen Kante + Rand (Nase bei lokal 0,0).
     const manualPos = C('waPosMode') === 'manual';
     const farX = noseRight ? -bx0 : bx1;   // Nase → hinterster Profilpunkt
-    const W = num('waBlockW', 0) > 0 ? num('waBlockW', 0) : manualPos ? Math.max(0, num('waPosX', 40)) + farX + mg : pw + 2 * mg;
-    const H = num('waBlockH', 0) > 0 ? num('waBlockH', 0) : manualPos ? Math.max(0, num('waPosY', 50)) + by1 + mg : ph + 2 * mg;
-    const D = Math.max(1, num('waDepth', 100));
+    const W = forceWH ? forceWH[0] : num('waBlockW', 0) > 0 ? num('waBlockW', 0) : manualPos ? Math.max(0, num('waPosX', 40)) + farX + mg : pw + 2 * mg;
+    const posY = num('waPosY', 50) + rh / 2;
+    const yLow = !rk && C('waYRef') === 'low';   // Höhe = tiefster Profilpunkt über Unterkante
+    const H = forceWH ? forceWH[1] : num('waBlockH', 0) > 0 ? num('waBlockH', 0) : manualPos ? Math.max(0, posY) + (yLow ? ph : by1) + mg : ph + 2 * mg;
+    const D = segV ? segV.D : Math.max(1, num('waDepth', 100));
     const blk = { x0: blockX(), y0: blockY(), w: W, h: H, d: D }; blk.x1 = blk.x0 + W; blk.y1 = blk.y0 + H;
     // Lage: mittig oder Nase frei (Abstand zur Blockvorderseite = Nasenseite, Höhe über Unterkante).
     let dx, dy;
     if (C('waPosMode') === 'manual') {
-      const px = num('waPosX', 40), py = num('waPosY', 50);
-      dx = noseRight ? blk.x1 - px : blk.x0 + px; dy = blk.y0 + py;
+      const px = num('waPosX', 40), py = posY;
+      const sx = segX0();
+      dx = sx ? blk.x0 + sx.x + sx.dir * px : noseRight ? blk.x1 - px : blk.x0 + px; dy = blk.y0 + py - (yLow ? by0 : 0);
     } else { dx = (blk.x0 + blk.x1) / 2 - (bx0 + bx1) / 2; dy = (blk.y0 + blk.y1) / 2 - (by0 + by1) / 2; }
     const contour = loc.map(p => [p[0] + dx, p[1] + dy]);
     const nose = [dx, dy];   // Bezugspunkt der Lage = Nase des UNGEDREHTEN Profils
     let iLE = 0; U.forEach((q, i) => { if (q[0] < U[iLE][0]) iLE = i; });
     if (src.iLE != null) iLE = src.iLE;
     const noseAct = contour[iLE];                                   // Nase nach der Drehung
-    const teAct = [dx + (noseRight ? -c : c), dy];                  // Endleiste (Drehpunkt, bleibt stehen)
+    const teAct = [dx + (noseRight ? -pv : pv), dy];                // Drehpunkt (Endleiste bzw. Rechteckmitte), bleibt stehen
     // Schnittbahn: Versatz der Kontur.
     const k = kerf(), keep = C('waKeep') === 'profile' ? 'profile' : 'block';
     const clear = keep === 'block' ? Math.max(0, num('waClear', 0)) : 0;
@@ -534,8 +622,8 @@
     if (path.length < 3) { lastRes = { empty: true, msg: T('Profil zu klein für den Abbrand.') }; return lastRes; }
     // Passt das Profil in den Block?
     { let e = Infinity; path.concat(contour).forEach(p => { e = Math.min(e, p[0] - blk.x0, blk.x1 - p[0], p[1] - blk.y0, blk.y1 - p[1]); });
-      if (e < 0) warns.push(T('Das Profil ragt aus dem Block — Blockmaße oder Lage anpassen.'));
-      else if (e < 2) warns.push(T('Das Profil liegt weniger als 2 mm an der Blockkante.')); }
+      if (e < 0) warns.push(T(rk ? 'Das Rechteck ragt aus dem Block — Blockmaße oder Lage anpassen.' : 'Das Profil ragt aus dem Block — Blockmaße oder Lage anpassen.'));
+      else if (e < 2) warns.push(T(rk ? 'Das Rechteck liegt weniger als 2 mm an der Blockkante.' : 'Das Profil liegt weniger als 2 mm an der Blockkante.')); }
     // Anfahrfläche (Seite im Bild): vorne = Nasenseite, hinten = Endleistenseite.
     const ap = ['top', 'bottom', 'front', 'rear'].indexOf(C('waApproach')) >= 0 ? C('waApproach') : 'top';
     const side = ap === 'top' ? 'top' : ap === 'bottom' ? 'bottom' : ((ap === 'front') === noseRight ? 'right' : 'left');
@@ -574,7 +662,7 @@
     { let cross = 0; const n = path.length;
       for (let q = 0; q < n; q++) { const a = path[q], b = path[(q + 1) % n]; if (q === i0 || (q + 1) % n === i0) continue; if (segX(E, Sp, a, b)) cross++; }
       if (cross) {
-        if (keep === 'profile') warns.push(T('Der Anfahrweg schneidet durch das Profilstück — anderen Startpunkt oder andere Anfahrrichtung wählen.'));
+        if (keep === 'profile') warns.push(T(rk ? 'Der Anfahrweg schneidet durch das Rechteckstück — anderen Startpunkt oder andere Anfahrrichtung wählen.' : 'Der Anfahrweg schneidet durch das Profilstück — anderen Startpunkt oder andere Anfahrrichtung wählen.'));
         else notes.push(T('Der Anfahrweg läuft durch den Ausschnitt (Abfall) — unkritisch.'));
       } }
     // Luftwege vom Nullpunkt zum Anfahrpunkt (um den Block herum).
@@ -594,7 +682,7 @@
     for (let q = 1; q < loop.length; q++) loopLen += Math.hypot(loop[q][0] - loop[q - 1][0], loop[q][1] - loop[q - 1][1]);
     cutLen = loopLen + 2 * Math.hypot(Sp[0] - E[0], Sp[1] - E[1]);
     lastRes = {
-      empty: false, name: src.name, chord: c, angle: num('waAngle', 0), noseRight, contour, sN, path, loop, i0, Sp, E, Ap, side, ap,
+      empty: false, kind: rk ? 'rect' : undefined, rect: rk ? src.rect : null, name: src.name, chord: c, angle: num('waAngle', 0), noseRight, contour, sN, path, loop, i0, Sp, E, Ap, side, ap,
       startPicked: !!startC, dirCW: wantCW, nose, noseAct, teAct, block: blk, keep, clear, k, off, feed: feed(), cutLen, loopLen, pts, warns, notes,
       pw, ph, origin: { x: 0, y: 0 }
     };
@@ -614,25 +702,36 @@
       const e = 1e-6;
       return clip(-dx, a[0] - blk.x0 - e) && clip(dx, blk.x1 - e - a[0]) && clip(-dy, a[1] - blk.y0 - e) && clip(dy, blk.y1 - e - a[1]) && t1 - t0 > 1e-9;
     };
-    const moves = []; let tmin = 0;
-    r.pts.forEach((p, i) => {
-      if (i === 0) { moves.push({ X: p[0], Y: p[1], k: 'start', F: outF }); return; }
-      const q = r.pts[i - 1], L = Math.hypot(p[0] - q[0], p[1] - q[1]);
-      if (L < 1e-6) return;
-      const cutting = p[2] !== 'air' && inBlock(q, p);
-      const F = cutting ? (maxF > 0 ? Math.min(f, maxF) : f) : outF;
-      moves.push({ X: p[0], Y: p[1], k: p[2], F, cut: cutting });
-      tmin += L / Math.max(1, F);
+    // Gemeinsamer Block + „alle nacheinander": Fahrten aller Ausschnitte in Listenfolge aneinander
+    // (jeder beginnt und endet am Nullpunkt, die Luftwege führen um den Block).
+    const parts = gcAll() && lastAll ? lastAll.filter(o => o.r && !o.r.empty) : [{ i: activeIdx(), name: '', r }];
+    const multi = parts.length > 1;
+    const moves = []; let tmin = 0, cutLen = 0;
+    parts.forEach((pt, pi) => {
+      const P = pt.r.pts, kind = pt.r.kind || 'wing'; let title = multi ? (pi + 1) + '/' + parts.length + ' · ' + pt.name : null;
+      cutLen += pt.r.cutLen;
+      P.forEach((p, i) => {
+        if (i === 0) { if (pi === 0) moves.push({ X: p[0], Y: p[1], k: 'start', F: outF }); return; }
+        const q = P[i - 1], L = Math.hypot(p[0] - q[0], p[1] - q[1]);
+        if (L < 1e-6) return;
+        const cutting = p[2] !== 'air' && inBlock(q, p);
+        const F = cutting ? (maxF > 0 ? Math.min(f, maxF) : f) : outF;
+        const m = { X: p[0], Y: p[1], k: p[2], F, cut: cutting, kind };
+        if (title) { m.title = title; title = null; }
+        moves.push(m);
+        tmin += L / Math.max(1, F);
+      });
     });
     const heat = App.heatForSpeed ? App.heatForSpeed(matId(), f) : null;
     return {
       moves, res: r,
       meta: {
-        kind: r.kind || 'wing', kh: r.kh || null, fwd: r.fwd,
+        kind: r.kind || 'wing', kh: r.kh || null, rect: r.rect || null, fwd: r.fwd,
         name: r.name, chord: r.chord, angle: r.angle, keep: r.keep, clear: r.clear, kerf: r.k, feed: f, outFeed: outF,
         heat, wireS: heat != null && App.wireSFor ? App.wireSFor(heat) : null,
         block: { w: r.block.w, h: r.block.h, d: r.block.d, x: r.block.x0, y: r.block.y0 },
-        approach: r.ap, dirCW: r.dirCW, startPicked: r.startPicked, cutLen: r.cutLen, minutes: tmin
+        approach: r.ap, dirCW: r.dirCW, startPicked: r.startPicked, cutLen: multi ? cutLen : r.cutLen, minutes: tmin,
+        parts: multi ? parts.map(o => ({ name: o.name, kind: o.r.kind || 'wing', label: o.r.kind === 'canopy' ? T('Kabinenhaubenausschnitt') : o.r.name, cutLen: o.r.cutLen })) : null
       }
     };
   }
@@ -705,7 +804,8 @@
     ctx.moveTo(bx, by); ctx.lineTo(bx - ux * s - uy * s * 0.55, by - uy * s + ux * s * 0.55); ctx.lineTo(bx - ux * s + uy * s * 0.55, by - uy * s - ux * s * 0.55);
     ctx.closePath(); ctx.fill();
   }
-  function draw() {
+  function draw() { draw2d(); if (window.AusSeg && AusSeg.on() && state.activeTab === TAB) AusSeg.draw3d(); }
+  function draw2d() {
     if (!canvas || !ctx) return;
     const r = canvas.getBoundingClientRect(), w = r.width, hgt = r.height, res = lastRes;
     if (!view) fitView();
@@ -728,7 +828,9 @@
       ctx.fillStyle = 'rgba(200,170,110,0.07)'; ctx.fillRect(ax, ay, bx - ax, by - ay);
       ctx.strokeStyle = '#a08a5a'; ctx.lineWidth = 1.5; ctx.strokeRect(ax, ay, bx - ax, by - ay);
       ctx.fillStyle = '#a08a5a'; ctx.font = '11px Segoe UI, sans-serif';
-      ctx.fillText(T('Block') + ' ' + blk.w.toFixed(0) + ' × ' + blk.h.toFixed(0) + ' × ' + blk.d.toFixed(0) + ' mm', ax + 4, ay - 5); }
+      ctx.fillText(T('Block') + ' ' + blk.w.toFixed(0) + ' × ' + blk.h.toFixed(0) + ' × ' + blk.d.toFixed(0) + ' mm' + (res.seg ? ' · ' + res.seg.name : ''), ax + 4, ay - 5); }
+    drawSegRef(res, V);
+    drawOthers(res);
     if (res.kind === 'canopy') { drawCanopy(res, V, w, hgt, step); return; }
     // Anfahrfläche hervorheben
     if (V.block !== false) { const s = res.side, a = s === 'top' ? [blk.x0, blk.y1, blk.x1, blk.y1] : s === 'bottom' ? [blk.x0, blk.y0, blk.x1, blk.y0] : s === 'right' ? [blk.x1, blk.y0, blk.x1, blk.y1] : [blk.x0, blk.y0, blk.x0, blk.y1];
@@ -742,9 +844,9 @@
     if (Math.abs(res.angle) > 1e-6) {   // Drehpunkt Endleiste
       const [tx, ty] = W2S(res.teAct[0], res.teAct[1]); ctx.strokeStyle = '#4aa3ff'; ctx.lineWidth = 1.2;
       ctx.beginPath(); ctx.arc(tx, ty, 5, 0, Math.PI * 2); ctx.moveTo(tx - 8, ty); ctx.lineTo(tx + 8, ty); ctx.moveTo(tx, ty - 8); ctx.lineTo(tx, ty + 8); ctx.stroke();
-      ctx.fillStyle = '#4aa3ff'; ctx.font = '10px Segoe UI, sans-serif'; const tl = T('Drehpunkt Endleiste') + ' ' + res.angle.toFixed(1) + '°'; ctx.fillText(tl, res.noseRight ? tx + 8 : tx - 8 - ctx.measureText(tl).width, ty + 18);
+      ctx.fillStyle = '#4aa3ff'; ctx.font = '10px Segoe UI, sans-serif'; const tl = T(res.kind === 'rect' ? 'Drehpunkt Mitte' : 'Drehpunkt Endleiste') + ' ' + res.angle.toFixed(1) + '°'; ctx.fillText(tl, res.noseRight ? tx + 8 : tx - 8 - ctx.measureText(tl).width, ty + 18);
     }
-    { const [nx, ny] = W2S(res.noseAct[0], res.noseAct[1]); ctx.fillStyle = '#4aa3ff'; ctx.font = '10px Segoe UI, sans-serif'; ctx.fillText(T('Nase'), nx + (res.noseRight ? 6 : -30), ny - 6); }
+    if (res.kind !== 'rect') { const [nx, ny] = W2S(res.noseAct[0], res.noseAct[1]); ctx.fillStyle = '#4aa3ff'; ctx.font = '10px Segoe UI, sans-serif'; ctx.fillText(T('Nase'), nx + (res.noseRight ? 6 : -30), ny - 6); }
     if (V.cut) {
       // Abbrand in wahrer Dicke
       if (App.kerfBand && App.kerfTrueOn && App.kerfTrueOn('ausschnitt') && res.k > 0) {
@@ -799,6 +901,35 @@
       ctx.fillStyle = '#3ddc84'; ctx.fillText(msg, x0 + 10, hgt - barH - 32);
     }
     updateInfo(res);
+  }
+  // Segment als Bezug: Umriss (quer) bzw. beide Querschnitte (längs, Ende gestrichelt) in Grün.
+  function drawSegRef(res, V) {
+    const sv = res.seg; if (!sv) return;
+    const b = res.block, P = q => [b.x0 + q[0], b.y0 + q[1]];
+    sv.ref.forEach(L => {
+      ctx.beginPath(); polyPath(L.pts.map(P), true);
+      if (V.fill && L.k !== 'B') { ctx.fillStyle = 'rgba(61,220,132,0.07)'; ctx.fill(); }
+      ctx.strokeStyle = 'rgba(61,220,132,0.85)'; ctx.lineWidth = 1.3; ctx.setLineDash(L.k === 'B' ? [5, 4] : []); ctx.stroke(); ctx.setLineDash([]);
+    });
+  }
+  // Übrige Ausschnitte grau (Kontur) bzw. blass (Schnittbahn) mit Nummer und Name. Gemeinsamer Block:
+  // wie berechnet; sonst (seg3d) an der Blockecke unten links des aktiven Blocks ausgerichtet.
+  function drawOthers(res) {
+    const L = lastAll && res.shared ? lastAll : seg3d; if (!L) return;
+    const a = res.shared ? res.shared.idx : activeIdx();
+    L.forEach(o => {
+      let r = o.r; if (o.i === a || !r || r.empty) return;
+      if (!lastAll && r.block && res.block) {
+        const dx = res.block.x0 - r.block.x0, dy = res.block.y0 - r.block.y0, mv = P => P.map(p => [p[0] + dx, p[1] + dy]);
+        r = { kind: r.kind, contour: mv(r.contour), loop: mv(r.loop) };
+      }
+      const closed = r.kind !== 'canopy';
+      ctx.beginPath(); polyPath(r.contour, closed); ctx.strokeStyle = 'rgba(159,176,196,0.75)'; ctx.setLineDash([4, 3]); ctx.lineWidth = 1.2; ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); polyPath(r.loop, false); ctx.strokeStyle = 'rgba(255,90,60,0.3)'; ctx.lineWidth = 1.2; ctx.stroke();
+      let tl = r.contour[0]; r.contour.forEach(p => { if (p[1] > tl[1]) tl = p; });
+      const [x, y] = W2S(tl[0], tl[1]); ctx.fillStyle = 'rgba(159,176,196,0.9)'; ctx.font = '11px Segoe UI, sans-serif';
+      ctx.fillText((o.i + 1) + ' · ' + o.name, x + 4, y - 6);
+    });
   }
   // Pfeile in gleichen Abständen entlang der Schnittbahn (Richtung).
   function loopArrows(res) {
@@ -893,15 +1024,19 @@
     if (g.loc.free) {
       // freier Linienzug: lokal = Blockvorderseite oben, y nach oben
       const pts = C('khPts'), i = +g.id.slice(1), s = pts && pts[i]; if (!s) return;
-      const lx = fx, ly = wy - g.blk.y1; khSel = i;
-      if (g.id[0] === 'n') { s.x = r1(Math.max(0, lx)); if (i > 0 && i < pts.length - 1) s.y = r1(Math.max(0.5, -ly)); return; }
+      const lx = fx - (g.kx || 0), ly = wy - g.blk.y1; khSel = i;
+      if (g.id[0] === 'n') { s.x = r1(Math.max(0, lx)); if (i > 0 && i < pts.length - 1) s.y = r1(khBottom() ? Math.max(0.5, wy - g.blk.y0) : Math.max(0.5, -ly)); return; }
       const a = g.loc.Pn[i], b = g.loc.Pn[i + 1]; if (!a || !b) return;
       const d = sub(b, a), L = Math.hypot(d[0], d[1]) || 1, perp = ((lx - a[0]) * d[1] - (ly - a[1]) * d[0]) / L;
       if (s.t === 'foil') { const hm = g.loc.S[i] && g.loc.S[i].hm; if (Math.abs(hm) > 1e-6) s.fScale = Math.round(perp / hm * 100); }
       else { s.pos = r1(cl(((lx - a[0]) * d[0] + (ly - a[1]) * d[1]) / (L * L), 0.1, 0.9) * 100); s.curv = r1(perp); }
       return;
     }
-    if (g.id === 'c2') { S('khX', r1(Math.max(1, fx))); S('khDepth', r1(Math.max(1, g.blk.y1 - wy))); return; }
+    if (g.id === 'c2') {
+      const sx = segX0(); S('khX', r1(sx ? (wx - g.blk.x0 - sx.x) * sx.dir : Math.max(1, fx)));
+      if (khBottom()) S('khHB', r1(Math.max(1, wy - g.blk.y0))); else S('khDepth', r1(Math.max(1, g.blk.y1 - wy)));
+      return;
+    }
     const lx = fx - g.kx, ly = wy - (g.blk.y1 - g.dep), L = g.loc;
     if (g.id === 'c3') { S('khLen', r1(Math.max(5, Math.hypot(lx, ly)))); S('khSlope', r1(cl(Math.atan2(ly, Math.max(1e-6, lx)) * deg, -60, 60))); return; }
     if (g.id === 't1') { S('khAngF', r1(cl(Math.atan2(ly, -lx) * deg, 10, 170))); return; }
@@ -928,7 +1063,9 @@
   }
   function extLine(x1, y1, x2, y2) { ctx.strokeStyle = 'rgba(159,176,196,0.45)'; ctx.lineWidth = 1; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); ctx.setLineDash([]); }
   function drawDims(res) {
-    const blk = res.block, nx = res.noseAct[0], ny = res.noseAct[1], f = v => (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '') + ' mm';
+    // Rechteck: Bezug = linke untere Ecke des (gedrehten) Rechtecks statt der Nase.
+    const rk = res.kind === 'rect', bx = rk ? Math.min(...res.contour.map(p => p[0])) : 0, by = rk ? Math.min(...res.contour.map(p => p[1])) : 0;
+    const blk = res.block, nx = rk ? bx : res.noseAct[0], ny = rk ? by : res.noseAct[1], f = v => (Math.round(v * 10) / 10).toFixed(1).replace(/\.0$/, '') + ' mm';
     const [, yb] = W2S(0, blk.y0), [, y0] = W2S(0, 0), base = Math.max(yb, y0);
     const [sx0] = W2S(0, 0), [sbx0] = W2S(blk.x0, 0), [sbx1] = W2S(blk.x1, 0), [snx, sny] = W2S(nx, ny);
     const front = res.noseRight ? sbx1 : sbx0;             // Blockvorderseite = Nasenseite
@@ -939,7 +1076,7 @@
     if (blk.x0 > 0.05) { extLine(sx0, y0, sx0, r2 + 4); extLine(sbx0, yb, sbx0, r1 + 4); dimLine(sx0, r1, sbx0, r1, f(blk.x0)); }
     dimLine(Math.min(front, snx), r1, Math.max(front, snx), r1, f(Math.abs(nx - (res.noseRight ? blk.x1 : blk.x0))));
     // Zeile 2: Nullpunkt → Nase (gesamt)
-    dimLine(Math.min(sx0, snx), r2, Math.max(sx0, snx), r2, 'X0 → ' + T('Nase') + ' ' + f(nx));
+    dimLine(Math.min(sx0, snx), r2, Math.max(sx0, snx), r2, 'X0 → ' + T(rk ? 'Kante' : 'Nase') + ' ' + f(nx));
     // Höhen: Nullpunkt → Blockunterkante (links am Block), Blockunterkante → Nase (an der Nase)
     const side = res.noseRight ? 1 : -1, vx = snx + side * 24;
     extLine(snx + side * 4, sny, vx + side * 4, sny);
@@ -948,7 +1085,15 @@
   }
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const AP_NAMES = { top: 'von oben', bottom: 'von unten', front: 'von vorne (Nasenseite)', rear: 'von hinten (Endleistenseite)' };
+  const AP_RECT = { top: 'von oben', bottom: 'von unten', front: 'von links', rear: 'von rechts' };
   const KH_KEEP = { canopy: 'Haube maßhaltig', fus: 'Rumpf maßhaltig', mid: 'Draht auf der Linie' };
+  function sharedLine(res) {
+    if (!res.shared) return '';
+    let t = '<br>' + T('Gemeinsamer Block') + ' · ' + T('Ausschnitt') + ' ' + (res.shared.idx + 1) + '/' + res.shared.n;
+    if (res.shared.all && lastAll) { const L = lastAll.reduce((s, o) => s + (o.r && !o.r.empty ? o.r.cutLen : 0), 0);
+      t += ' · ' + T('G-Code: alle nacheinander') + ', ' + T('Schnittlänge gesamt') + ' ' + (L / 1000).toFixed(2) + ' m'; }
+    return t;
+  }
   function updateInfo(res) {
     const el = document.getElementById('ausInfo'); if (!el) return;
     if (!res || res.empty) { el.innerHTML = esc(res && res.msg ? res.msg : T('Kein Profil.')); return; }
@@ -961,17 +1106,22 @@
         + T(res.fwd ? 'Schnitt von vorne nach hinten' : 'Schnitt von hinten nach vorne') + ' · ' + T(KH_KEEP[res.keep]) + '<br>'
         + T('Abbrand') + ' ' + res.k.toFixed(2) + ' mm · ' + T('Vorschub') + ' ' + Math.round(res.feed) + ' mm/min · '
         + T('Schnittlänge') + ' ' + (res.cutLen / 1000).toFixed(2) + ' m (~' + (res.cutLen / Math.max(1, res.feed)).toFixed(1) + ' min)';
+      hc += sharedLine(res);
       if (res.warns.length) hc += '<div style="color:#ffb454;margin-top:4px">' + res.warns.map(w => '⚠ ' + esc(w)).join('<br>') + '</div>';
       if (res.notes.length) hc += '<div style="color:#8b98a8;margin-top:4px">' + res.notes.map(w => 'ℹ ' + esc(w)).join('<br>') + '</div>';
       el.innerHTML = hc; return;
     }
-    let hh = '<b>' + T('Profil') + ':</b> ' + esc(res.name) + '<br>'
-      + T('Profiltiefe') + ' ' + mm(res.chord) + ' mm · ' + T('Einstellwinkel') + ' ' + res.angle.toFixed(1) + '° · '
-      + T(res.keep === 'block' ? 'Ausschnitt (Block bleibt)' : 'Profilstück bleibt') + (res.clear > 0 ? ' · ' + T('Spiel') + ' ' + res.clear.toFixed(2) + ' mm' : '') + '<br>'
-      + T('Anfahrt') + ' ' + T(AP_NAMES[res.ap]) + ' · ' + T(res.dirCW ? 'im Uhrzeigersinn' : 'gegen den Uhrzeigersinn') + ' · '
+    const rk = res.kind === 'rect', apn = rk ? AP_RECT : AP_NAMES;
+    let hh = (rk ? '<b>' + T('Rechteckausschnitt') + ':</b> ' + mm(res.rect.w) + ' × ' + mm(res.rect.h) + ' mm' + (res.rect.r > 0 ? ' · ' + T('Eckenradius') + ' ' + mm(res.rect.r) + ' mm' : '') + '<br>'
+        + T('Drehwinkel') + ' ' + res.angle.toFixed(1) + '° · '
+      : '<b>' + T('Profil') + ':</b> ' + esc(res.name) + '<br>'
+        + T('Profiltiefe') + ' ' + mm(res.chord) + ' mm · ' + T('Einstellwinkel') + ' ' + res.angle.toFixed(1) + '° · ')
+      + T(res.keep === 'block' ? 'Ausschnitt (Block bleibt)' : rk ? 'Rechteckstück bleibt' : 'Profilstück bleibt') + (res.clear > 0 ? ' · ' + T('Spiel') + ' ' + res.clear.toFixed(2) + ' mm' : '') + '<br>'
+      + T('Anfahrt') + ' ' + T(apn[res.ap]) + ' · ' + T(res.dirCW ? 'im Uhrzeigersinn' : 'gegen den Uhrzeigersinn') + ' · '
       + T(res.startPicked ? 'Startpunkt gewählt' : 'Startpunkt automatisch') + '<br>'
       + T('Abbrand') + ' ' + res.k.toFixed(2) + ' mm · ' + T('Vorschub') + ' ' + Math.round(res.feed) + ' mm/min · '
       + T('Schnittlänge') + ' ' + (res.cutLen / 1000).toFixed(2) + ' m (~' + (res.cutLen / Math.max(1, res.feed)).toFixed(1) + ' min)';
+    hh += sharedLine(res);
     if (res.warns.length) hh += '<div style="color:#ffb454;margin-top:4px">' + res.warns.map(w => '⚠ ' + esc(w)).join('<br>') + '</div>';
     if (res.notes.length) hh += '<div style="color:#8b98a8;margin-top:4px">' + res.notes.map(w => 'ℹ ' + esc(w)).join('<br>') + '</div>';
     el.innerHTML = hh;
@@ -1080,7 +1230,12 @@
       if (state.cfg.gcodeSource === TAB) { if (genTimer) clearTimeout(genTimer); genTimer = setTimeout(() => { genTimer = null; App.render(); }, 120); }
     }, delay || 60);
   }
-  function show() { bindCanvas(); syncBar(); if (!fitCanvas()) return; const had = lastRes && !lastRes.empty; build(); if (!had || !view) fitView(); draw(); }
+  // Segmentliste (DXF-Formen / 3D-Modell) aktuell halten: die Seitenleiste wird beim Reiterwechsel
+  // nur gefiltert, deshalb neu aufbauen, wenn sich die Zahl der Segmente geändert hat.
+  let srcSig = '';
+  function show() {
+    bindCanvas(); syncBar();
+    if (window.AusSeg) { AusSeg.bindButton(); const sg = JSON.stringify(AusSeg.sources()); if (sg !== srcSig) { srcSig = sg; buildSidebar(); } } if (!fitCanvas()) return; const had = lastRes && !lastRes.empty; build(); if (!had || !view) fitView(); draw(); }
   function resize() { if (state.activeTab !== TAB) return; if (fitCanvas()) draw(); }
   function refresh() { if (state.activeTab !== TAB) return; build(); draw(); }
 
@@ -1114,14 +1269,24 @@
     const nr = (body, label, k, opt) => numRow(body, label, () => num(k, DEF[k]), v => { S(k, v); upd(opt && opt.side); }, Object.assign({ norender: true }, opt || {}));
     const sel = (body, label, k, opts, h, sideRebuild) => selectRow(body, label, opts, () => C(k), v => { S(k, v); upd(sideRebuild); }, h);
     const res = lastRes && !lastRes.empty ? lastRes : null;
-    const kindRow = body => selectRow(body, 'Art des Ausschnitts', [['wing', 'Tragflächenausschnitt (Profil)'], ['canopy', 'Kabinenhaubenausschnitt']], () => (isCanopy() ? 'canopy' : 'wing'),
-      v => { S('waKind', v); pickMode = false; hover = null; lastRes = null; view = null; syncBar(); upd(true); },
-      'Tragflächenausschnitt: ein Profil als Loch oder Profilstück. Kabinenhaubenausschnitt: offener Schnitt aus vorderer, unterer („waagrechter") und hinterer Linie mit Übergangsradien.');
+    const kindRow = body => selectRow(body, 'Art des Ausschnitts', [['wing', 'Tragflächenausschnitt (Profil)'], ['rect', 'Rechteckausschnitt'], ['canopy', 'Kabinenhaubenausschnitt']], kindOf,
+      v => { S('waKind', v); S('waStart', null); pickMode = false; hover = null; lastRes = null; view = null; syncBar(); upd(true); },
+      'Tragflächenausschnitt: ein Profil als Loch oder Profilstück. Rechteckausschnitt: ein Rechteck (Breite, Höhe, Eckenradius, Drehwinkel) als Loch oder Rechteckstück. Kabinenhaubenausschnitt: offener Schnitt aus vorderer, unterer („waagrechter") und hinterer Linie mit Übergangsradien.');
+    listSidebar(side);
+    segSidebar(side);
     if (isCanopy()) { canopySidebar(side, nr, sel, res, kindRow); return; }
+    const rk = isRectKind(), pfx = rk ? 'Rechteckausschnitt' : 'Tragflächenausschnitt';
 
-    // --- Profil -------------------------------------------------------------
-    const g1 = grp('Tragflächenausschnitt: Profil', true, TAB, { key: 'wa_prof' });
+    // --- Profil bzw. Rechteck ---------------------------------------------------
+    const g1 = grp(rk ? 'Rechteckausschnitt: Maße' : 'Tragflächenausschnitt: Profil', true, TAB, { key: 'wa_prof' });
     kindRow(g1.body);
+    if (rk) {
+      const rs = (label, k, opt) => numRow(g1.body, label, () => num(k, DEF[k]), v => { S(k, v); S('waStart', null); upd(true); }, Object.assign({ norender: true }, opt));
+      rs('Breite (mm)', 'rcW', { step: 1, min: 1, hint: 'Waagrechte Seite des Rechtecks (Ansicht von vorne).' });
+      rs('Höhe (mm)', 'rcH', { step: 1, min: 0.1, hint: 'Senkrechte Seite des Rechtecks.' });
+      rs('Eckenradius (mm)', 'rcR', { step: 0.5, min: 0, hint: '0 = scharfe Ecken; höchstens die halbe kürzere Seite.' });
+      nr(g1.body, 'Drehwinkel (°)', 'waAngle', { step: 0.5, hint: 'Drehung um die Rechteckmitte: positiv = linke Seite hoch (im Uhrzeigersinn).' });
+    } else {
     sel(g1.body, 'Profil', 'waSrc', [['root', 'Wurzelprofil der Tragfläche'], ['own', 'eigenes Profil'], ['rect', 'Rechteck (z. B. Plattenleitwerk)']],
       'Wurzelprofil: Profil und Profiltiefe der Wurzelrippe aus dem Tragflächendesigner (ändert sich mit). Eigenes Profil: .dat-Datei oder Profildatenbank, Profiltiefe frei. Rechteck: Länge, Dicke und Eckenradius frei, z. B. für ein Plattenleitwerk.', true);
     const isRect = C('waSrc') === 'rect';
@@ -1164,13 +1329,14 @@
     sel(g1.body, 'Nase zeigt nach', 'waNose', [['left', 'links'], ['right', 'rechts']], 'Ansicht von vorne auf die Maschine. „Vorne" bei der Anfahrt ist immer die Nasenseite.');
     if (!isRect) sel(g1.body, 'Profil spiegeln', 'waFlip', [['no', 'nein'], ['yes', 'ja (Oberseite unten)']], 'Spiegelt das Profil an der Sehne: die Oberseite liegt unten. Nase und Endleiste bleiben an ihrem Platz, der Einstellwinkel zählt weiter positiv = Nase hoch.');
     if (!isRect) nr(g1.body, 'Punkte der Kontur', 'waPts', { step: 10, min: 40, max: 1000, int: true });
+    }
     side.appendChild(g1.g);
 
     // --- Block & Lage ---------------------------------------------------------
-    const g2 = grp('Tragflächenausschnitt: Block & Lage', false, TAB, { key: 'wa_block' });
-    sel(g2.body, 'Was bleibt stehen', 'waKeep', [['block', 'Block (Ausschnitt = Loch)'], ['profile', 'Profilstück']],
+    const g2 = grp(pfx + ': Block & Lage', false, TAB, { key: 'wa_block' });
+    sel(g2.body, 'Was bleibt stehen', 'waKeep', [['block', 'Block (Ausschnitt = Loch)'], ['profile', rk ? 'Rechteckstück' : 'Profilstück']],
       'Bestimmt die Seite des Abbrands: beim Ausschnitt läuft der Draht um den halben Abbrand innerhalb der Kontur (das Loch wird genau so groß wie das Profil plus Spiel), beim Profilstück außerhalb.', true);
-    if (C('waKeep') !== 'profile') nr(g2.body, 'Spiel (mm)', 'waClear', { step: 0.1, min: 0, hint: 'Ausschnitt ringsum um diesen Betrag größer als das Profil (Passung, Beplankung, Kleber).' });
+    if (C('waKeep') !== 'profile') nr(g2.body, 'Spiel (mm)', 'waClear', { step: 0.1, min: 0, hint: rk ? 'Ausschnitt ringsum um diesen Betrag größer als das Rechteck (Passung, Kleber).' : 'Ausschnitt ringsum um diesen Betrag größer als das Profil (Passung, Beplankung, Kleber).' });
     if (App.matOptions) {
       const mo = [['', '— kein Werkstoff —']].concat(App.matOptions());
       selectRow(g2.body, 'Werkstoff', mo, () => (C('waMatId') != null ? C('waMatId') : (state.material.id || '')), v => { S('waMatId', v); upd(true); },
@@ -1179,28 +1345,30 @@
     sel(g2.body, 'Abbrand', 'waKerfMode', [['mat', 'aus Werkstoff-Kalibrierung'], ['manual', 'manuell'], ['off', 'aus (0)']], null, true);
     if (C('waKerfMode') === 'manual') nr(g2.body, 'Abbrand (Schnittspalt, mm)', 'waKerf', { step: 0.05, min: 0 });
     else hint(g2.body, T('Abbrand aktuell: ') + kerf().toFixed(2) + ' mm');
-    nr(g2.body, 'Blockbreite fest (mm, 0 = auto)', 'waBlockW', { step: 5, min: 0 });
-    nr(g2.body, 'Blockhöhe fest (mm, 0 = auto)', 'waBlockH', { step: 5, min: 0 });
-    if (!(num('waBlockW', 0) > 0 && num('waBlockH', 0) > 0)) nr(g2.body, 'Rand um das Profil (mm, bei auto)', 'waMargin', { step: 1, min: 0 });
-    nr(g2.body, 'Blockdicke entlang des Drahts (mm)', 'waDepth', { step: 5, min: 1 });
-    sel(g2.body, 'Lage des Profils', 'waPosMode', [['center', 'mittig im Block'], ['manual', 'Abstand angeben']], null, true);
-    if (C('waPosMode') === 'manual') {
+    blockRows(g2.body, nr, rk ? 'Rand um das Rechteck (mm, bei auto)' : 'Rand um das Profil (mm, bei auto)');
+    sel(g2.body, rk ? 'Lage des Rechtecks' : 'Lage des Profils', 'waPosMode', [['center', 'mittig im Block'], ['manual', 'Abstand angeben']], null, true);
+    if (C('waPosMode') === 'manual' && rk) {
+      nr(g2.body, 'Linke Kante ↔ linke Blockseite (mm)', 'waPosX', { step: 1, hint: 'Beide Werte gelten für das ungedrehte Rechteck (Drehwinkel 0°); gedreht wird um die Mitte. Die Maße in der Ansicht zeigen die linke untere Ecke des gedrehten Rechtecks.' });
+      nr(g2.body, 'Unterkante über Blockunterkante (mm)', 'waPosY', { step: 1 });
+    } else if (C('waPosMode') === 'manual') {
       nr(g2.body, 'Nase ↔ Blockvorderseite (mm)', 'waPosX', { step: 1, hint: 'Vorderseite = Blockseite auf der Nasenseite. Beide Werte gelten für das ungedrehte Profil (Einstellwinkel 0°); beim Drehen bleibt die Endleiste stehen, die Nase wandert. Die Maße in der Ansicht zeigen die gedrehte Nase.' });
-      nr(g2.body, 'Nasenhöhe über Blockunterkante (mm)', 'waPosY', { step: 1 });
+      sel(g2.body, 'Höhe bezogen auf', 'waYRef', [['nose', 'Nase'], ['low', 'tiefster Profilpunkt (Unterseite)']], 'Welcher Punkt des Profils in der angegebenen Höhe über der Blockunterkante liegt.', true);
+      nr(g2.body, C('waYRef') === 'low' ? 'Profilunterseite über Blockunterkante (mm)' : 'Nasenhöhe über Blockunterkante (mm)', 'waPosY', { step: 1 });
     }
+    if (C('waPosMode') === 'manual') xRefRow(g2.body, sel);
     hint(g2.body, 'Blocklage (Abstand X/Y vom Nullpunkt, Lage zwischen den Portalen) und Vorschub stellt der Reiter „G-Code" ein.');
     side.appendChild(g2.g);
 
     // --- Anfahrt, Startpunkt & Richtung ------------------------------------------
-    const g3 = grp('Tragflächenausschnitt: Anfahrt, Startpunkt & Richtung', true, TAB, { key: 'wa_path' });
-    sel(g3.body, 'Anfahrt', 'waApproach', [['top', 'von oben'], ['bottom', 'von unten'], ['front', 'von vorne (Nasenseite)'], ['rear', 'von hinten (Endleistenseite)']],
+    const g3 = grp(pfx + ': Anfahrt, Startpunkt & Richtung', true, TAB, { key: 'wa_path' });
+    sel(g3.body, 'Anfahrt', 'waApproach', rk ? [['top', 'von oben'], ['bottom', 'von unten'], ['front', 'von links'], ['rear', 'von rechts']] : [['top', 'von oben'], ['bottom', 'von unten'], ['front', 'von vorne (Nasenseite)'], ['rear', 'von hinten (Endleistenseite)']],
       'Blockfläche, durch die der Draht einfährt: senkrecht zur Fläche bis auf Höhe bzw. Lage des Startpunkts, dann zum Startpunkt; nach dem Umlauf auf demselben Weg hinaus.');
     nr(g3.body, 'Anfahrt-Abstand zur Blockfläche (mm)', 'waApproachDist', { step: 1, min: 0, hint: 'Bis zu diesem Punkt vor der Blockfläche fährt der Draht in Luft.' });
     { const ws = C('waStart');
       hint(g3.body, ws != null
-        ? T('Startpunkt gewählt (bei ') + (ws * 100).toFixed(1) + T(' % der Konturlänge, ab Endleiste über die Oberseite).')
+        ? T('Startpunkt gewählt (bei ') + (ws * 100).toFixed(1) + T(rk ? ' % des Umfangs, ab Mitte der rechten Kante über die Oberkante).' : ' % der Konturlänge, ab Endleiste über die Oberseite).')
         : 'Startpunkt automatisch: der Anfahrfläche nächstgelegener Punkt der Kontur.');
-      hint(g3.body, 'Befehl „Startpunkt wählen": danach einen Punkt der Profilkontur anklicken (grüner Kreis zeigt ihn). Der Befehl endet mit dem Klick oder mit Esc.');
+      hint(g3.body, 'Befehl „Startpunkt wählen": danach einen Punkt der Kontur anklicken (grüner Kreis zeigt ihn). Der Befehl endet mit dem Klick oder mit Esc.');
       if (pickMode) App.warn ? App.warn(g3.body, T('Wahlmodus AKTIV: einen Punkt der Kontur anklicken — dort beginnt der Schnitt.')) : null;
       const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:4px 0';
       const p = document.createElement('button'); p.textContent = T(pickMode ? '■ Startpunkt wählen: AN' : '▶ Startpunkt wählen'); if (pickMode) p.className = 'primary';
@@ -1208,7 +1376,7 @@
       const a = document.createElement('button'); a.textContent = T('Startpunkt automatisch'); a.disabled = ws == null; a.onclick = () => { S('waStart', null); if (pickMode) setPickMode(false); upd(true); }; bar.appendChild(a);
       g3.body.appendChild(bar); }
     sel(g3.body, 'Schnittrichtung', 'waDir', [['cw', 'im Uhrzeigersinn ↻'], ['ccw', 'gegen den Uhrzeigersinn ↺']],
-      'Umlaufrichtung um das Profil, wie in der Ansicht (von vorne) gesehen. Die Pfeile auf der Schnittbahn zeigen sie an.');
+      'Umlaufrichtung um die Kontur, wie in der Ansicht (von vorne) gesehen. Die Pfeile auf der Schnittbahn zeigen sie an.');
     if (res && res.warns.length) res.warns.forEach(w => App.warn ? App.warn(g3.body, w) : hint(g3.body, w));
     if (document.getElementById('gcodeView')) {
       const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:6px 0';
@@ -1219,6 +1387,11 @@
     side.appendChild(g3.g);
   }
 
+  // Lage in X: Blockseite oder Beginn des ersten Bezugssegments (nur mit Segment).
+  function xRefRow(body, sel) {
+    if (!C('waSeg')) return;
+    sel(body, 'Lage in X bezogen auf', 'waXRef', [['block', 'Blockseite'], ['seg', 'Beginn des ersten Segments']], 'Mit Segment als Bezug: X-Abstand ab dem Anfang des vordersten Segments, gezählt in das Segment hinein (bei „Segment umdrehen“ nach links).', true);
+  }
   function canopySidebar(side, nr, sel, res, kindRow) {
     // --- Form ---------------------------------------------------------------
     const g1 = grp('Kabinenhaubenausschnitt: Form', true, TAB, { key: 'kh_form' });
@@ -1238,7 +1411,11 @@
       side.appendChild(g1.g);
     } else {
     nr(g1.body, 'Vordere Ecke ↔ Blockvorderseite (mm)', 'khX', { step: 1, min: 1, hint: 'Lage der vorderen unteren Ecke (Schnittpunkt von vorderer und unterer Linie, ohne Radius).' });
-    nr(g1.body, 'Tiefe unter Blockoberkante (mm)', 'khDepth', { step: 1, min: 1, hint: 'So tief liegt die vordere untere Ecke unter der Blockoberseite.' });
+    xRefRow(g1.body, sel);
+    sel(g1.body, 'Höhe bezogen auf', 'khYRef', [['top', 'Blockoberkante (Tiefe)'], ['bottom', 'Blockunterkante (Höhe)']], 'Bezug für die Höhe der Ecke bzw. der Punkte: Tiefe unter der Oberkante oder Höhe über der Unterkante (z. B. Rumpfboden).', true);
+    if (khBottom()) nr(g1.body, 'Höhe über Blockunterkante (mm)', 'khHB', { step: 1, min: 1, hint: 'So hoch liegt die vordere untere Ecke über der Blockunterseite. Bei automatischer Blockhöhe kommt die Tiefe darüber.' });
+    if (khBottom() && !(num('waBlockH', 0) > 0) && !C('waSeg')) nr(g1.body, 'Tiefe unter Blockoberkante (mm, für die Blockhöhe)', 'khDepth', { step: 1, min: 1 });
+    if (!khBottom()) nr(g1.body, 'Tiefe unter Blockoberkante (mm)', 'khDepth', { step: 1, min: 1, hint: 'So tief liegt die vordere untere Ecke unter der Blockoberseite.' });
     nr(g1.body, 'Untere Linie: Länge (mm)', 'khLen', { step: 1, min: 5 });
     nr(g1.body, 'Untere Linie: Neigung (°)', 'khSlope', { step: 0.5, min: -60, max: 60, hint: '0° = waagrecht, positiv = hinten höher.' });
     nr(g1.body, 'Vordere Linie: Winkel (°)', 'khAngF', { step: 1, min: 10, max: 170, hint: 'Winkel zur Waagrechten: 90° = senkrecht, kleiner = oben nach vorne geneigt, größer = oben nach hinten geneigt. Die Linie läuft bis zur Blockoberfläche.' });
@@ -1272,10 +1449,7 @@
     sel(g3.body, 'Abbrand', 'waKerfMode', [['mat', 'aus Werkstoff-Kalibrierung'], ['manual', 'manuell'], ['off', 'aus (0)']], null, true);
     if (C('waKerfMode') === 'manual') nr(g3.body, 'Abbrand (Schnittspalt, mm)', 'waKerf', { step: 0.05, min: 0 });
     else hint(g3.body, T('Abbrand aktuell: ') + kerf().toFixed(2) + ' mm');
-    nr(g3.body, 'Blockbreite fest (mm, 0 = auto)', 'waBlockW', { step: 5, min: 0 });
-    nr(g3.body, 'Blockhöhe fest (mm, 0 = auto)', 'waBlockH', { step: 5, min: 0 });
-    if (!(num('waBlockW', 0) > 0 && num('waBlockH', 0) > 0)) nr(g3.body, 'Rand hinter/unter der Haube (mm, bei auto)', 'waMargin', { step: 1, min: 0 });
-    nr(g3.body, 'Blockdicke entlang des Drahts (mm)', 'waDepth', { step: 5, min: 1 });
+    blockRows(g3.body, nr, 'Rand hinter/unter der Haube (mm, bei auto)');
     nr(g3.body, 'Überlauf vor/nach dem Block (mm)', 'waApproachDist', { step: 1, min: 0, hint: 'So weit vor der Blockfläche beginnt und endet der Schnitt in Verlängerung der Linien.' });
     sel(g3.body, 'Schnittrichtung', 'khDir', [['fwd', 'von vorne nach hinten'], ['rev', 'von hinten nach vorne']]);
     hint(g3.body, 'Blocklage (Abstand X/Y vom Nullpunkt, Lage zwischen den Portalen) und Vorschub stellt der Reiter „G-Code" ein.');
@@ -1304,7 +1478,7 @@
     };
     const tb = document.createElement('table'); tb.style.cssText = 'width:100%;border-collapse:collapse;font-size:10px;table-layout:fixed;margin:4px 0';
     const th = document.createElement('tr');
-    th.innerHTML = '<th style="width:16px">#</th><th>X</th><th title="' + T('Tiefe unter der Blockoberkante (mm)') + '">' + T('Tiefe') + '</th><th title="' + T('Übergangsradius an diesem Punkt (mm)') + '">R</th><th style="width:36%" title="' + T('Form der Linie von diesem Punkt bis zum nächsten') + '">' + T('Abschnitt') + '</th>';
+    th.innerHTML = '<th style="width:16px">#</th><th>X</th><th title="' + T(khBottom() ? 'Höhe über der Blockunterkante (mm)' : 'Tiefe unter der Blockoberkante (mm)') + '">' + T(khBottom() ? 'Höhe' : 'Tiefe') + '</th><th title="' + T('Übergangsradius an diesem Punkt (mm)') + '">R</th><th style="width:36%" title="' + T('Form der Linie von diesem Punkt bis zum nächsten') + '">' + T('Abschnitt') + '</th>';
     tb.appendChild(th);
     pts.forEach((s, i) => {
       const tr = document.createElement('tr'), end = i === 0 || i === n - 1; if (i === khSel) tr.style.background = 'rgba(255,210,122,.18)';
@@ -1374,22 +1548,162 @@
     } catch (e) { if (e && e.name !== 'AbortError') App.toast && App.toast(T('Profil nicht lesbar.')); }
   }
 
+  // ======================================================================
+  //  Mehrere Ausschnitte je Projekt (Datentausch wie bei mehreren Tragflächen):
+  //  cfg.waList = [{ id, name, cfg }], cfg.waActive = Index. Der aktive Ausschnitt
+  //  lebt in den wa*/kh*/rc*-Schlüsseln von state.cfg (sein cfg-Feld ist leer),
+  //  die ruhenden tragen ihre Werte in cfg. G-Code erzeugt der aktive.
+  // ======================================================================
+  const SWAP_SKIP = { waView: 1, waSeg: 1 };   // Ansichtsschalter und Bezugssegment gelten für alle
+  // Gemeinsamer Block: diese Werte gelten für alle Ausschnitte (bleiben beim Tausch stehen).
+  const SHARED_KEYS = ['waBlockW', 'waBlockH', 'waDepth', 'waMatId', 'waKerfMode', 'waKerf', 'waSeg'];
+  const swapKeys = () => Object.keys(DEF).filter(k => !SWAP_SKIP[k] && !(state.cfg.waShared === true && SHARED_KEYS.indexOf(k) >= 0));
+  // fn mit den Werten von Ausschnitt i ausführen; der aktive Stand wird per REFERENZ zurückgelegt
+  // (Seitenleiste und Griffe halten Verweise auf khPts-Objekte).
+  function withCut(i, fn) {
+    const L = cutList(); if (i === activeIdx() || !L[i]) return fn();
+    const keep = {}; swapKeys().forEach(k => { keep[k] = state.cfg[k]; });
+    loadSnap(L[i].cfg);
+    try { return fn(); }
+    finally { swapKeys().forEach(k => { if (keep[k] === undefined) delete state.cfg[k]; else state.cfg[k] = keep[k]; }); }
+  }
+  function moveCut(d) {
+    const L = cutList(), a = activeIdx(), b = a + d; if (b < 0 || b >= L.length) return;
+    const t = L[a]; L[a] = L[b]; L[b] = t; state.cfg.waActive = b; upd(true);
+  }
+  function setShared(on) {
+    const L = cutList();
+    // Ausschalten: die gemeinsamen Werte an alle Ausschnitte weitergeben (nichts springt).
+    if (!on && state.cfg.waShared === true) L.forEach((c, i) => { if (i !== activeIdx() && c.cfg) SHARED_KEYS.forEach(k => { if (state.cfg[k] !== undefined) c.cfg[k] = JSON.parse(JSON.stringify(state.cfg[k])); else delete c.cfg[k]; }); });
+    state.cfg.waShared = !!on; lastRes = null; view = null; upd(true);
+  }
+  function cutList() {
+    let L = state.cfg.waList;
+    if (!Array.isArray(L) || !L.length) { L = state.cfg.waList = [{ id: 'wa' + Date.now().toString(36), name: T('Ausschnitt') + ' 1' }]; state.cfg.waActive = 0; }
+    const a = +state.cfg.waActive; if (!(a >= 0 && a < L.length)) state.cfg.waActive = 0;
+    // Altstände: Bezugssegment lag je Ausschnitt → das erste gefundene gilt für alle.
+    if (!state.cfg.waSeg) { const c = L.find(x => x.cfg && x.cfg.waSeg); if (c) state.cfg.waSeg = c.cfg.waSeg; }
+    L.forEach(x => { if (x.cfg) delete x.cfg.waSeg; });
+    return L;
+  }
+  const activeIdx = () => (cutList(), +state.cfg.waActive);
+  function snapshot() { const o = {}; swapKeys().forEach(k => { if (state.cfg[k] !== undefined) o[k] = JSON.parse(JSON.stringify(state.cfg[k])); }); return o; }
+  function loadSnap(o) {
+    swapKeys().forEach(k => { delete state.cfg[k]; });
+    if (o && typeof o === 'object') swapKeys().forEach(k => { if (o[k] !== undefined) state.cfg[k] = JSON.parse(JSON.stringify(o[k])); });
+  }
+  function afterSwap() { pickMode = false; hover = null; lastRes = null; view = null; khSel = 0; syncBar(); upd(true); }
+  function selectCut(i) {
+    const L = cutList(), a = activeIdx(); if (i === a || !L[i]) return;
+    L[a].cfg = snapshot(); loadSnap(L[i].cfg); delete L[i].cfg; state.cfg.waActive = i; afterSwap();
+  }
+  function nextName() {
+    let n = 0; const re = new RegExp('^' + T('Ausschnitt').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' (\\d+)$');
+    cutList().forEach(c => { const m = re.exec(c.name || ''); if (m) n = Math.max(n, +m[1]); });
+    return T('Ausschnitt') + ' ' + Math.max(n + 1, cutList().length + 1);
+  }
+  // Neuer Ausschnitt: Vorgaben (gleiche Art wie der aktive) oder Kopie des aktiven.
+  function addCut(copy) {
+    const L = cutList(), a = activeIdx(), kind = kindOf();
+    L[a].cfg = snapshot();
+    if (!copy) { loadSnap(null); S('waKind', kind); }
+    else S('waStart', C('waStart'));
+    L.push({ id: 'wa' + Date.now().toString(36) + L.length, name: copy ? (L[a].name || T('Ausschnitt')) + ' ' + T('(Kopie)') : nextName() });
+    state.cfg.waActive = L.length - 1; afterSwap();
+  }
+  function delCut() {
+    const L = cutList(), a = activeIdx(); if (L.length <= 1) return;
+    if (window.confirm && !window.confirm(T('Ausschnitt löschen?') + '\n' + (L[a].name || ''))) return;
+    L.splice(a, 1); const i = Math.max(0, a - 1);
+    loadSnap(L[i].cfg); delete L[i].cfg; state.cfg.waActive = i; afterSwap();
+  }
+  const KIND_NAMES = { wing: 'Tragflächenausschnitt', rect: 'Rechteckausschnitt', canopy: 'Kabinenhaubenausschnitt' };
+  function cutKind(i) { const L = cutList(); if (i === activeIdx()) return kindOf(); const k = L[i].cfg && L[i].cfg.waKind; return KIND_NAMES[k] ? k : 'wing'; }
+  function segSidebar(side) {
+    if (!window.AusSeg) return;
+    const g = grp('Segment als Bezug (DXF-Formen / 3D-Modell)', !!C('waSeg'), TAB, { key: 'wa_seg' });
+    AusSeg.sidebar(g.body, {
+      selectRow, numRow, hint,
+      get: () => C('waSeg'),
+      set: v => { S('waSeg', v ? JSON.parse(JSON.stringify(v)) : null); S('waStart', null); lastRes = null; view = null; upd(true); },
+      changed: () => upd(true)
+    });
+    side.appendChild(g.g);
+  }
+  // Blockmaße: fest/auto — oder aus dem Segment (dann nur Hinweis).
+  function blockRows(body, nr, marginLabel) {
+    const sv = segOf();
+    if (sv) { hint(body, T('Block aus dem Segment: ') + sv.W.toFixed(1) + ' × ' + sv.H.toFixed(1) + ' mm, ' + T('Dicke ') + sv.D.toFixed(1) + ' mm'); return; }
+    nr(body, 'Blockbreite fest (mm, 0 = auto)', 'waBlockW', { step: 5, min: 0 });
+    nr(body, 'Blockhöhe fest (mm, 0 = auto)', 'waBlockH', { step: 5, min: 0 });
+    if (!(num('waBlockW', 0) > 0 && num('waBlockH', 0) > 0)) nr(body, marginLabel, 'waMargin', { step: 1, min: 0 });
+    nr(body, 'Blockdicke entlang des Drahts (mm)', 'waDepth', { step: 5, min: 1 });
+  }
+  function listSidebar(side) {
+    const L = cutList(), a = activeIdx();
+    const g = grp('Ausschnitte im Projekt', true, TAB, { key: 'wa_list' });
+    selectRow(g.body, 'Ausschnitt', L.map((c, i) => [String(i), (i + 1) + ' · ' + (c.name || T('Ausschnitt')) + ' (' + T(KIND_NAMES[cutKind(i)]) + ')']), () => String(a),
+      v => selectCut(+v), 'Jeder Ausschnitt hat eigene Form, Block, Werkstoff, Anfahrt und Richtung. Der G-Code (Quelle „Ausschnitte") entsteht für den hier gewählten Ausschnitt.');
+    { const row = document.createElement('div'); row.className = 'row';
+      const lb = document.createElement('label'); lb.textContent = T('Name'); row.appendChild(lb);
+      const inp = document.createElement('input'); inp.type = 'text'; inp.value = L[a].name || ''; inp.style.width = '150px';
+      inp.onchange = () => { L[a].name = String(inp.value).trim() || nextName(); buildSidebar(); if (state.cfg.gcodeSource === TAB) upd(false); };
+      inp.onkeydown = e => { if (e.key === 'Enter') inp.blur(); };
+      row.appendChild(inp); g.body.appendChild(row); }
+    const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:4px 0';
+    const mk = (txt, tip, fn, dis) => { const b = document.createElement('button'); b.textContent = T(txt); b.title = T(tip); b.disabled = !!dis; b.onclick = fn; bar.appendChild(b); };
+    mk('+ Neuer Ausschnitt', 'Legt einen weiteren Ausschnitt mit den Vorgaben an (gleiche Art wie der gewählte).', () => addCut(false));
+    mk('Kopieren', 'Legt eine Kopie des gewählten Ausschnitts an.', () => addCut(true));
+    mk('Löschen', 'Löscht den gewählten Ausschnitt (mindestens einer bleibt).', delCut, L.length <= 1);
+    g.body.appendChild(bar);
+    if (L.length > 1) {
+      selectRow(g.body, 'Block', [['own', 'jeder Ausschnitt eigener Block'], ['shared', 'alle im selben Block']], () => state.cfg.waShared === true ? 'shared' : 'own',
+        v => setShared(v === 'shared'),
+        'Alle im selben Block: Blockmaße, Blockdicke, Werkstoff und Abbrand gelten für alle Ausschnitte; jeder behält seine Lage im Block. Blockgröße automatisch = so groß, dass jeder Ausschnitt mit seinem Rand hineinpasst. Die anderen Ausschnitte erscheinen grau in der Ansicht.');
+      if (state.cfg.waShared === true) {
+        selectRow(g.body, 'G-Code', [['all', 'alle Ausschnitte nacheinander'], ['one', 'nur der gewählte']], () => state.cfg.waGcAll === 'one' ? 'one' : 'all',
+          v => { state.cfg.waGcAll = v; upd(true); },
+          'Alle nacheinander: ein G-Code schneidet die Ausschnitte in der Reihenfolge der Liste; zwischen zwei Ausschnitten fährt der Draht in Luft um den Block zum Nullpunkt und von dort zum nächsten Anfahrpunkt.');
+        const ob = document.createElement('div'); ob.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:4px 0;align-items:center';
+        const sp = document.createElement('span'); sp.style.cssText = 'font-size:11px;opacity:.8'; sp.textContent = T('Reihenfolge:'); ob.appendChild(sp);
+        const mv = (txt, tip, d, dis) => { const b = document.createElement('button'); b.textContent = txt; b.title = T(tip); b.disabled = !!dis; b.onclick = () => moveCut(d); ob.appendChild(b); };
+        mv('▲', 'Gewählten Ausschnitt früher schneiden', -1, a === 0); mv('▼', 'Gewählten Ausschnitt später schneiden', 1, a === L.length - 1);
+        g.body.appendChild(ob);
+      }
+    }
+    side.appendChild(g.g);
+  }
+
   // Neues Projekt / Projekt laden: Projektwerte des Reiters auf Anfang.
   function reset() {
     Object.keys(DEF).forEach(k => { delete state.cfg[k]; });
-    lastRes = null; view = null; hover = null; pickMode = false;
+    delete state.cfg.waList; delete state.cfg.waActive; delete state.cfg.waShared; delete state.cfg.waGcAll;
+    lastRes = null; view = null; hover = null; pickMode = false; khSel = 0;
     setTimeout(() => { if (state.activeTab === TAB) show(); }, 0);
   }
-  function label() { if (isCanopy()) return T('Kabinenhaubenausschnitt'); const r = lastRes && !lastRes.empty ? lastRes : build(); return T('Tragflächenausschnitt') + (r && !r.empty ? ' · ' + r.name : ''); }
+  function cutName() { const L = cutList(); return L.length > 1 ? (L[activeIdx()].name || '') : ''; }
+  function label() {
+    if (gcAll()) return T('Ausschnitte') + ' · ' + cutList().length + ' ' + T('im selben Block');
+    const nm = cutName(), pre = nm ? nm + ' · ' : '';
+    if (isCanopy()) return pre + T('Kabinenhaubenausschnitt');
+    const r = lastRes && !lastRes.empty ? lastRes : build();
+    if (isRectKind()) return pre + T('Rechteckausschnitt') + (r && !r.empty ? ' · ' + r.name : '');
+    return pre + T('Tragflächenausschnitt') + (r && !r.empty ? ' · ' + r.name : '');
+  }
   function fileBase() {
+    const nm = cutName(), clean = s => s.replace(/[^\wäöüÄÖÜß\-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 50);
+    if (gcAll()) return 'ausschnitte_block';
+    if (nm) return clean(nm) || 'ausschnitt';
     if (isCanopy()) return 'kabinenhaube';
     const r = lastRes && !lastRes.empty ? lastRes : build();
-    return ('ausschnitt_' + (r && !r.empty ? r.name : '')).replace(/[^\wäöüÄÖÜß\-]+/g, '_').replace(/_+$/g, '').slice(0, 50) || 'ausschnitt';
+    return clean('ausschnitt_' + (r && !r.empty ? r.name : '')) || 'ausschnitt';
   }
 
   Object.assign(App, { ausschnittSidebar, buildAusschnittScene: () => buildScene() });
   window.Ausschnitt = {
     show, resize, refresh, build, draw, machineMoves, buildScene, previewMoves, reset, label, fileBase,
-    _test: { offsetClosed, deloop, offsetOpen, khFillet, khCurve, khFoil, khFreeLine, khToFree, area, kerf, feed, C, S }
+    list: cutList, select: selectCut, add: addCut,
+    results: () => ({ res: lastRes, all: lastAll || (seg3d && lastRes && !lastRes.empty ? seg3d.concat([{ i: activeIdx(), r: lastRes }]) : null), active: activeIdx(), segRaw: C('waSeg') }),
+    _test: { offsetClosed, deloop, offsetOpen, khFillet, khCurve, khFoil, khFreeLine, khToFree, area, kerf, feed, C, S, snapshot }
   };
 })();

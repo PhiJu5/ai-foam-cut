@@ -36,6 +36,7 @@
     em('G21 ; mm');
     em('G90 ; absolut');
     if (c.header) String(c.header).split('\n').forEach(l => em(l));
+    if (App.matNote) em(App.matNote(App.matIdFor('schrift')));
     if (m.heat != null) {
       em('; ' + T('Drahtheizung: ') + m.heat + ' %');
       em('M3 S' + (m.wireS != null ? m.wireS : Math.round(m.heat)) + ' ; ' + T('Drahtheizung EIN'));

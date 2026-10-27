@@ -249,9 +249,11 @@
     if (st.length < 2) throw new Error(T('Mindestens ein Trapez nötig.'));
 
     const missing = [];
+    // Profil per Namen: zugeordnete .dat, sonst Profildatenbank (App.foilByName).
+    const find = (n) => foils[normName(n)] || (window.App && App.foilByName ? App.foilByName(n) : null);
     const resolveProfile = (foil) => {
       if (!foil) return placeholder('Profil');
-      const hit = foils[normName(foil)];
+      const hit = find(foil);
       if (hit) { const c = hit.map(p => ({ x: p.x, y: p.y })); c.name = foil; return c; }
       if (missing.indexOf(foil) < 0) missing.push(foil);
       return placeholder(foil);
@@ -260,15 +262,23 @@
     // Strak (Mischprofil zweier Nachbarn) — beide .dat nötig, sonst Platzhalter mit Strak-Namen.
     const specProfile = (sp) => {
       if (!sp || !sp.b) return resolveProfile(sp && sp.name);
-      const ha = foils[normName(sp.a)], hb = foils[normName(sp.b)];
+      const ha = find(sp.a), hb = find(sp.b);
       [[sp.a, ha], [sp.b, hb]].forEach(([n, h]) => { if (!h && missing.indexOf(n) < 0) missing.push(n); });
       if (ha && hb) return strak(ha, hb, sp.t, strakName(sp));
       return placeholder(strakName(sp));
     };
-    const holder = (sp) => ({ foilName: (sp && sp.name) || '', foilStrak: (sp && sp.b) ? { a: sp.a, b: sp.b, t: sp.t } : null });
+    // Strak-Rippe: Schalter strak — das Tragflächendesign mischt sie später selbst aus den
+    // gegebenen Nachbarprofilen nach Spannweitenlage (App.updateStraks).
+    // Nur wenn beide Nachbarprofile selbst Rippen sind — sonst (Trapezgrenzen abseits der
+    // Profilschnitte) bleibt die hier berechnete Mischung als festes Profil stehen.
+    const isRib = (nm) => (model.sections || []).some(sc => sc.airfoil === nm && st.some(x => Math.abs(sc.xn - x) < 1e-6));
+    const holder = (sp) => {
+      const mix = !!(sp && sp.b), strak = mix && isRib(sp.a) && isRib(sp.b);
+      return { foilName: (sp && sp.name) || '', strak, foilMix: mix && !strak ? { a: sp.a, b: sp.b, t: sp.t } : null };
+    };
     const rootSpec = model.airfoilSpec ? model.airfoilSpec(st[0]) : { name: model.airfoilAt(st[0]) };
     const cfg = {
-      root: Object.assign({ profile: specProfile(rootSpec), chord: +model.chord(st[0]).toFixed(2) }, holder(rootSpec)),
+      root: Object.assign({ profile: specProfile(rootSpec), chord: +model.chord(st[0]).toFixed(2) }, holder(rootSpec), { strak: false, foilMix: rootSpec && rootSpec.b ? { a: rootSpec.a, b: rootSpec.b, t: rootSpec.t } : null }),
       segments: [],
       meta: { name: model.name, halfspan: model.halfspan, nTrapez: st.length - 1, stations: st },
       missingFoils: missing

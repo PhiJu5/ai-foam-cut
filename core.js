@@ -210,7 +210,7 @@
       teStyle: 'horizontal',       // EL-Art: 'horizontal' = 2 waagr. Stege (Negativschalen-Logik) | 'skeleton' = entlang Skelettlinie | 'surface' = je Steg entlang eigener Fläche | 'surfaceUpper'/'surfaceLower' = beide parallel zur Ober-/Unterseite
       extOverBlockLE: false, extOverBlockClearLE: 5,  // Schnittverlängerung NL immer über Block (+Abstand mm)
       extOverBlockTE: false, extOverBlockClearTE: 5,  // Schnittverlängerung EL immer über Block (+Abstand mm)
-      showCore: true, showKerf: true, showNums: false, numEvery: 10, showBlock: true, showDim: true,   // numEvery: jeder n-te Profilpunkt nummeriert
+      showCore: true, showKerf: true, showNums: false, numEvery: 10, showBlock: true, showDim: true, showFoilNames: true,   // numEvery: jeder n-te Profilpunkt nummeriert
       showDihedral: true,                 // V-Form in Profil-/Drahtansicht zeigen
       ribShow: 'both',                     // Zeichenfenster: 'both' | 'inner' (Wurzel) | 'outer' (Rand)
       kerfMode: 'ratio',                  // kerf-Berechnung KERNDESIGN: 'ratio' (Profillängen) | 'speed' (Bahngeschwindigkeit); DXF-Formen/3D-Modell eigene (state.dxf/modelGcode.kerfMode)

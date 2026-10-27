@@ -4,6 +4,32 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.97] — 2026-10-27
+### Ausschnitte: Rechteck, mehrere Ausschnitte, Segmente als Bezug
+- Neue Art **„Rechteckausschnitt“**: Breite, Höhe, Eckenradius, Drehwinkel; Lage zur Blockkante oder mittig; Block (Loch) oder Rechteckstück bleibt stehen.
+- **Mehrere Ausschnitte je Projekt** (Gruppe „Ausschnitte im Projekt“: Neu, Kopieren, Löschen, Reihenfolge). Optional **alle im selben Block**; der G-Code schneidet alle nacheinander oder nur den gewählten.
+- **Segment als Bezug**: Segmente aus **DXF-Formen** oder dem **3D-Modell** (ohne vorheriges „Zerlegen“) als Kopie laden, über **„Weitere Segmente“** auch mehrere derselben Quelle, lagerichtig hintereinander. Lage quer (Seiten-/Draufsicht) oder längs, umdrehbar; Block und Umriss kommen von den Segmenten, „Neu laden“ holt den aktuellen Stand.
+- **3D-Vorschau** mit Block, Segmenten und Ausschnitten.
+- Das Bezugssegment gilt für alle Ausschnitte des Projekts; 2D-Ansicht und 3D-Vorschau zeigen immer alle Ausschnitte (aktiver kräftig, übrige blass mit Nummer/Name).
+- Neue Bezüge: Kabinenhaube „Höhe bezogen auf“ Blockober- oder -unterkante, Tragfläche auf Nase oder tiefsten Profilpunkt, mit Bezugssegment „Lage in X“ ab Blockseite oder Beginn des ersten Segments.
+
+### Rippendesigner: schräge Wurzelrippe
+- „Wurzelrippe schräg (°)“ bzw. Einrückung von Nase oder Endleiste in mm, dazu „parallel eingerückt (mm)“ — z. B. für eine Rumpfeinschnürung. Die Schräge geht immer zu Lasten des Werkstücks; die Rippe ist der wahre Schnitt, Holmausschnitte sitzen richtig. Gilt auch für Nasenschablonen, Rippen-STL, CAD-Bearbeitung und Fräse.
+
+### Tragflächendesigner: Strak-Profile
+- Schalter **„Strak-Profil (aus Nachbarprofilen gemischt)“** je Segment: Mischung aus dem nächsten gegebenen Profil innen und außen nach Spannweitenlage, wird automatisch nachgeführt. „Profil bearbeiten…“ bleibt möglich. Der .pc2-Import legt Straks aus dem Planform Creator entsprechend an und holt Profile direkt aus der Profildatenbank.
+- Bemaßung zeigt zusätzlich die **gesamte Halbspannweite**.
+
+### 3MF-Export mehrerer Teile
+- Bei Exporten mit mehreren Teilen in der STL-Vorschau wählbar: **3MF – eine Datei, Teile getrennt** (Standard) oder STL je Teil. Gilt für Formenbau, 3D-Modell sowie neu für Rippen und Nasenschablonen (bisher eine zusammengeworfene STL).
+
+### Formenbau
+- Winglet (parametrisch): **„Schwung Nasenleiste“** und **„Lage der Auswölbung“** für eine geschwungene Nasenleiste.
+- Schalter **„Gespiegelte Seite zeigen“** (nur Vorschau).
+
+### G-Code: Werkstoff immer im Kopf
+- Jeder Heißdraht-G-Code nennt im Kopf den Werkstoff, auf den sich Vorschub und Drahtheizung beziehen — für alle Quellen und Blockzuschnitt-Befehle.
+
 ## [1.96] — 2026-10-23
 ### Werkstoff frei zuordnen
 - Neuer Schalter **„Werkstoff frei zuordnen“** oben im Reiter Projektübersicht. Ist er an, wird der Werkstoff im Reiter **G-Code** direkt unter Quelle, Tragfläche und Segment gewählt; die Dicke kommt aus Kerndesign bzw. Negativschalendesign.
