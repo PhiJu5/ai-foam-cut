@@ -46,50 +46,8 @@
         const gt = sparOnProfile(sp, cut.tip.pts, coreT || cut.tip.pts, sparFromLE(sp, segIdx, 'tip'), yco, 'tip', coreT);
         if (!gr || !gr.lead || !gt || !gt.lead) return;   // reicht bis zur Oberfläche -> überspringen
         const kh = App.sparKerfHalf(sp, cut, gr.poly, gt.poly);   // Abbrand je Rippe (Modus/Bezug: global oder je Holm)
-        // Abzweigung dort, wo die SENKRECHTE bei x=xc die Rippenbahn kreuzt — je
-        // Rippe an IHREM eigenen Holm-x (gr.xc bzw. gt.xc). Fehlt dort ein Bahn-
-        // punkt, wird er durch Kantenteilung ERZEUGT -> die Anfahrt ist IMMER
-        // senkrecht (auch wenn Wurzel/Rand das Holm-x an unterschiedlichen Stellen
-        // haben). Eingefügt wird bei EINEM gemeinsamen Index (Wurzel) -> Türme sync.
-        const crR = crossOnPath(root, gr.xc, gr.lead[1].y);
-        const crT = crossOnPath(tip, gt.xc, gt.lead[1].y);
-        if (!crR || !crT) return;
-        let eR = lerpPt(root[crR.i], root[crR.i + 1], crR.t), eT = lerpPt(tip[crT.i], tip[crT.i + 1], crT.t), iIns = crR.i;
-        if (!prop) {
-          // NICHT proportional: Wurzel und Rand erreichen ihren Holm an verschiedenen
-          // Bahnindizes. Abzweig an EINEM gemeinsamen Punkt der Bahn VOR beiden Holmen
-          // (Nasenseite). Beide Rippen fahren dort senkrecht in den Kern auf Holm-
-          // Mittenhöhe, zurück zur Holm-Vorderwand, umfahren den Holm und verlassen den
-          // Kern auf demselben Weg (holeExcursion viaCore). Gleiches (i, t) für beide,
-          // Anfahrpunkt = Vorderwand-Mitte auf beiden Rippen -> Türme synchron.
-          // Abzweigpunkt: VOR dem Holm (Nasenseite), mit Abstand SPAR_CORE_GAP vor
-          // der (abbrand-versetzten) Tasche, damit der senkrechte Schlitz die Tasche
-          // nicht trifft. Von beiden Kandidaten den nehmen, bei dem BEIDE Rippen vor
-          // ihrem Holm liegen (je nach Laufrichtung der Bahn der spätere/frühere).
-          const frontX = (poly, k) => Math.min.apply(null, poly.map(p => p.x)) - Math.abs(k) - SPAR_CORE_GAP;
-          const fR = crossOnPath(root, frontX(gr.poly, kh.root), gr.lead[1].y);
-          const fT = crossOnPath(tip, frontX(gt.poly, kh.tip), gt.lead[1].y);
-          if (!fR || !fT) return;
-          const later = (fR.i > fT.i || (fR.i === fT.i && fR.t >= fT.t)) ? fR : fT;
-          const earlier = later === fR ? fT : fR;
-          const xDecr = root[fR.i + 1].x < root[fR.i].x;   // Bahn läuft hier Richtung Nase?
-          const near = xDecr ? later : earlier;
-          iIns = near.i;
-          eR = lerpPt(root[near.i], root[near.i + 1], near.t);
-          eT = lerpPt(tip[near.i], tip[near.i + 1], near.t);
-        }
-        // Ecken-Anker nur, wenn Wurzel und Rand nach Offset/Deloop GLEICH viele Ecken
-        // haben (sonst fielen Anker auf verschiedene Ecken -> Turmbahnen verdreht).
-        const kR = kerfKeepTopology(eR, gr.poly, gr.lead[0], kh.root, cut.root.pts, !prop);
-        const kT = kerfKeepTopology(eT, gt.poly, gt.lead[0], kh.tip, cut.tip.pts, !prop);
-        const hpR = holeLoopPrep(eR, gr.poly, gr.lead[0], kR, cut.root.pts, !prop);
-        const hpT = holeLoopPrep(eT, gt.poly, gt.lead[0], kT, cut.tip.pts, !prop);
-        const noAnchor = loopAnchors(hpR.loop).anchors.length !== loopAnchors(hpT.loop).anchors.length;
-        inserts.push({
-          i: iIns,
-          root: holeExcursionFinish(eR, hpR.loop, hpR.corner, !prop, noAnchor),
-          tip: holeExcursionFinish(eT, hpT.loop, hpT.corner, !prop, noAnchor)
-        });
+        const ins = sparHoleInsert(root, tip, gr, gt, kh, cut.root.pts, cut.tip.pts, prop);
+        if (ins) inserts.push(ins);
       } catch (e) { /* einzelnen Holm überspringen, Rippenbahn bleibt erhalten */ }
     });
     if (!inserts.length && !pockets.length) return pr;
@@ -129,6 +87,56 @@
       right.push({ x: prj(r.x, t.x, mw), y: prj(r.y, t.y, mw) });
     }
     return Object.assign({}, pr, { rootPath, tipPath, left, right });
+  }
+  /* Loch-Abstecher EINES Holms (Modus „während") für eine offene Wurzel-/Randbahn:
+   * gr/gt = sparOnProfile-Geometrie je Rippe, kh = Abbrand je Rippe, surfR/surfT =
+   * Oberfläche für das Klemmen. Rückgabe { i, root, tip } (Einfügen nach Index i)
+   * oder null. Auch vom Negativschalendesign (negholme.js) auf Teilbahnen genutzt. */
+  function sparHoleInsert(root, tip, gr, gt, kh, surfR, surfT, prop) {
+    // Abzweigung dort, wo die SENKRECHTE bei x=xc die Rippenbahn kreuzt — je
+    // Rippe an IHREM eigenen Holm-x (gr.xc bzw. gt.xc). Fehlt dort ein Bahn-
+    // punkt, wird er durch Kantenteilung ERZEUGT -> die Anfahrt ist IMMER
+    // senkrecht (auch wenn Wurzel/Rand das Holm-x an unterschiedlichen Stellen
+    // haben). Eingefügt wird bei EINEM gemeinsamen Index (Wurzel) -> Türme sync.
+    const crR = crossOnPath(root, gr.xc, gr.lead[1].y);
+    const crT = crossOnPath(tip, gt.xc, gt.lead[1].y);
+    if (!crR || !crT) return null;
+    let eR = lerpPt(root[crR.i], root[crR.i + 1], crR.t), eT = lerpPt(tip[crT.i], tip[crT.i + 1], crT.t), iIns = crR.i;
+    if (!prop) {
+      // NICHT proportional: Wurzel und Rand erreichen ihren Holm an verschiedenen
+      // Bahnindizes. Abzweig an EINEM gemeinsamen Punkt der Bahn VOR beiden Holmen
+      // (Nasenseite). Beide Rippen fahren dort senkrecht in den Kern auf Holm-
+      // Mittenhöhe, zurück zur Holm-Vorderwand, umfahren den Holm und verlassen den
+      // Kern auf demselben Weg (holeExcursion viaCore). Gleiches (i, t) für beide,
+      // Anfahrpunkt = Vorderwand-Mitte auf beiden Rippen -> Türme synchron.
+      // Abzweigpunkt: VOR dem Holm (Nasenseite), mit Abstand SPAR_CORE_GAP vor
+      // der (abbrand-versetzten) Tasche, damit der senkrechte Schlitz die Tasche
+      // nicht trifft. Von beiden Kandidaten den nehmen, bei dem BEIDE Rippen vor
+      // ihrem Holm liegen (je nach Laufrichtung der Bahn der spätere/frühere).
+      const frontX = (poly, k) => Math.min.apply(null, poly.map(p => p.x)) - Math.abs(k) - SPAR_CORE_GAP;
+      const fR = crossOnPath(root, frontX(gr.poly, kh.root), gr.lead[1].y);
+      const fT = crossOnPath(tip, frontX(gt.poly, kh.tip), gt.lead[1].y);
+      if (!fR || !fT) return null;
+      const later = (fR.i > fT.i || (fR.i === fT.i && fR.t >= fT.t)) ? fR : fT;
+      const earlier = later === fR ? fT : fR;
+      const xDecr = root[fR.i + 1].x < root[fR.i].x;   // Bahn läuft hier Richtung Nase?
+      const near = xDecr ? later : earlier;
+      iIns = near.i;
+      eR = lerpPt(root[near.i], root[near.i + 1], near.t);
+      eT = lerpPt(tip[near.i], tip[near.i + 1], near.t);
+    }
+    // Ecken-Anker nur, wenn Wurzel und Rand nach Offset/Deloop GLEICH viele Ecken
+    // haben (sonst fielen Anker auf verschiedene Ecken -> Turmbahnen verdreht).
+    const kR = kerfKeepTopology(eR, gr.poly, gr.lead[0], kh.root, surfR, !prop);
+    const kT = kerfKeepTopology(eT, gt.poly, gt.lead[0], kh.tip, surfT, !prop);
+    const hpR = holeLoopPrep(eR, gr.poly, gr.lead[0], kR, surfR, !prop);
+    const hpT = holeLoopPrep(eT, gt.poly, gt.lead[0], kT, surfT, !prop);
+    const noAnchor = loopAnchors(hpR.loop).anchors.length !== loopAnchors(hpT.loop).anchors.length;
+    return {
+      i: iIns,
+      root: holeExcursionFinish(eR, hpR.loop, hpR.corner, !prop, noAnchor),
+      tip: holeExcursionFinish(eT, hpT.loop, hpT.corner, !prop, noAnchor)
+    };
   }
   function nearestIdx(pts, p) {
     let bi = 0, bd = Infinity;
@@ -1492,7 +1500,7 @@
 
 
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----
-  Object.assign(App, { DT_BAND_RES, SPAR_CORE_GAP, SPAR_HOLE_N, SPAR_LEAD_N, anyNonProportionalSpar, applySparCuts, carvePocketSide, clampEdge });
+  Object.assign(App, { DT_BAND_RES, SPAR_CORE_GAP, SPAR_HOLE_N, SPAR_LEAD_N, anyNonProportionalSpar, applySparCuts, carvePocketSide, clampEdge, sparHoleInsert });
   Object.assign(App, { clipPolylineX, cornerAnchoredResampleN, crossOnPath, deloopPoly, doubleTClampedPoly, drawSpars, dtThinReport, flattenFloor });
   Object.assign(App, { hingeFromLE, hingeNotchPoly, hingePctAtStation, holeEntryNearest, holeEntryStart, holeEntryStartY, holeExcursion, holeExcursionFinish });
   Object.assign(App, { holeLoopPrep, kerfKeepTopology, lerpPt, loopAnchors, monotonicX, nearestIdx, offsetArcPerp, offsetInward });

@@ -80,6 +80,8 @@
     formWlTwist: -2,           // Schränkung zur Spitze (°, negativ = Auswaschung)
     formWlLeBow: 0,            // Schwung der Nasenleiste im senkrechten Teil (Seitenansicht): größte Auswölbung nach vorn in % der Wurzeltiefe (negativ = hohl)
     formWlLeBowPos: 40,        // Lage der größten Auswölbung in % der Länge des senkrechten Teils
+    formWlTeBow: 0,            // Schwung der Endleiste im senkrechten Teil (Seitenansicht): größte Auswölbung nach hinten in % der Wurzeltiefe (negativ = hohl)
+    formWlTeBowPos: 40,        // Lage der größten Auswölbung in % der Länge des senkrechten Teils
     formWlMidPos: 50,          // Lage des mittleren Profils in % der Winglet-Länge (ab Übergangsende)
     formWlTipLen: 10,          // Rundung der Winglet-Spitze (mm)
     formWlTipMode: 'ellipse',  // Spitzenform: 'ellipse' | 'sichel' | 'custom' (frei parametrisch)
@@ -811,35 +813,39 @@
     const cR = c0 * w.cRoot / 100, cT = c0 * w.cTip / 100, toe = w.toe * Math.PI / 180, tw = w.twist * Math.PI / 180;
     const mp = Math.min(0.95, Math.max(0.05, w.midPos / 100));
     const zb = zF + Rb * (Math.sin(th1) - Math.sin(th0)), yb = yF - Rb * (Math.cos(th1) - Math.cos(th0));
+    // Schwung von Nasenleiste/Endleiste (Seitenansicht, z. B. Ventus 3): im senkrechten Teil wölbt sich die
+    // Kante um amp·sin²(π·g(v)) nach außen (Nase vor, Endleiste zurück; die jeweils andere Kante bleibt).
+    // sin² hat an beiden Enden Steigung 0 -> stetiger Anschluss an Bogen und Spitze; g(v) = v^k legt das Maximum auf pos.
+    const bowFn = (pct, pos) => {
+      const A = cR * (pct || 0) / 100, k = Math.log(0.5) / Math.log((pos || 40) / 100);
+      return t => { if (!A || Ls <= 0) return 0; const v = (t - Lf - Lb) / Ls; if (v <= 0 || v >= 1) return 0; const sn = Math.sin(Math.PI * Math.pow(v, k)); return A * sn * sn; };
+    };
+    const bowLE = bowFn(w.leBow, w.leBowPos), bowTE = bowFn(w.teBow, w.teBowPos);
     // Endleiste: gerade im waagrechten Teil (Verlängerung der Flügel-Endleiste oder eigene
     // Pfeilung) und gerade im senkrechten Teil (eigene Pfeilung); im Bogen geht die Steigung per
     // Smoothstep über -> Endleistenlinie ohne Knick.
     const tanH = w.teWing ? sl.dxTE : Math.tan(w.teSweepH * Math.PI / 180), tanV = Math.tan(w.teSweep * Math.PI / 180);
-    const xTEat = t => e.xTE + tanH * t + (tanV - tanH) * (t <= Lf ? 0 : t <= Lf + Lb ? Lb * ismooth((t - Lf) / Lb) : Lb * 0.5 + (t - Lf - Lb));
+    const xTE0 = t => e.xTE + tanH * t + (tanV - tanH) * (t <= Lf ? 0 : t <= Lf + Lb ? Lb * ismooth((t - Lf) / Lb) : Lb * 0.5 + (t - Lf - Lb));
     // Nasenlinie ohne Rücksprung (Flügelpfeilung -> Rückpfeilung des waagrechten Teils) und
     // zugehörige Tiefe; ab Beginn t0 geht die Tiefe per Smoothstep über die Länge Lr in den
     // Zielverlauf über (Wurzeltiefe, dann Verjüngung auf die Spitzentiefe; die Verjüngung setzt
     // mit Steigung 0 ein und wird dann linear -> C1). Die Nase folgt aus Endleiste − Tiefe und
     // ist damit überall stetig differenzierbar (keine Knicke/Huckel).
+    const xTEat = t => xTE0(t) + bowTE(t);
     const xLEline = t => t < Lf ? e.xLE + tanW * t + (tanF - tanW) * Lf * ismooth(t / Lf) : xF + tanF * (t - Lf);
-    const cLine = t => Math.max(0.15 * c0, xTEat(t) - xLEline(t));
+    const cLine = t => Math.max(0.15 * c0, xTE0(t) - xLEline(t));
     const t0 = Math.min(Math.max(0, w.stepAt), Lf + Lb);
     const Lr = Math.max(1, w.step > 0 ? Math.min(w.step, Tt - t0) : Lf + Lb - t0), tEnd = Math.min(Tt, t0 + Lr);
     // Zielverlauf = eine Gerade (Wurzeltiefe am Ende des Rücksprungs -> Spitzentiefe), auch vor tEnd
     // fortgesetzt: der Smoothstep des Rücksprungs läuft damit direkt in die Verjüngung ein (C1, keine
     // Plateau-/S-Form an der Nase).
     const cTarget = t => Tt <= tEnd ? cR : cR + (cT - cR) * (t - tEnd) / (Tt - tEnd);
-    // Schwung der Nasenleiste (Seitenansicht, z. B. Ventus 3): im senkrechten Teil wird die Nase um
-    // bow·sin²(π·g(v)) nach vorn gewölbt (Endleiste bleibt). sin² hat an beiden Enden Steigung 0 ->
-    // stetiger Anschluss an Bogen und Spitze; g(v) = v^k legt das Maximum auf leBowPos.
-    const bowA = cR * (w.leBow || 0) / 100, bowK = Math.log(0.5) / Math.log((w.leBowPos || 40) / 100);
-    const bowAt = t => { if (!bowA || Ls <= 0) return 0; const v = (t - Lf - Lb) / Ls; if (v <= 0 || v >= 1) return 0; const sn = Math.sin(Math.PI * Math.pow(v, bowK)); return bowA * sn * sn; };
     const cAt0 = t => {
       if (t < t0) return cLine(t);
       if (t < tEnd) { const cl = cLine(t); return cl + (cTarget(t) - cl) * sm2((t - t0) / Lr); }
       return cTarget(t);
     };
-    const cAt = t => Math.max(0.05 * c0, cAt0(t) + bowAt(t));
+    const cAt = t => Math.max(0.05 * c0, cAt0(t) + bowLE(t) + bowTE(t));
     // s = Bogenlänge ab Ende des waagrechten Teils (negativ = im waagrechten Teil).
     const secAt = s => {   // Mittellinie (Winkel th, Nasenpunkt y/z) sowie Profil P und Anstellung a, noch ohne Höhenausgleich
       let th, y, z, P, a;
@@ -3033,7 +3039,7 @@
       tipDih: Math.min(60, Math.max(-45, +C('formTipDih') || 0)), tipRef: +C('formTipRef') || 0, tipRise: +C('formTipRise') || 0, tipTwist: +C('formTipTwist') || 0, tipThk: +C('formTipThk') || 100,
       wl: { step: Math.max(0, +C('formWlStep') || 0), stepAt: Math.max(0, +C('formWlStepAt') || 0), flatWing: C('formWlFlatWing') !== false, teWing: C('formWlTeWing') !== false, teSweep: Math.min(60, Math.max(-30, +C('formWlTeSweep') || 0)), teSweepH: Math.min(60, Math.max(-30, +C('formWlTeSweepH') || 0)), flatLen: Math.max(0, +C('formWlFlatLen') || 0), flatSweep: Math.min(70, Math.max(-30, +C('formWlFlatSweep') || 0)), len: +C('formWlLen') || 0, R: Math.max(0, +C('formWlR')), cant: Math.min(85, Math.max(-30, +C('formWlCant') || 0)),
         cRoot: Math.max(5, +C('formWlCRoot') || 0), cTip: Math.max(2, +C('formWlCTip') || 0), sweep: Math.min(70, Math.max(-30, +C('formWlSweep') || 0)),
-        toe: +C('formWlToe') || 0, twist: +C('formWlTwist') || 0, midPos: +C('formWlMidPos') || 50, leBow: Math.min(60, Math.max(-60, +C('formWlLeBow') || 0)), leBowPos: Math.min(90, Math.max(10, +C('formWlLeBowPos') || 40)), tipLen: Math.max(0, +C('formWlTipLen')), tipP: +C('formWlTipP') || 2,
+        toe: +C('formWlToe') || 0, twist: +C('formWlTwist') || 0, midPos: +C('formWlMidPos') || 50, leBow: Math.min(60, Math.max(-60, +C('formWlLeBow') || 0)), leBowPos: Math.min(90, Math.max(10, +C('formWlLeBowPos') || 40)), teBow: Math.min(60, Math.max(-60, +C('formWlTeBow') || 0)), teBowPos: Math.min(90, Math.max(10, +C('formWlTeBowPos') || 40)), tipLen: Math.max(0, +C('formWlTipLen')), tipP: +C('formWlTipP') || 2,
         tipMode: C('formWlTipMode') || 'ellipse', tipPLE: +C('formWlTipPLE') || 2, tipPTE: +C('formWlTipPTE') || 2, tipRef: +C('formWlTipRef') || 0, tipThk: +C('formWlTipThk') || 100 },
       wlProf: C('formWlProf') || {},
       wlDrawMode: C('formWlDrawMode') === 'pline' ? 'pline' : 'spline', wlDrawRootAt: +C('formWlDrawRootAt') || 30,
@@ -6363,8 +6369,12 @@
         hint: 'Pfeilung der Endleiste im waagrechten Teil (positiv = nach hinten).' });
       numRow(t.body, 'Schwung Nasenleiste (% Wurzeltiefe)', () => C('formWlLeBow'), v => { S('formWlLeBow', v); rr(); }, { step: 2, min: -60, max: 60, norender: true,
         hint: 'Geschwungene Nasenleiste im senkrechten Teil (Seitenansicht), wie beim Ventus 3: größte Auswölbung nach vorn in % der Wurzeltiefe; die Endleiste bleibt. Läuft an Bogen und Spitze tangential aus. 0 = gerade, negativ = hohl.' });
-      if (+C('formWlLeBow')) numRow(t.body, 'Lage der Auswölbung (% Länge)', () => C('formWlLeBowPos'), v => { S('formWlLeBowPos', v); rr(); }, { step: 5, min: 10, max: 90, norender: true,
+      numRow(t.body, 'Lage Schwung Nasenleiste (% Länge)', () => C('formWlLeBowPos'), v => { S('formWlLeBowPos', v); rr(); }, { step: 5, min: 10, max: 90, norender: true,
         hint: 'Wo entlang des senkrechten Teils die Nase am weitesten vorsteht (klein = bauchig unten, groß = Schwung zur Spitze).' });
+      numRow(t.body, 'Schwung Endleiste (% Wurzeltiefe)', () => C('formWlTeBow'), v => { S('formWlTeBow', v); rr(); }, { step: 2, min: -60, max: 60, norender: true,
+        hint: 'Geschwungene Endleiste im senkrechten Teil (Seitenansicht): größte Auswölbung nach hinten in % der Wurzeltiefe; die Nasenleiste bleibt. Läuft an Bogen und Spitze tangential aus. 0 = gerade, negativ = hohl.' });
+      numRow(t.body, 'Lage Schwung Endleiste (% Länge)', () => C('formWlTeBowPos'), v => { S('formWlTeBowPos', v); rr(); }, { step: 5, min: 10, max: 90, norender: true,
+        hint: 'Wo entlang des senkrechten Teils die Endleiste am weitesten nach hinten steht.' });
       numRow(t.body, 'Pfeilung Endleiste senkrecht (°)', () => C('formWlTeSweep'), v => { S('formWlTeSweep', v); rr(); }, { step: 1, min: -30, max: 60, norender: true,
         hint: 'Pfeilung der Endleiste im senkrechten Teil gegen die Winglet-Mittellinie (positiv = nach hinten). Wird im Bogen stetig aus der waagrechten Pfeilung entwickelt.' });
       numRow(t.body, 'Toe-out an der Wurzel (°)', () => C('formWlToe'), v => { S('formWlToe', v); rr(); }, { step: 0.5, norender: true,

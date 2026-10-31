@@ -37,7 +37,8 @@
       "description": "Im Negativschalendesign den Kern in einzelne Stege zerlegen (Glasschlauch, Holmgurt, Stegabstand) und im selben Schnitt wie die Schalen fahren; im Kerndesign den Kern ebenso zerteilen, optional mit erhaltener, auseinandergezogener Schale (eigener Schnitt, ein oder getrennte Programme).",
       "files": [
         "stege.js",
-        "kernteile.js"
+        "kernteile.js",
+        "negholme.js"
       ],
       "tabs": [],
       "default": true

@@ -1886,6 +1886,7 @@
     if (window.Ausschnitt && Ausschnitt.reset) { try { Ausschnitt.reset(); } catch (e) {} }
     if (window.StlBody && StlBody.reset) { try { StlBody.reset(); } catch (e) {} }   // STL-Rumpfmodell des Vorprojekts verwerfen (kommt aus d.cfg.stlBody)
     if (window.Decals && Decals.reset) { try { Decals.reset(); } catch (e) {} }   // Altprojekte ohne cfg.decals: leer starten
+    if (App.undoReset) { try { App.undoReset(); } catch (e) {} }
     if (window.RumpfPro && RumpfPro.histReset) { try { RumpfPro.histReset(); } catch (e) {} }   // Rumpf-Pro: Rückgängig nur bis zum geladenen Stand
     ['negStegeOn', 'negStegeList', 'negStegeGap', 'negStegeOnly'].forEach(k => {
       const v = PROJECT_DEFAULTS.cfg[k]; state.cfg[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;

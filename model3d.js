@@ -1286,6 +1286,66 @@
   function correspondLoops(a, b, N) {
     let A = resampleClosed(a, N), B = resampleClosed(b, N); B = alignLoops(A, B); return [A, B];
   }
+  // Eckpunkte einer Schleife (Knick > 20°, Kanten kürzer als 1e-6 zählen nicht).
+  function loopCorners(P) {
+    const n = P.length, out = [], lim = Math.sin(20 * Math.PI / 180);
+    for (let i = 0; i < n; i++) {
+      const p = P[(i - 1 + n) % n], c = P[i], q = P[(i + 1) % n];
+      const ax = c[0] - p[0], ay = c[1] - p[1], bx = q[0] - c[0], by = q[1] - c[1], la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+      if (la < 1e-6 || lb < 1e-6) continue;
+      const cr = (ax * by - ay * bx) / (la * lb), dt = (ax * bx + ay * by) / (la * lb);
+      if (Math.abs(cr) > lim || dt < 0) out.push(c);
+    }
+    return out;
+  }
+  // Fehlende Ecken von Q als zusätzliche Bahnpunkte einfügen; die Gegenseite R bekommt
+  // an derselben Stelle einen interpolierten Punkt, damit die Paarung erhalten bleibt.
+  function insertCorners(Q, R, corners) {
+    Q = Q.slice();
+    const n = Q.length, acc = loopAcc(Q), L = acc[n], ins = [];
+    for (const c of corners) {
+      const pr = projectOnLoop(Q, c, acc);
+      if (pr.d2 > 1 || L <= 0) continue;
+      let i = 0; while (i < n - 1 && acc[i + 1] <= pr.s) i++;
+      const e = acc[i + 1] - acc[i], t = e > 1e-12 ? (pr.s - acc[i]) / e : 0;
+      // Bahnpunkt praktisch auf der Ecke: auf die Ecke legen statt eine Mini-Kante einzufügen.
+      const near = [i, (i + 1) % n].find(j => Math.hypot(Q[j][0] - c[0], Q[j][1] - c[1]) < 0.05);
+      if (near !== undefined) { Q[near] = c.slice(); continue; }
+      ins.push({ i, t, c });
+    }
+    ins.sort((x, y) => x.i - y.i || x.t - y.t);
+    const oQ = [], oR = []; let k = 0;
+    for (let i = 0; i < n; i++) {
+      oQ.push(Q[i]); oR.push(R[i]);
+      for (; k < ins.length && ins[k].i === i; k++) {
+        const a = R[i], b = R[(i + 1) % n], t = ins[k].t;
+        oQ.push(ins[k].c.slice()); oR.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      }
+    }
+    return [oQ, oR];
+  }
+  // Abgetastetes Paar um die echten Ecken beider Sollkonturen ergänzen.
+  function keepCorners(pair, a, b) {
+    const [A1, B1] = insertCorners(pair[0], pair[1], loopCorners(a));
+    const [B2, A2] = insertCorners(B1, A1, loopCorners(b));
+    return [A2, B2];
+  }
+  // Wie correspondLoops, aber gegenüberliegende Ecken von A und B werden einander
+  // zugeordnet (als interne Synchronpaare), damit der Draht Ecke auf Ecke läuft.
+  function correspondCorners(a, b, N) {
+    const [A, B] = correspondLoops(a, b, N);
+    const cA = loopCorners(a), cB = loopCorners(b);
+    if (!cA.length || !cB.length) return keepCorners([A, B], a, b);
+    const idxOf = (Q, c) => { const acc = loopAcc(Q); return projectOnLoop(Q, c, acc).s / acc[Q.length] * Q.length; };
+    const ia = cA.map(c => idxOf(A, c)), ib = cB.map(c => idxOf(B, c)), lim = N * 0.04;
+    const cd = (x, y) => { const d = Math.abs(x - y) % N; return Math.min(d, N - d); };
+    const nearest = (x, arr) => { let bi = -1, bd = Infinity; arr.forEach((v, i) => { const d = cd(x, v); if (d < bd) { bd = d; bi = i; } }); return [bi, bd]; };
+    const pairs = [];
+    ia.forEach((x, i) => { const [j, d] = nearest(x, ib); if (j >= 0 && d <= lim && nearest(ib[j], ia)[0] === i) pairs.push({ a: cA[i], b: cB[j] }); });
+    if (!pairs.length) return keepCorners([A, B], a, b);
+    const r = syncLoops(a, b, pairs, N);
+    return keepCorners([r.A, r.B], a, b);
+  }
   // ---- Manuelle Synchronpaare (wie DXF-Formen) ----
   // Ein Paar {a:[u,w], b:[u,w]} liegt in Querschnittskoordinaten (vor Achsentausch/
   // Spiegeln), damit es Punktzahl-, Tausch- und Spiegel-Änderungen übersteht. Es wird
@@ -1465,34 +1525,39 @@
   // Polygon um d nach außen versetzen (Abbrand-Ausgleich), Eckennormalen.
   function offsetPoly2D(poly, d) {
     if (!d) return poly;
-    const n = poly.length, out = [];
-    const ccw = polyArea2D(poly) > 0;
-    for (let i = 0; i < n; i++) {
-      const p0 = poly[(i - 1 + n) % n], p1 = poly[i], p2 = poly[(i + 1) % n];
-      const e1 = [p1[0] - p0[0], p1[1] - p0[1]], e2 = [p2[0] - p1[0], p2[1] - p1[1]];
-      const nrm = e => { const L = Math.hypot(e[0], e[1]) || 1; return ccw ? [e[1] / L, -e[0] / L] : [-e[1] / L, e[0] / L]; };
-      const n1 = nrm(e1), n2 = nrm(e2);
-      let nx = n1[0] + n2[0], ny = n1[1] + n2[1];
-      const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
-      const cosH = Math.max(0.35, (nx * (n1[0] + n2[0]) + ny * (n1[1] + n2[1])) / 2 + 0.5);
-      out.push([p1[0] + nx * d / cosH, p1[1] + ny * d / cosH]);
-    }
-    return out;
+    return offsetPoly2DVar(poly, poly.map(() => d));
   }
   // Wie offsetPoly2D, aber mit einem Versatz je Punkt (Abbrand lokal variabel).
   function offsetPoly2DVar(poly, gaps) {
-    const n = poly.length, out = [];
-    const ccw = polyArea2D(poly) > 0;
+    const n = poly.length, out = [], tips = [];
+    const ccw = polyArea2D(poly) > 0, EPS = 0.05;
+    // Kantenrichtung über den nächsten Punkt mit echtem Abstand: Mini-Kanten (Punkte fast
+    // auf der Ecke, z. B. Synchronpaar + Eckpunkt) haben sonst eine zufällige Normale.
+    const away = (i, st) => { for (let k = 1; k < n; k++) { const q = poly[(i + st * k + n * k) % n]; if (Math.hypot(q[0] - poly[i][0], q[1] - poly[i][1]) > EPS) return q; } return poly[i]; };
     for (let i = 0; i < n; i++) {
-      const p0 = poly[(i - 1 + n) % n], p1 = poly[i], p2 = poly[(i + 1) % n];
+      const p0 = away(i, -1), p1 = poly[i], p2 = away(i, 1);
       const e1 = [p1[0] - p0[0], p1[1] - p0[1]], e2 = [p2[0] - p1[0], p2[1] - p1[1]];
       const nrm = e => { const L = Math.hypot(e[0], e[1]) || 1; return ccw ? [e[1] / L, -e[0] / L] : [-e[1] / L, e[0] / L]; };
       const n1 = nrm(e1), n2 = nrm(e2);
       let nx = n1[0] + n2[0], ny = n1[1] + n2[1];
       const L = Math.hypot(nx, ny) || 1; nx /= L; ny /= L;
-      const cosH = Math.max(0.35, (nx * (n1[0] + n2[0]) + ny * (n1[1] + n2[1])) / 2 + 0.5);
+      // Gehrung: Versatz d senkrecht zu beiden Kanten; sehr spitze Ecken begrenzt.
+      const cosH = Math.max(0.35, nx * n1[0] + ny * n1[1]);
       const d = gaps[i] || 0;
       out.push([p1[0] + nx * d / cosH, p1[1] + ny * d / cosH]);
+      const le = (Math.hypot(e1[0], e1[1]) * Math.hypot(e2[0], e2[1])) || 1, cr = (e1[0] * e2[1] - e1[1] * e2[0]) / le;
+      if (d && Math.abs(cr) >= 0.17 && cr * (ccw ? 1 : -1) * d < 0) tips.push({ i, e1, e2, reach: Math.abs(d) * Math.sqrt(Math.max(0, 1 / (cosH * cosH) - 1)) + EPS });
+    }
+    // Ecke, an der sich der Versatz zusammenzieht: nur Nachbarpunkte im Gehrungsbereich,
+    // die über die Gehrung hinauslaufen, auf den Gehrungspunkt legen (sonst Mini-Schleife).
+    for (const t of tips) {
+      const m = out[t.i].slice(), c = poly[t.i];
+      for (const [st, e, sg] of [[1, t.e2, 1], [-1, t.e1, -1]]) for (let k = 1; k < n / 2; k++) {
+        const j = (t.i + st * k + n * k) % n;
+        if (Math.hypot(poly[j][0] - c[0], poly[j][1] - c[1]) > t.reach) break;
+        if (((out[j][0] - m[0]) * e[0] + (out[j][1] - m[1]) * e[1]) * sg >= 0) break;
+        out[j] = m.slice();
+      }
     }
     return out;
   }
@@ -1623,10 +1688,10 @@
     const syncInfo = { total: syncTag.length, used: 0, dropped: 0 };
     const pairLoops = (la, lb, iA, iB, Np) => {
       const sp = syncTag.filter(t => t.la === iA && t.lb === iB);
-      if (!sp.length) return correspondLoops(la, lb, Np);
+      if (!sp.length) return correspondCorners(la, lb, Np);
       const r = syncLoops(la, lb, sp, Np); syncInfo.used += r.used; syncInfo.dropped += r.dropped;
       sp.forEach((t, k) => { t.ok = r.bad.indexOf(k) < 0; t.dropped = !t.ok; });
-      return [r.A, r.B];
+      return keepCorners([r.A, r.B], la, lb);
     };
     let [oA, oB] = pairLoops(mA.outer, mB.outer, -1, -1, N); oA = oA.map(map); oB = oB.map(map);
     // Innenkonturen (Löcher) paaren + korrespondieren. Fehlt auf EINER Stirnfläche
@@ -2696,7 +2761,7 @@
     const side = pairSyncPick ? 'B' : 'A', hit = pairSyncSnap(mx, my, side);
     if (!hit) return;
     if (!pairSyncPick) { pairSyncPick = hit.pt; pairSyncHover = null; draw(); return; }
-    const a = pairUnmap(pairSyncPick), b = pairUnmap(hit.pt);
+    const sp = pairX.spr, a = pairUnmap(pairSyncPick), b = pairUnmap(sp ? [hit.pt[0] - sp.x, hit.pt[1] - sp.y] : hit.pt);
     pairSyncPick = null; pairSyncHover = null;
     pairApply({ syncAdd: { a, b } });
   }
@@ -2711,6 +2776,12 @@
       A: cp.A, B: cp.B, hollow: cp.hollow, entry: cp.entry, innerEntries: cp.innerEntries || [], edited: cp.edited,
       seg: segIndex, lo: cp.lo, hi: cp.hi, kp: kerfPairOf(cp.kerfInfo, Object.assign({ kerf: 0 }, o || {})),
       syncMarks: cp.syncMarks || [], syncInfo: cp.syncInfo || null };
+  }
+  // Vorschlag für den Anzeige-Versatz: B rechts neben A.
+  function pairSpreadHint(segIndex, o) {
+    const d = pairData(segIndex, o); if (!d) return 0;
+    const xs = P => P.map(p => p[0]), aX = xs(d.outerA), bX = xs(d.outerB), aMax = Math.max.apply(null, aX), aMin = Math.min.apply(null, aX);
+    return Math.ceil(aMax - Math.min.apply(null, bX) + 0.15 * (aMax - aMin) + 5);
   }
   function drawPairs() {
     ensureSegments();     // bei Bedarf automatisch zerlegen (passend zu Achse/Ebenen)
@@ -2743,6 +2814,14 @@
     let bxmin = Infinity, bymin = Infinity, bxmax = -Infinity, bymax = -Infinity;
     for (const p of d.cutOuterA.concat(d.cutOuterB)) { bxmin = Math.min(bxmin, p[0]); bymin = Math.min(bymin, p[1]); bxmax = Math.max(bxmax, p[0]); bymax = Math.max(bymax, p[1]); }
     { const bm = Math.max(0, +(prov.opt || {}).blockMargin || 0); bxmin -= bm; bymin -= bm; bxmax += bm; bymax += bm; }   // Blockzugabe wie im G-Code
+    // Synchronisieren: B nur in der Anzeige versetzen (prov.spread); Block, Paare und
+    // G-Code bleiben in wahrer Lage. Beim Punkte-Bearbeiten ist der Versatz aus.
+    const spr = (prov.spread && !pairEdit) ? prov.spread : null;
+    if (spr) {
+      const sh1 = P => { const r = P.map(p => [p[0] + spr.x, p[1] + spr.y]); if (P.kk) r.kk = P.kk; if (P.k0 != null) r.k0 = P.k0; return r; };
+      d.outerB = sh1(d.outerB); d.innersB = d.innersB.map(sh1); d.cutOuterB = sh1(d.cutOuterB); d.cutInnersB = d.cutInnersB.map(sh1); d.B = sh1(d.B);
+      d.syncMarks = d.syncMarks.map(m => Object.assign({}, m, { b: [m.b[0] + spr.x, m.b[1] + spr.y] }));
+    }
     const all = d.A.concat(d.B);
     if (pathLp) { all.push.apply(all, pathLp); all.push.apply(all, pathRp); all.push(org); }
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2755,7 +2834,7 @@
     // Transform + Punkte für Interaktion (Startpunkt setzen / Punkte verschieben).
     pairX = { seg, cx, cy, sc, px: p2.px, py: p2.py, cutA: d.A, cutB: d.B, outer: d.cutOuterA, edited: d.edited,
       sol: { A: [d.outerA].concat(d.innersA), B: [d.outerB].concat(d.innersB) },
-      swap: !!(prov.opt || {}).swap, flip: !!(prov.opt || {}).flip, syncInfo: d.syncInfo };
+      swap: !!(prov.opt || {}).swap, flip: !!(prov.opt || {}).flip, syncInfo: d.syncInfo, spr };
     // Achsenkreuz
     ctx.strokeStyle = col('--line', '#2a323c'); ctx.lineWidth = 1; ctx.setLineDash([3, 4]);
     ctx.beginPath(); ctx.moveTo(tx(0), 0); ctx.lineTo(tx(0), H); ctx.moveTo(0, ty(0)); ctx.lineTo(W, ty(0)); ctx.stroke();
@@ -2887,7 +2966,7 @@
     // Titel + Legende
     ctx.fillStyle = col('--txt', '#e6ebf1'); ctx.font = '12px Segoe UI'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
     ctx.fillText(T('Segmentpaar ') + (seg + 1) + '/' + nseg + ' — A = ' + sectionName(seg) + ', B = ' + sectionName(seg + 1)
-      + (d.hollow ? T('  · hohl (innen zuerst)') : '') + (d.edited ? T('  · bearbeitet') : '')
+      + (d.hollow ? T('  · hohl (innen zuerst)') : '') + (d.edited ? T('  · bearbeitet') : '') + (spr ? T('  · B versetzt (nur Anzeige)') : '')
       + (d.syncMarks.length ? T('  · Synchronpaare: ') + d.syncInfo.used + '/' + d.syncInfo.total : '') + T('  · Bahn ') + d.A.length + T(' Pkt'), 12, 10);
     // Legende nur für eingeblendete Teile (Ansichtsmenü „Legende" schaltet sie ganz ab).
     const leg = [];
@@ -3513,7 +3592,7 @@
     setView, getView: () => M.view, refresh,
     serialize, deserialize,
     setPairEdit, isPairEdit: () => pairEdit, pairInfo: () => pairX,
-    setPairSync, isPairSync: () => pairSync, isPairSyncPick: () => !!pairSyncPick, autoSyncSeg, setPairStart, isPairStart: () => pairStart,
+    pairSpreadHint, setPairSync, isPairSync: () => pairSync, isPairSyncPick: () => !!pairSyncPick, autoSyncSeg, setPairStart, isPairStart: () => pairStart,
     setPairTowers(on) { M.pairTowers = !!on; if (M.view === 'pairs') draw(); }, isPairTowers: () => M.pairTowers === true,
     setPlateTravel(on) { M.plateTravel = !!on; if (M.view === 'plate') draw(); }, isPlateTravel: () => M.plateTravel !== false,
     setSectionDensity(v) {

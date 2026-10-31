@@ -4,6 +4,29 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [1.98] — 2026-10-31
+### 3D-Modell: Abbrand korrigiert (Maßänderung!), scharfe Ecken
+- **Abbrand-Versatz korrigiert:** Bisher wurde auf Geraden nur etwa zwei Drittel des Soll-Versatzes ausgeglichen. Die Schnittspur liegt jetzt um den vollen halben Abbrand versetzt, Teile ändern dadurch ihr Maß gegenüber alten G-Codes. Ecken laufen als echte Gehrung, auch wenn ein Synchronpaar knapp neben einer Ecke liegt.
+- Die echten Ecken der Schnittprofile bleiben in der Bahn erhalten (zusätzliche Bahnpunkte, die Punktzahl kann leicht über der Vorgabe liegen). Gegenüberliegende Ecken von A und B werden ohne Synchronpaare automatisch einander zugeordnet.
+- Gruppe „Synchronpunkte“: **„Profile auseinanderziehen (nur Anzeige)“** mit Versatz B waagerecht/senkrecht; wahre Lage, Synchronpaare und G-Code bleiben unverändert.
+
+### Strg+Z in allen Zeichen- und Bearbeitungsreitern
+- Rückgängig über bis zu 100 Schritte (Strg+Z) und Wiederholen (Strg+Y bzw. Strg+Umschalt+Z) in Rumpf, Fräse, Ausschnitte, Schriften, Formenbau (auch Winglet-Zeichnung) und 3D-Modell (Segmentpaar-Punkte, Platte). Der Verlauf gilt je Reiter und endet beim Laden eines Projekts oder beim Wechsel der Tragfläche.
+- CAD und DXF-Formen: Strg+Z greift auch, wenn das leere Koordinatenfeld den Fokus hat; beim laufenden Zeichnen geht es Punkt für Punkt zurück.
+
+### Negativschalendesign: Holmausschnitte im Kern
+- Neues Menü **„Holmausschnitte im Kern“** (mit „Kern mitschneiden“): Holme werden wie im Kerndesign während des Schnitts in die Kernbahn eingerechnet (Anfahr-Schlitz, um die Tasche, zurück). Gurttaschen sind ausgenommen.
+- Kern in Stege zerteilt: je Holm Kernteil (automatisch oder fest) und Lage in % der Stegbreite; der Holm wird mit seinem Steg verschoben geschnitten. Holme über die Stegflanke werden übersprungen und gemeldet.
+- Kompletter Holm-Editor samt Abbrand, als eigene Holmliste je Tragfläche, getrennt von Kerndesign und Tragflächendesigner.
+
+### DXF-Formen
+- Schalter **„Linke Profilseite hinten“**: Die linke Seite der Zeichnung liegt im G-Code hinten, wie im 3D-Modell. Blockzugabe, feste Blocklänge, Blockzuschnitt, Anfahrt und Startpunkt-Automatik folgen.
+- Schalter **„Profile auseinanderziehen (nur Anzeige)“** in der Gruppe „Synchronpunkte“; wahre Lage, Synchronpaare und G-Code bleiben unverändert.
+- 3D-Ansicht der geschnittenen Segmente: INNEN steht links, AUSSEN rechts (vorher seitenverkehrt).
+
+### Formenbau
+- Winglet (parametrisch): **„Schwung Endleiste“** und **„Lage der Auswölbung Endleiste“**, passend zur Nasenleiste.
+
 ## [1.97] — 2026-10-27
 ### Ausschnitte: Rechteck, mehrere Ausschnitte, Segmente als Bezug
 - Neue Art **„Rechteckausschnitt“**: Breite, Höhe, Eckenradius, Drehwinkel; Lage zur Blockkante oder mittig; Block (Loch) oder Rechteckstück bleibt stehen.

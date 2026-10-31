@@ -727,6 +727,24 @@
         + 'Erneut klicken auf den Button beendet den Modus.'
       : 'Zum Setzen den Modus starten. Danach INNEN-Punkt und zugehörigen AUSSEN-Punkt anklicken. '
         + 'Beide Konturen werden zwischen den Paaren synchronisiert; das erste Paar legt den Startpunkt fest.');
+    {
+      const sp = d.syncSpread || (d.syncSpread = { on: false, x: 0, y: 0 });
+      App.boolRow(sy.body, 'Profile auseinanderziehen (nur Anzeige)', () => sp.on, v => {
+        sp.on = v;
+        if (v && !sp.x && !sp.y && d.inner && d.outer) {   // Vorschlag: AUSSEN rechts neben INNEN
+          const bb = P => P.reduce((b, p) => ({ a: Math.min(b.a, p.x), b: Math.max(b.b, p.x) }), { a: 1e9, b: -1e9 });
+          const bi = bb(d.inner), bo = bb(d.outer);
+          sp.x = Math.ceil(bi.b - bo.a + 0.15 * (bi.b - bi.a) + 5);
+        }
+        App.buildSidebar(); renderDxf();
+      }, 'Verschiebt AUSSEN in der Zeichnung um den angegebenen Versatz, damit sich INNEN und AUSSEN nicht '
+        + 'überdecken und die Punkte leichter zu treffen sind. Reine Anzeige: die wahre Lage der Profile zueinander, '
+        + 'die Synchronpaare und der G-Code bleiben unverändert.');
+      if (sp.on) {
+        App.numRow(sy.body, 'Versatz AUSSEN X (mm)', () => sp.x, v => { sp.x = v; renderDxf(); }, { step: 5, norender: true });
+        App.numRow(sy.body, 'Versatz AUSSEN Y (mm)', () => sp.y, v => { sp.y = v; renderDxf(); }, { step: 5, norender: true });
+      }
+    }
     if (d.pick && d.pick.stage === 1)
       App.hint(sy.body, T('➊ INNEN-Punkt ') + d.pick.i + T(' gewählt — jetzt zugehörigen AUSSEN-Punkt anklicken.'));
     // Automatik: Ecken beider Konturen zuordnen (sonst gleichmäßig nach Bogenlänge).
@@ -816,6 +834,10 @@
       'Zeichnet die tatsächliche Draht-Bahn (INNEN/AUSSEN synchronisiert, inkl. Abbrand-Versatz) '
       + 'zusätzlich zu den Profilen.');
     if (d.showSpur && App.kerfTrueRow) App.kerfTrueRow(op.body, 'dxf');
+    App.boolRow(op.body, 'Linke Profilseite hinten', () => !!d.rearLeft,
+      v => { d.rearLeft = v; App.buildSidebar(); renderDxf(); App.render(); },
+      'Aus: die rechte Seite der Zeichnung liegt im G-Code hinten (Richtung Maschinennullpunkt). '
+      + 'An: die linke Seite liegt hinten — wie im Reiter „3D-Modell". Die Zugabe „hinten" sitzt dann links.');
     App.selectRow(op.body, 'Anfahrt von', [['rear', 'hinten (waagrecht)'], ['top', 'oben (senkrecht)'],
        ['front', 'vorne (waagrecht)'], ['bottom', 'unten (senkrecht)']],
       () => dxfApproachDir(d), v => { d.approach = v; App.buildSidebar(); renderDxf(); App.render(); },
@@ -1112,7 +1134,10 @@
     const z = po ? po.z : dxfBlockZ(d);
     const lenX = po ? po.lenX : (d.blockLenX || 0), hY = po ? po.heightY : (d.blockHeightY || 0);
     let minx, maxx, miny, maxy;
-    maxx = gb.maxx + z.r; minx = lenX > 0 ? maxx - lenX : gb.minx - z.f;
+    // Option „Linke Profilseite hinten" (d.rearLeft): hinten liegt in der Zeichnung LINKS
+    // (kleines X) -> Zugabe hinten links, feste Länge ab dort; G-Code spiegelt X (dxfProjection).
+    if (d.rearLeft) { minx = gb.minx - z.r; maxx = lenX > 0 ? minx + lenX : gb.maxx + z.f; }
+    else { maxx = gb.maxx + z.r; minx = lenX > 0 ? maxx - lenX : gb.minx - z.f; }
     miny = gb.miny - z.b; maxy = hY > 0 ? miny + hY : gb.maxy + z.t;
     return { minx, miny, maxx, maxy };
   }
@@ -1710,6 +1735,10 @@
     const d = state.dxf; const synced = dxfSynced(); if (!synced) return null;
     let rootPath = synced.inner.map(p => ({ x: p.x, y: p.y }));
     let tipPath = synced.outer.map(p => ({ x: p.x, y: p.y }));
+    // „Linke Profilseite hinten" (wie im 3D-Modell): X spiegeln (x -> -x), danach gilt
+    // überall wieder „hinten = größtes X". Die Blöcke werden unten mitgespiegelt.
+    const mirX = !!d.rearLeft;
+    if (mirX) { rootPath.forEach(p => { p.x = -p.x; }); tipPath.forEach(p => { p.x = -p.x; }); }
     // Sichere Anfahrt/Ausfahrt: Der Draht fährt vom Maschinennullpunkt (hinten,
     // größtes X) waagrecht ans Werkstück. Damit diese waagrechte An-/Abfahrt die
     // Kontur NICHT kreuzt, beginnt der Schnitt am HINTERSTEN Punkt (max X) — dort
@@ -1766,8 +1795,9 @@
     // Je Profilebene ein Rechteck (blockIn am INNEN-, blockOut am AUSSEN-Profil); ohne
     // eigene AUSSEN-Geometrie sind beide gleich (Prisma). `block` = Hülle beider (Nullpunkt,
     // Sicherheitshöhe, Anzeigen).
-    const BB = dxfBlocks({ minx: 0, maxx: maxx, miny: miny, maxy: maxy });
-    const blockIn = BB.inner, blockOut = BB.outer, block = rectUnion(blockIn, blockOut);
+    const BB = dxfBlocks({ minx: mirX ? -maxx : 0, maxx: mirX ? 0 : maxx, miny: miny, maxy: maxy });
+    const mrect = r => (mirX ? { minx: -r.maxx, miny: r.miny, maxx: -r.minx, maxy: r.maxy } : r);
+    const blockIn = mrect(BB.inner), blockOut = mrect(BB.outer), block = rectUnion(blockIn, blockOut);
     const origin = { x: Math.max(block.maxx, maxx) + (state.cfg.blockX || 0), y: Math.min(block.miny, miny) - (state.cfg.blockY || 0) };
     // Blockzuschnitt: senkrechte Schnitte an Blockvorderkante/hinterem Blockende, um den
     // halben Abbrand ins Verschnittmaterial versetzt. Beim Prisma konstantes X an beiden
@@ -2377,7 +2407,8 @@
       // Profile INNEN/AUSSEN (im Synchron-Setzmodus und Punkteditor immer sichtbar: Fangziel).
       const showProf = dxfPvOn('prof') || d.syncMode || d.pEdit.on;
       if (showProf && d.inner) { ctx.setLineDash(dashFor('profInner', [])); drawLoop(d.inner, App.PAL.profInner); ctx.setLineDash([]); }
-      if (showProf && d.outer) { ctx.setLineDash(dashFor('profOuter', [])); drawLoop(d.outer, App.PAL.profOuter); ctx.setLineDash([]); }
+      const so = dxfSpreadOff(), outerV = dxfShiftPts(d.outer, so);
+      if (showProf && d.outer) { ctx.setLineDash(dashFor('profOuter', [])); drawLoop(outerV, App.PAL.profOuter); ctx.setLineDash([]); }
       // Schnittspur (tatsächliche Draht-Bahn inkl. Abbrand) — synchron aus INNEN/AUSSEN.
       if (d.showSpur) {
         const sc = App.dxfSynced();
@@ -2390,6 +2421,7 @@
           if (App.kerfBand) { App.kerfBand(ctx, V, [ri], { view: 'dxf', k: kb, close: true }); App.kerfBand(ctx, V, [ro], { view: 'dxf', k: kb, close: true }); }
           ctx.strokeStyle = App.PAL.kerf; ctx.lineWidth = 1.4; ctx.setLineDash(dashFor('kerf', []));
           App.poly(ctx, V, ri, true); ctx.stroke();
+          ro = dxfShiftPts(ro, so);
           ctx.setLineDash(dashFor('kerf', [6, 4])); App.poly(ctx, V, ro, true); ctx.stroke(); ctx.setLineDash([]);
         }
       }
@@ -2400,6 +2432,7 @@
         if (sn && sn.inner.length > 1) {
           let ni = sn.inner, no = sn.outer;
           if (d.showSpur && d.kerf && !d.pathEdit) { const kk = App.dxfApplyKerf(ni.map(p => ({ x: p.x, y: p.y })), no.map(p => ({ x: p.x, y: p.y }))); ni = kk.root; no = kk.tip; }
+          no = dxfShiftPts(no, so);
           const nEvery = Math.max(1, Math.round(+d.pvNumN || 10));
           ctx.strokeStyle = 'rgba(160,176,196,.45)'; ctx.lineWidth = 0.8; ctx.beginPath();
           for (let i = 0; i < Math.min(ni.length, no.length); i += nEvery) { ctx.moveTo(V.X(ni[i].x), V.Y(ni[i].y)); ctx.lineTo(V.X(no[i].x), V.Y(no[i].y)); }
@@ -2414,7 +2447,7 @@
       }
       ctx.lineWidth = 1.2;
       if (d.inner && d.outer && (dxfPvOn('sync') || d.syncMode)) d.sync.forEach((s, k) => {
-        const a = d.inner[s.i], c = d.outer[s.j]; if (!a || !c) return;
+        const a = d.inner[s.i], c = outerV[s.j]; if (!a || !c) return;
         const start = (k === d.start);
         ctx.strokeStyle = start ? App.PAL.syncStart : 'rgba(160,176,196,.6)';
         ctx.setLineDash(start ? dashFor('syncStart', []) : []);
@@ -2434,14 +2467,16 @@
       if (d.syncMode && d.helpLayers) {
         // Schnittpunkte INNEN/AUSSEN × Hilfslayer als Fangmarken (kleine Kreuze).
         ctx.lineWidth = 1; ctx.setLineDash([]);
-        [[d.inner, App.PAL.profInner || '#5aa0ff'], [d.outer, App.PAL.profOuter || '#ff9f45']].forEach(([pts, col]) => {
+        [[d.inner, App.PAL.profInner || '#5aa0ff', null], [d.outer, App.PAL.profOuter || '#ff9f45', so]].forEach(([pts, col, o]) => {
           if (!pts) return; ctx.strokeStyle = col;
-          dxfHelpIntersections(pts).forEach(q => { const cx = V.X(q.x), cy = V.Y(q.y); ctx.beginPath(); ctx.moveTo(cx - 4, cy - 4); ctx.lineTo(cx + 4, cy + 4); ctx.moveTo(cx - 4, cy + 4); ctx.lineTo(cx + 4, cy - 4); ctx.stroke(); });
+          dxfHelpIntersections(pts).forEach(q0 => { const q = o ? { x: q0.x + o.x, y: q0.y + o.y } : q0; const cx = V.X(q.x), cy = V.Y(q.y); ctx.beginPath(); ctx.moveTo(cx - 4, cy - 4); ctx.lineTo(cx + 4, cy + 4); ctx.moveTo(cx - 4, cy + 4); ctx.lineTo(cx + 4, cy - 4); ctx.stroke(); });
         });
       }
       if (d.syncMode && d.syncHover) {
         const h = d.syncHover;
-        const p = (h.i != null) ? ((h.which === 'outer' ? d.outer : d.inner) || [])[h.i] : { x: h.x, y: h.y };
+        const oh = h.which === 'outer' && so ? so : { x: 0, y: 0 };
+        const p0 = (h.i != null) ? ((h.which === 'outer' ? d.outer : d.inner) || [])[h.i] : { x: h.x, y: h.y };
+        const p = p0 && { x: p0.x + oh.x, y: p0.y + oh.y };
         if (p) {
           const col = h.which === 'outer' ? (App.PAL.profOuter || '#ff9f45') : (App.PAL.profInner || '#5aa0ff');
           const cx = V.X(p.x), cy = V.Y(p.y);
@@ -2510,6 +2545,14 @@
   // ---- Ansichtsmenü DXF-Formen (#dxfViewToggles, wie Kerndesign / 3D-Segmentpaar) ----
   // Eigene Schalter in state.dxf.pv (fehlend = an, Punktnummern = aus), Abstand pvNumN;
   // Schnittspur/Block nutzen die vorhandenen showSpur/showBlock.
+  // Synchronisieren: AUSSEN nur in der Anzeige verschoben (d.syncSpread), damit sich
+  // INNEN und AUSSEN nicht überdecken. Geometrie, Paare und G-Code bleiben unberührt.
+  function dxfSpreadOff() {
+    const d = state.dxf, sp = d.syncSpread;
+    if (!sp || !sp.on || d.edit.on || d.pEdit.on) return null;
+    return { x: +sp.x || 0, y: +sp.y || 0 };
+  }
+  const dxfShiftPts = (pts, o) => (o && pts) ? pts.map(p => ({ x: p.x + o.x, y: p.y + o.y })) : pts;
   function dxfPvOn(k) { const pv = state.dxf.pv || {}; return k === 'nums' ? pv.nums === true : pv[k] !== false; }
   function syncDxfToggles() {
     const box = document.getElementById('dxfViewToggles'); if (!box) return;
@@ -2766,8 +2809,9 @@
     }
     return out;
   }
-  function dxfSyncSnap(pts, px, py, tolPx) {
+  function dxfSyncSnap(pts, px, py, tolPx, off) {
     const V = App.dxfDraw.V;
+    if (off) { px -= V.X(off.x) - V.X(0); py -= V.Y(off.y) - V.Y(0); }
     let bi = -1, bd = 1e9;
     pts.forEach((p, i) => { const dx = V.X(p.x) - px, dy = V.Y(p.y) - py; const dd = dx * dx + dy * dy; if (dd < bd) { bd = dd; bi = i; } });
     // Schnittpunkt mit einem Hilfslayer in Reichweite? Gewinnt, wenn näher als der Stützpunkt.
@@ -2830,7 +2874,7 @@
       const i = (s.i != null) ? s.i : dxfSyncInsert('inner', s);
       d.pick = { stage: 1, i };
     } else {
-      const s = dxfSyncSnap(d.outer, px, py, 24); if (!s) { d.pick = null; App.buildSidebar(); renderDxf(); return; }
+      const s = dxfSyncSnap(d.outer, px, py, 24, dxfSpreadOff()); if (!s) { d.pick = null; App.buildSidebar(); renderDxf(); return; }
       const j = (s.i != null) ? s.i : dxfSyncInsert('outer', s);
       d.sync.push({ i: d.pick.i, j });
       d.pick = null;
@@ -2847,7 +2891,7 @@
     const px = ev.clientX - r.left, py = ev.clientY - r.top;
     const stage1 = !!(d.pick && d.pick.stage === 1);
     const which = stage1 ? 'outer' : 'inner';
-    const s = dxfSyncSnap(stage1 ? d.outer : d.inner, px, py, 24);
+    const s = dxfSyncSnap(stage1 ? d.outer : d.inner, px, py, 24, stage1 ? dxfSpreadOff() : null);
     const hov = s ? (s.i != null ? { which, i: s.i } : { which, x: s.x, y: s.y }) : null;
     const prev = d.syncHover;
     const same = (!hov && !prev) || (hov && prev && hov.which === prev.which && hov.i === prev.i && hov.x === prev.x && hov.y === prev.y);
@@ -3175,7 +3219,8 @@
   }
   /* Liefert alle Segmente der Rippenkette als 3D-Liste für das gemeinsame
    * 3D-Fenster (render.js, App.seg3dOpen('dxf')): { k, root, tip, z0, z1, label }.
-   * Welt: X = Profiltiefe, Y = Höhe, Z = Spannweite (Segmentbreiten aufsummiert).
+   * Welt: X = Profiltiefe, Y = Höhe, Z = Spannweite (Segmentbreiten aufsummiert, negativ:
+   * so liegt INNEN in der Standardansicht links, AUSSEN rechts).
    * Segmente ohne Schneidepfad entfallen. */
   function dxfSeg3DList() {
     const d = state.dxf; dxfEnsureModel(); const ribs = d.ribs || [];
@@ -3186,7 +3231,7 @@
     for (let k = 0; k < nS; k++) {
       const P = dxfSegPaths(k);
       if (P && P.root.length > 2 && P.tip.length === P.root.length)
-        list.push({ k, root: P.root, tip: P.tip, z0: zs[k], z1: zs[k + 1], label: 'Seg ' + (k + 1) + ' · ' + Math.round(zs[k + 1] - zs[k]) + ' mm' });
+        list.push({ k, root: P.root, tip: P.tip, z0: -zs[k], z1: -zs[k + 1], label: 'Seg ' + (k + 1) + ' · ' + Math.round(zs[k + 1] - zs[k]) + ' mm' });
     }
     return { list, active: d.activeSeg };
   }
@@ -3225,10 +3270,12 @@
     // DXF-Reiter: Rückgängig (Strg+Z) / Wiederholen (Strg+Y bzw. Strg+Umschalt+Z).
     window.addEventListener('keydown', e => {
       if (state.activeTab !== 'dxf' || !(e.ctrlKey || e.metaKey)) return;
-      const inField = document.activeElement && /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-      if (inField) return;
+      const ae = document.activeElement, inField = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+      if (inField && !(ae.id === 'dxfCoordInput' && !ae.value)) return;
       const k = e.key.toLowerCase();
-      const path = state.dxf.pEdit.on;
+      const path = state.dxf.pEdit.on, dr = state.dxf.edit.draft;
+      // Laufende Skizze: zuerst Punkt für Punkt zurück.
+      if (k === 'z' && !e.shiftKey && !path && dr && dr.pts && dr.pts.length > 1) { e.preventDefault(); dr.pts.pop(); renderDxf(); return; }
       if (k === 'z' && !e.shiftKey) { e.preventDefault(); path ? dxfPathUndo() : dxfUndo(); }
       else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); path ? dxfPathRedo() : dxfRedo(); }
     });

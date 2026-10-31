@@ -318,6 +318,8 @@
       // wie die Schalen, um negStegeGap auseinandergerückt; je Steg {end (% Sehne),
       // sleeve (Glasschlauch), capTop/capBot (Holmgurt)} in negStegeList.
       negStegeOn: false, negStegeList: null, negStegeGap: 4,
+      negSparCut: false, negSparSteg: 0, negSpars: null,   // eigene Holme im Kern/in den Stegen (negholme.js)
+      negSparKerfMode: 'in', negSparKerfBasis: 'profile',
       negStegeOnly: false,                // nur die Stege schneiden (ohne Schalen/Stützstoff/Vorschnitte)
       gcodeSource: 'core',                 // Quelle im Reiter „G-Code": 'core' (Kerndesign) | 'neg' (Negativschalendesign)
       // Werkstoff-Zuweisung je Tragfläche (Reiter „Projektübersicht", wings.js cfg-Keys):
@@ -417,7 +419,7 @@
     dxf: { file: null, layers: null, order: [], innerName: null, outerName: null,
            innerOff: { x: 0, y: 0 }, outerOff: { x: 0, y: 0 },  // Verschiebung je Kontur (mm) zum Ausrichten zweier separater DXF
            inner: null, outer: null, sync: [], start: 0, dir: 1, density: 240,
-           span: 300, pick: null, kerf: true, safeLead: true,
+           span: 300, pick: null, kerf: true, safeLead: true, rearLeft: false,
            approach: 'rear', approachDist: 10,   // Anfahrweg: rear|top|front|bottom + Abstand zur Blockfläche (mm)
            showBlock: true, blockMargin: 10,   // Mindestabstand des Blockrands zum Profil (rundum, mm)
            blockOvF: 20, blockOvR: 20,         // (Alt) getrennte Zugabe vorne/hinten — nicht mehr in der UI

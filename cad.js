@@ -2693,8 +2693,10 @@
       }
       // „J" verbindet die gewählten Konturen (Linien/Polylinien/Splines).
       if ((e.key === 'j' || e.key === 'J') && !inField && !e.ctrlKey && !e.metaKey && ed.sel.length >= 2) { e.preventDefault(); cadJoinSelection(); return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { if (inField) return; e.preventDefault(); cadUndo(); return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { if (inField) return; e.preventDefault(); cadRedo(); return; }
+      // Das Koordinatenfeld hat im CAD meist den Fokus: nur ein gefülltes Feld behält Strg+Z/Y fürs Tippen.
+      const typing = inField && document.activeElement.value !== '';
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) { if (typing) return; e.preventDefault(); if (ed.draft) { cadUndoPoint(); App.buildSidebar(); renderCad(); } else cadUndo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || ((e.key === 'z' || e.key === 'Z') && e.shiftKey))) { if (typing) return; e.preventDefault(); cadRedo(); return; }
       if (e.key === 'Escape') { if (!inField) cadCancel(); }
       else if ((e.key === 'Enter' || e.key === ' ' || e.code === 'Space') && !inField) { e.preventDefault(); cadEnterKey(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.sel.length && !inField) { e.preventDefault(); cadEraseSelection(); }

@@ -136,6 +136,9 @@
    * Eigener Mini-Renderer: Orbit-Kamera, Perspektive, Beleuchtung, Maler-
    * Algorithmus auf 2D-Canvas (kein WebGL nötig). */
   const SEG3D_CAM0 = { yaw: 0.85, pitch: 0.32, zoom: 1, px: 0, py: 0 };
+  // DXF-Formen: Segmente liegen auf −Z (INNEN = linke Ebene) — Startansicht von der
+  // anderen Seite, damit INNEN auch dort links und AUSSEN rechts steht.
+  const seg3dCam0 = () => Object.assign({}, SEG3D_CAM0, seg3d.source === 'dxf' ? { yaw: Math.PI - SEG3D_CAM0.yaw } : {});
   const seg3d = Object.assign({ side: 'one', drag: null, source: null, hover: null, gizmo: null, anim: null, pivot: null, pick: null }, SEG3D_CAM0);
   const SEG3D_TITLES = {
     wing: '3D-Ansicht — geschnittene Segmente der Tragfläche (zusammengebaut)',
@@ -472,7 +475,9 @@
   function seg3dOpen(source) {
     const el = seg3dWinEl(); if (!el) return;
     const src = source || 'wing'; if (src !== seg3d.source) seg3d.pivot = null;   // anderes Modell: Drehpunkt verwerfen
+    const srcChanged = src !== seg3d.source;
     seg3d.source = src;
+    if (srcChanged) Object.assign(seg3d, seg3dCam0());
     const t = el.querySelector('.ttl'); if (t) t.textContent = T(SEG3D_TITLES[seg3d.source] || SEG3D_TITLES.dxf);
     if (!el.style.left) {   // erste Öffnung: rechts, mittig über der Zeichenfläche
       const vw = window.innerWidth, vh = window.innerHeight;
@@ -487,7 +492,7 @@
   // Verdrahtung: Maus im Canvas (Orbit/Verschieben/Zoom), Fenster ziehen, Tasten.
   function seg3dWire() {
     const el = seg3dWinEl(), cv = document.getElementById('cSeg3d'); if (!el || !cv || el._wired) return; el._wired = true;
-    if (window.ViewCube) ViewCube.attach({ reset: () => { Object.assign(seg3d, SEG3D_CAM0); seg3d.pivot = null; }, canvas: () => document.getElementById('cSeg3d'), get: () => seg3d, set: (y, p) => { seg3d.yaw = y; seg3d.pitch = p; }, redraw: () => renderSeg3DWin(), k: [0.01, -0.01],
+    if (window.ViewCube) ViewCube.attach({ reset: () => { Object.assign(seg3d, seg3dCam0()); seg3d.pivot = null; }, canvas: () => document.getElementById('cSeg3d'), get: () => seg3d, set: (y, p) => { seg3d.yaw = y; seg3d.pitch = p; }, redraw: () => renderSeg3DWin(), k: [0.01, -0.01],
       rot: (v, yaw, pitch) => { const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch), x1 = v[2] * cy - v[0] * sy, z1 = v[2] * sy + v[0] * cy; return [x1, v[1] * cp - z1 * sp, v[1] * sp + z1 * cp]; },
       labels: { '+x': 'Endleiste', '-x': 'Nase', '+y': 'Oben', '-y': 'Unten', '+z': 'Außen', '-z': 'Wurzel' } });
     const cvPos = e => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
@@ -533,7 +538,7 @@
       e.preventDefault();
       const q = cvPos(e);
       if (seg3dSetPivotAt(q.x, q.y)) return;   // Doppelklick aufs Modell: Drehpunkt (ohne Springen)
-      Object.assign(seg3d, SEG3D_CAM0); seg3d.pivot = null;
+      Object.assign(seg3d, seg3dCam0()); seg3d.pivot = null;
       renderSeg3DWin();
     });
     // Mausrad-Doppelklick: ebenfalls Drehpunkt; daneben bleibt Mausrad-Ziehen = verschieben.
@@ -553,7 +558,7 @@
     if (window.ResizeObserver) new ResizeObserver(() => renderSeg3DWin()).observe(el);
     const sSide = document.getElementById('seg3dSide'); if (sSide) { sSide.value = seg3d.side; sSide.onchange = () => { seg3d.side = sSide.value; seg3d.pivot = null; renderSeg3DWin(); }; }
     const bClose = document.getElementById('seg3dClose'); if (bClose) bClose.onclick = seg3dClose;
-    const bReset = document.getElementById('seg3dReset'); if (bReset) bReset.onclick = () => { Object.assign(seg3d, SEG3D_CAM0); seg3d.pivot = null; renderSeg3DWin(); };
+    const bReset = document.getElementById('seg3dReset'); if (bReset) bReset.onclick = () => { Object.assign(seg3d, seg3dCam0()); seg3d.pivot = null; renderSeg3DWin(); };
     const bW = document.getElementById('wing3dOpenBtn'); if (bW) bW.onclick = () => seg3dOpen('wing');
     const bD = document.getElementById('dxf3dOpenBtn'); if (bD) bD.onclick = () => seg3dOpen('dxf');
     window.addEventListener('keydown', e => { if (e.key === 'Escape' && seg3dIsOpen() && !(e.target && e.target.closest && e.target.closest('input,textarea,select'))) seg3dClose(); });
@@ -2177,13 +2182,14 @@
     const path = [];
     const noseApex = [];   // doppelt besuchte Kern-Nasenspitzen (Index im path)
     const supNose = [];    // Nasen-Ecken der Stützstoff-Flächen (Fläche↔Blockvorderkante)
+    let coreRange = null, stegRanges = null;   // Bahnindizes der Kernkontur bzw. je Steg (Holme im Kern)
     // „Nur Stege schneiden": KEINE Schalen — die Bahn ist allein die Steg-Schleife
     // (Anfahrt hinten am Block auf EL-Höhe, Oberseiten, Nasen-Schlaufe, Unterseiten,
     // hinten raus; der Schließzug läuft an der Block-Hinterkante hoch).
     if (geom.stegeOnly && geom.stege && geom.stege.length && App.stegeEmit) {
       const ap = App.stegeEmit(path, geom.stege, xBR, xBL, Math.max(geom.noseExt || 0, 0) / 2, teSlope);
       if (ap) noseApex.push(ap);
-      return { path, noseApex, supNose, cy: blockCy, ownCy, geom, xL, xT, xBL, xBR, yBot, yTop, s2, yLE, yTE, xTE, teSlope, block: rect(xBL, yBot, xBR, yTop) };
+      return { path, noseApex, supNose, stegRanges: ap && ap.ranges, cy: blockCy, ownCy, geom, xL, xT, xBL, xBR, yBot, yTop, s2, yLE, yTE, xTE, teSlope, block: rect(xBL, yBot, xBR, yTop) };
     }
     // Reihenfolge IMMER von OBEN nach UNTEN, Einstich an der HINTEREN OBEREN
     // Blockkante (xBR = hinten/TE-Seite, yTop = oben). Letzter Schnitt = waag-
@@ -2199,7 +2205,7 @@
       // Kern in Stege zerlegt (stege.js): die Steg-Bahn ersetzt die Kern-Schlaufe.
       if (geom.stege && geom.stege.length && App.stegeEmit) {
         const ap = App.stegeEmit(path, geom.stege, xBR, xBL, Math.max(geom.noseExt || 0, 0) / 2, teSlope);
-        if (ap) noseApex.push(ap);
+        if (ap) { noseApex.push(ap); stegRanges = ap.ranges; }
         return;
       }
       const cores = geom.cores && geom.cores.length ? geom.cores : (geom.corePts ? [geom.corePts] : []);
@@ -2212,11 +2218,13 @@
         const N1 = { x: nose.x - hv, y: nose.y - hv }, N2 = { x: xBL, y: nose.y - hv };
         const N3 = { x: xBL, y: nose.y + hv }, N4 = { x: nose.x - hv, y: nose.y + hv };
         path.push(atBR(teCoreU));
+        const c0 = path.length;                               // Bahnindex von C[0] (Holme im Kern, negholme.js)
         for (let i = 0; i < iLEc + 1; i++) path.push(C[i]);   // Kern OBERSEITE TE→Nase
         const apexUp = path.length - 1;                       // Nasenspitze (1. Besuch)
         path.push(N1, N2, N3, N4);                            // Nasen-Schlaufe
         const apexLo = path.length;                           // Nasenspitze (2. Besuch)
         for (let i = iLEc; i < C.length; i++) path.push(C[i]); // Kern UNTERSEITE Nase→TE
+        coreRange = [c0, path.length - 1];                    // letzter (innerster) Kern
         path.push(atBR(teCoreL));
         // Doppelt besuchte Nasenspitze merken — der spätere kerf-Versatz spreizt
         // die beiden Besuche sonst mit unterschiedlichen Normalen auseinander und
@@ -2283,7 +2291,7 @@
     path.push({ x: xBL, y: yBot });                   // vertikal runter bis Blockunterkante
     path.push({ x: xBR, y: yBot });                   // horizontal (Blockunterkante) — letzter Schnitt
     return {
-      path, noseApex, supNose, cy: blockCy, ownCy, geom, xL, xT, xBL, xBR, yBot, yTop, s2, yLE, yTE, xTE, teSlope,
+      path, noseApex, supNose, coreRange, stegRanges, cy: blockCy, ownCy, geom, xL, xT, xBL, xBR, yBot, yTop, s2, yLE, yTE, xTE, teSlope,
       block: rect(xBL, yBot, xBR, yTop)
     };
   }
@@ -2782,6 +2790,7 @@
       if (!negOv) {
         negSnapNoseApex(rSpur, tSpur, root, tip, kg);   // Nasen-Schlaufe der Kerne enthaken
         [rSpur, tSpur] = negDeloopSync(rSpur, tSpur);    // Rest-Selbstüberschneidungen wegstutzen
+        if (App.negSparApply) [rSpur, tSpur] = App.negSparApply(rSpur, tSpur, { cut, idx, rPts, tPts, root, tip, stR, stT });   // Holme im Kern
       }
     }
     const mat = negMatBlock(root);   // Werkstoff-Block (Höhe aus Reiter „Werkstoff")
@@ -2883,13 +2892,10 @@
     // wenn „Kern mitschneiden" aktiv ist (sonst gibt es keinen Kern). Der Kern ist
     // die zuletzt eingefügte Kernkontur (innerste).
     let negSpars = null;
-    if (withCore && !stegeOn) {
-      const coreR = negCoreContour(rPts, state.cfg.negCoreSheeting || 0);
-      const coreT = negCoreContour(tPts, state.cfg.negCoreSheeting || 0);
-      const sIdx = Math.min(idx, state.segments.length - 1);
-      const a = shR ? drawSpars(ctx, V, sIdx, 'root', rPts, 0, coreR) : null;
-      const b = shT ? drawSpars(ctx, V, sIdx, 'tip', tPts, 0, coreT) : null;
-      negSpars = { n: (a && a.n || 0) + (b && b.n || 0), lead: !!((a && a.lead) || (b && b.lead)) };
+    if (withCore && App.negSparOn && App.negSparOn()) {
+      // „Holme im Kern schneiden" (negholme.js): Umrisse am Kern bzw. am Steg (verschoben).
+      const G = App.negSparDraw(ctx, V, { cut, idx, rPts, tPts, root, tip, stR, stT }, shR, shT);
+      negSpars = { n: G.length, lead: G.some(o => o.gr && o.gr.lead) };
     }
     // Bemaßung: Gesamtblockhöhe, Profillänge (Sehne), Blocküberstände (NL/EL) und
     // Auseinanderziehen — Innenprofil (Wurzel) unten, Außenprofil (Rand) oben.

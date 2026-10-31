@@ -844,19 +844,60 @@
         () => (sp.posTip != null ? sp.posTip : sp.pos), v => { sp.posTip = v; render(); }, { min: 0, norender: true });
     }
   }
+  /* Abbrand der Holmausschnitte (global + je Holm) — Kerndesign und Negativschalen-
+   * design („Holmausschnitte im Kern", negholme.js) teilen dieselben Einstellungen. */
+  function sparKerfRows(body, ctx) {
+    const C = ctx || SPAR_CTX_CORE, km = C.kmKey, kb = C.kbKey, spars = C.list();
+    selectRow(body, 'Abbrand-Kompensation',
+        [['none', 'Ohne Abbrand'], ['in', 'Abbrand innen'], ['out', 'Abbrand außen']],
+        () => state.cfg[km], v => { state.cfg[km] = v; buildSidebar(); render(); },
+        '„Ohne": Draht fährt auf der Nennkontur der Tasche. „Abbrand innen": Taschenkontur um Abbrand/2 '
+        + 'nach INNEN versetzt → die FERTIGE Tasche hat das Nennmaß (Standard). „Abbrand außen": um '
+        + 'Abbrand/2 nach AUSSEN → die Tasche wird um den Abbrand größer.');
+    if ((state.cfg[km] || 'none') !== 'none')
+      selectRow(body, 'Abbrand-Bezug (global)',
+        [['profile', 'Verhältnis (Profillänge)'], ['local', 'Lokale Geschwindigkeit']],
+        () => state.cfg[kb] || 'local', v => { state.cfg[kb] = v; render(); },
+        '„Verhältnis (Profillänge)": der Abbrand wird je Rippe dem PROFIL gleichgesetzt (Wurzel-/Außenwert '
+        + 'aus dem Sehnen-/Vorschubverhältnis wie beim Kernschnitt). „Lokale Geschwindigkeit": der Abbrand '
+        + 'wird aus der tatsächlichen Draht-Geschwindigkeit BEIM HOLMSCHNITT bestimmt (Verhältnis der '
+        + 'Taschenumfänge Wurzel/Außen) — die größere Tasche läuft schneller (schmaler), die kleinere '
+        + 'langsamer (breiter). Bei durchgehend gleich großem Holm sind beide Bezüge nahezu identisch. '
+        + 'Gilt für alle Holme auf „Global"; einzelne Holme können unten abweichen.');
+    // Abbrand je Holm überschreiben (Modus + Bezug). „Global" = obige Einstellung.
+    if (spars.length) {
+      subhead(body, 'Abbrand je Holm');
+      spars.forEach((sp, k) => {
+        selectRow(body, T('Holm ') + (k + 1) + T(' · Abbrand'),
+          [['global', 'Global'], ['none', 'Ohne'], ['in', 'Innen'], ['out', 'Außen']],
+          () => sp.kerfMode || 'global', v => { sp.kerfMode = v; buildSidebar(); render(); },
+          T('Abbrand-Kompensation nur für Holm ') + (k + 1) + T('. „Global" = obige Einstellung.'));
+        if ((sp.kerfMode || 'global') !== 'global' && (sp.kerfMode || 'global') !== 'none')
+          selectRow(body, T('Holm ') + (k + 1) + T(' · Bezug'),
+            [['global', 'Global'], ['profile', 'Verhältnis (Profillänge)'], ['local', 'Lokale Geschwindigkeit']],
+            () => sp.kerfBasis || 'global', v => { sp.kerfBasis = v; render(); },
+            T('Abbrand-Bezug nur für Holm ') + (k + 1) + T('. „Global" = obige Einstellung, „Verhältnis" = wie Profil je Rippe, „Lokale Geschwindigkeit" = Verhältnis der Taschenumfänge beim Holmschnitt.'));
+      });
+    }
+  }
   /* Globaler Holm-Editor (Reiter Tragflächendesigner). Holme sind von den
    * Segmenten gelöst; jeder Holm gilt für einen Segmentbereich und wird als
    * gerade Linie zwischen Wurzel von segFrom und Außen von segTo definiert. */
-  function sparEditor(box) {
-    if (!state.spars) state.spars = [];
+  const SPAR_CTX_CORE = { list: () => state.spars || (state.spars = []), active: () => state.activeSpar,
+    setActive: i => { state.activeSpar = i; }, kmKey: 'sparKerfMode', kbKey: 'sparKerfBasis' };
+  // ctx (optional) = eigene Holmliste, z. B. Negativschalendesign (negholme.js):
+  // { list() -> Array, active() -> Index|null, setActive(i) }. Ohne: Kerndesign-Holme.
+  function sparEditor(box, ctx) {
+    const C = ctx || SPAR_CTX_CORE;
+    const spars = C.list();
     const segOpts = state.segments.map((s, i) => [String(i), 'Segment ' + (i + 1)]);
     hint(box, 'Taschen im Profil (Holmkästen), unabhängig von den Segmenten. Jeder Holm gilt für '
       + 'einen Segmentbereich und wird als GERADE Linie zwischen der Wurzel des Von-Segments und dem '
       + 'Außenprofil des Bis-Segments geführt; dazwischenliegende Segmente werden gerade durchzogen.');
     hint(box, 'Holm im Grundriss anklicken zum Aktivieren – oder auf die Kopfzeile tippen. Nur der aktive Holm ist aufgeklappt.');
-    if (state.activeSpar != null && state.activeSpar >= state.spars.length) state.activeSpar = null;
-    state.spars.forEach((sp, k) => {
-      const open = state.activeSpar === k;
+    if (C.active() != null && C.active() >= spars.length) C.setActive(null);
+    spars.forEach((sp, k) => {
+      const open = C.active() === k;
       const card = document.createElement('div');
       card.style.cssText = 'border:1px solid var(--line);border-radius:7px;padding:0;margin:2px 0;background:var(--panel2);overflow:hidden';
       const hd = document.createElement('div');
@@ -869,13 +910,13 @@
       if (open) lab.style.color = 'var(--accent)';
       const spc = document.createElement('div'); spc.style.flex = '1';
       const del = mkMini('✕', () => {
-        state.spars.splice(k, 1);
-        if (state.activeSpar === k) state.activeSpar = null;
-        else if (state.activeSpar != null && state.activeSpar > k) state.activeSpar--;
+        spars.splice(k, 1);
+        if (C.active() === k) C.setActive(null);
+        else if (C.active() != null && C.active() > k) C.setActive(C.active() - 1);
         buildSidebar(); render();
       }); del.style.color = 'var(--bad)';
       hd.appendChild(caret); hd.appendChild(lab); hd.appendChild(spc); hd.appendChild(del);
-      hd.onclick = () => { state.activeSpar = open ? null : k; buildSidebar(); render(); };
+      hd.onclick = () => { C.setActive(open ? null : k); buildSidebar(); render(); };
       card.appendChild(hd);
       box.appendChild(card);
       if (!open) return;
@@ -1158,7 +1199,7 @@
         + 'für eine GERADE Tragflächensteckung trotz V-Form. Beide zusammen: durchgehend gerader Holm.');
     });
     const add = document.createElement('button'); add.className = 'primary'; add.textContent = T('+ Holm hinzufügen');
-    add.onclick = () => { const n = state.segments.length - 1; state.spars.push(newSpar({ segFrom: 0, segTo: n })); state.activeSpar = state.spars.length - 1; buildSidebar(); render(); };
+    add.onclick = () => { const n = state.segments.length - 1; spars.push(newSpar({ segFrom: 0, segTo: n })); C.setActive(spars.length - 1); buildSidebar(); render(); };
     box.appendChild(add);
   }
 
@@ -1880,38 +1921,7 @@
           + 'abschnittsweise neu abgetastet; der Draht steht dort schräg, Zwischenrippen weichen um bis zu ≈ ')
           + o.sk.devMm.toFixed(1) + T(' mm in Flugrichtung ab.')));
     }
-    if (state.cfg.sparCut)
-      selectRow(hgc.body, 'Abbrand-Kompensation',
-        [['none', 'Ohne Abbrand'], ['in', 'Abbrand innen'], ['out', 'Abbrand außen']],
-        () => state.cfg.sparKerfMode, v => { state.cfg.sparKerfMode = v; render(); },
-        '„Ohne": Draht fährt auf der Nennkontur der Tasche. „Abbrand innen": Taschenkontur um Abbrand/2 '
-        + 'nach INNEN versetzt → die FERTIGE Tasche hat das Nennmaß (Standard). „Abbrand außen": um '
-        + 'Abbrand/2 nach AUSSEN → die Tasche wird um den Abbrand größer.');
-    if (state.cfg.sparCut && (state.cfg.sparKerfMode || 'none') !== 'none')
-      selectRow(hgc.body, 'Abbrand-Bezug (global)',
-        [['profile', 'Verhältnis (Profillänge)'], ['local', 'Lokale Geschwindigkeit']],
-        () => state.cfg.sparKerfBasis || 'local', v => { state.cfg.sparKerfBasis = v; render(); },
-        '„Verhältnis (Profillänge)": der Abbrand wird je Rippe dem PROFIL gleichgesetzt (Wurzel-/Außenwert '
-        + 'aus dem Sehnen-/Vorschubverhältnis wie beim Kernschnitt). „Lokale Geschwindigkeit": der Abbrand '
-        + 'wird aus der tatsächlichen Draht-Geschwindigkeit BEIM HOLMSCHNITT bestimmt (Verhältnis der '
-        + 'Taschenumfänge Wurzel/Außen) — die größere Tasche läuft schneller (schmaler), die kleinere '
-        + 'langsamer (breiter). Bei durchgehend gleich großem Holm sind beide Bezüge nahezu identisch. '
-        + 'Gilt für alle Holme auf „Global"; einzelne Holme können unten abweichen.');
-    // Abbrand je Holm überschreiben (Modus + Bezug). „Global" = obige Einstellung.
-    if (state.cfg.sparCut && (state.spars || []).length) {
-      subhead(hgc.body, 'Abbrand je Holm');
-      (state.spars || []).forEach((sp, k) => {
-        selectRow(hgc.body, T('Holm ') + (k + 1) + T(' · Abbrand'),
-          [['global', 'Global'], ['none', 'Ohne'], ['in', 'Innen'], ['out', 'Außen']],
-          () => sp.kerfMode || 'global', v => { sp.kerfMode = v; buildSidebar(); render(); },
-          T('Abbrand-Kompensation nur für Holm ') + (k + 1) + T('. „Global" = obige Einstellung.'));
-        if ((sp.kerfMode || 'global') !== 'global' && (sp.kerfMode || 'global') !== 'none')
-          selectRow(hgc.body, T('Holm ') + (k + 1) + T(' · Bezug'),
-            [['global', 'Global'], ['profile', 'Verhältnis (Profillänge)'], ['local', 'Lokale Geschwindigkeit']],
-            () => sp.kerfBasis || 'global', v => { sp.kerfBasis = v; render(); },
-            T('Abbrand-Bezug nur für Holm ') + (k + 1) + T('. „Global" = obige Einstellung, „Verhältnis" = wie Profil je Rippe, „Lokale Geschwindigkeit" = Verhältnis der Taschenumfänge beim Holmschnitt.'));
-      });
-    }
+    if (state.cfg.sparCut) sparKerfRows(hgc.body);
     hint(hgc.body, 'Form, Größe, Lage und Segmentbereich der Holme werden im Reiter '
       + '„Tragflächendesigner → Holmausschnitte" festgelegt.');
     side.appendChild(hgc.g);
@@ -2195,6 +2205,7 @@
     side.appendChild(kg.g);
 
     if (App.stegeSidebar) App.stegeSidebar(side);   // Kern in Stege zerlegen (nur mit Kern)
+    if (App.negSparSidebar) App.negSparSidebar(side);   // Holmausschnitte im Kern (nur mit Kern)
     App.ptEditMenu(side, 'neg');   // Punkte-Editor (Negativschalendesign)
 
     // --- Reiter „Formenbau" (form, optionales Feature) ------------------
@@ -2931,7 +2942,8 @@
   function buildModelGcodeSidebar(side) {
     if (!window.Model3D) return;
     // Pair-Ansicht (3. Fenster) holt Segment + Parameter hierüber.
-    window.__model3dPairProvider = () => ({ seg: mgCfg().seg, opt: mgOpt(), nums: mgCfg().pv.nums ? mgCfg().pairNums : 0 });
+    window.__model3dPairProvider = () => ({ seg: mgCfg().seg, opt: mgOpt(), nums: mgCfg().pv.nums ? mgCfg().pairNums : 0,
+      spread: (mgCfg().syncSpread && mgCfg().syncSpread.on) ? mgCfg().syncSpread : null });
     // Platten-Ansicht: Stücke + Parameter, und Bearbeitung (Verschieben/Kanal).
     window.__model3dPlateProvider = () => ({ placements: platePlacements(),
       opt: Object.assign({}, mgOpt(), { plateConnEdits: plateCfg().connEdits, plateGap: Math.min(plateCfg().gapH, plateCfg().gapV) }) });
@@ -3048,6 +3060,20 @@
       : 'Ohne Paare ordnet das Programm die Punkte gleichmäßig nach Bogenlänge zu. Mit Paaren laufen A und B zwischen je zwei Paaren synchron — '
         + 'z. B. Ecken, Kanten oder Nasen aufeinander legen, damit der Draht nicht verdrillt. Ein Paar genügt, um nur den Gleichlauf-Beginn festzulegen. '
         + 'Paare auf einem Loch gelten für dieses Loch. Gilt nur für das gewählte Segmentpaar.');
+    {
+      const sp = c.syncSpread || (c.syncSpread = { on: false, x: 0, y: 0 });
+      App.boolRow(sy.body, 'Profile auseinanderziehen (nur Anzeige)', () => sp.on, v => {
+        sp.on = v;
+        if (v && !sp.x && !sp.y && Model3D.pairSpreadHint) sp.x = Model3D.pairSpreadHint(c.seg, mgOpt());
+        buildSidebar(); Model3D.setView('pairs'); Model3D.refresh();
+      }, 'Verschiebt Sollkontur B in der Ansicht „Segmentpaar“ um den angegebenen Versatz, damit sich A und B nicht '
+        + 'überdecken und die Punkte leichter zu treffen sind. Reine Anzeige: die wahre Lage der Profile zueinander, '
+        + 'die Synchronpaare und der G-Code bleiben unverändert. Beim Punkte-Bearbeiten ist der Versatz aus.');
+      if (sp.on) {
+        App.numRow(sy.body, 'Versatz B waagerecht (mm)', () => sp.x, v => { sp.x = v; Model3D.refresh(); }, { step: 5, norender: true });
+        App.numRow(sy.body, 'Versatz B senkrecht (mm)', () => sp.y, v => { sp.y = v; Model3D.refresh(); }, { step: 5, norender: true });
+      }
+    }
     // Automatik (dieselbe wie DXF-Formen): Nase, Umkehrpunkte, Ecken, sonst Bogenlänge.
     if (Model3D.autoSyncSeg && App.autoSyncPairs) {
       const arow = document.createElement('div'); arow.style.cssText = 'display:flex;gap:6px;margin-top:6px';
@@ -3738,7 +3764,7 @@
   Object.assign(App, { noteBuckets, noteGet, noteHas, noteKey, noteSet, numRow, numRowEnter, openNotePop, plateCfg });
   Object.assign(App, { plateGcode, platePlacements, profilePicker, refreshNoteMarks, saveMenuColors, scheduleMenuColors, segBox, segCard });
   Object.assign(App, { segmentCutCard, segmentSelectRow, segmentShapeCard, segmentSheetRows, selectRow, setHintsMode, setNotesEnabled, sheetingGroup });
-  Object.assign(App, { feedRow, sparEditor, sparPosFields, subhead, txtRow, warn, wingImportGroup, wrapWithSpinner });
+  Object.assign(App, { SPAR_CTX_CORE, feedRow, sparEditor, sparKerfRows, sparPosFields, subhead, txtRow, warn, wingImportGroup, wrapWithSpinner });
   Object.defineProperty(App, 'MENU_COL', { get: () => MENU_COL, set: v => { MENU_COL = v; }, enumerable: true, configurable: true });
   Object.defineProperty(App, '_menuColTimer', { get: () => _menuColTimer, set: v => { _menuColTimer = v; }, enumerable: true, configurable: true });
   Object.defineProperty(App, 'hintsMode', { get: () => hintsMode, set: v => { hintsMode = v; }, enumerable: true, configurable: true });

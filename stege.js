@@ -133,8 +133,10 @@
     // Oberseiten hinten→vorne; die Stegtrennung erfolgt IM OBEREN SCHNITT: nach der
     // Oberseite von Steg k die linke Flanke runter, Lücke unten queren, rechte Flanke
     // von Steg k−1 hoch (dessen Oberseite folgt).
+    const ranges = S.map(() => ({}));   // Bahnindizes je Steg: top/bot = [erster, letzter] (Holme im Kern, negholme.js)
     for (let k = N - 1; k >= 0; k--) {
-      const t = S[k].top; for (let i = n - 1; i >= 0; i--) path.push(t[i]);
+      const t = S[k].top; ranges[k].top = [path.length, path.length + n - 1];
+      for (let i = n - 1; i >= 0; i--) path.push(t[i]);
       if (k > 0) path.push(S[k].bot[0], S[k - 1].bot[n - 1]);
     }
     // Nasen-Schlaufe (wie emitCores): Nasenspitze wird zweimal besucht.
@@ -142,9 +144,9 @@
     hv = Math.max(hv || 0, 0);
     path.push({ x: nose.x - hv, y: nose.y - hv }, { x: xBL, y: nose.y - hv }, { x: xBL, y: nose.y + hv }, { x: nose.x - hv, y: nose.y + hv });
     const apexLo = path.length;
-    for (let k = 0; k < N; k++) { const b = S[k].bot; for (let i = 0; i < n; i++) path.push(b[i]); }   // Unterseiten vorne→hinten (Lücken unten schon offen)
+    for (let k = 0; k < N; k++) { const b = S[k].bot; ranges[k].bot = [path.length, path.length + n - 1]; for (let i = 0; i < n; i++) path.push(b[i]); }   // Unterseiten vorne→hinten (Lücken unten schon offen)
     path.push({ x: xBR, y: last.bot[n - 1].y + m * (xBR - last.bot[n - 1].x) });  // hinten raus (Höhe EL-Unterkante)
-    return { apexUp, apexLo, prev: S[0].top[1] || nose, nose, next: S[0].bot[1] || nose };
+    return { apexUp, apexLo, prev: S[0].top[1] || nose, nose, next: S[0].bot[1] || nose, ranges };
   }
   /* Draufsicht der Tragfläche (alle Segmente) mit den Steg-Grenzen in
    * ORIGINALLAGE (so, wie die Stücke zusammengesetzt werden) — oben im
@@ -329,5 +331,5 @@
     side.appendChild(g.g);
   }
 
-  Object.assign(App, { stegeCheck, stegeDecorate, stegeEmit, stegeExportLayers, stegeList, stegeOn, stegePiece, stegePieces, stegePlan, stegeSidebar, stegeListUi });
+  Object.assign(App, { stegeContour, stegeCheck, stegeDecorate, stegeEmit, stegeExportLayers, stegeList, stegeOn, stegePiece, stegePieces, stegePlan, stegeSidebar, stegeListUi });
 })();

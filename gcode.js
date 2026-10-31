@@ -377,6 +377,9 @@
       App.negSnapNoseApex(rp, tp, root, tip, kg);   // Nasen-Schlaufe der Kerne enthaken
       [rp, tp] = App.negDeloopSync(rp, tp);          // Rest-Selbstüberschneidungen wegstutzen
     }
+    // Holmausschnitte im Kern bzw. in den Stegen (negholme.js), nach dem Abbrand-Versatz.
+    const sparCtx = { cut, idx, rPts, tPts, root, tip, stR, stT };
+    if (!negOv && App.negSparApply) [rp, tp] = App.negSparApply(rp, tp, sparCtx);
     // Von Hand bearbeitete Abbrandlinie (Ziel „Schnittverlauf"): ersetzt die
     // fertige Drahtbahn direkt (nach dem Abbrand) — hat Vorrang vor der Kavität.
     const burnOv = state.negBurnEdit[idx];
@@ -393,7 +396,8 @@
     const ox = root.xBR + (state.cfg.blockX || 0);
     const oy = mat.yBot - (state.cfg.blockY || 0);
     const core = state.cfg.negCore ? { sheeting } : null;
-    return { cut, geom, root, tip, rp, tp, core, mw, zRoot, zTip, ox, oy, idx, mat, stege: stegeOn ? stR : null };
+    const sparGeoms = App.negSparGeoms ? App.negSparGeoms(sparCtx) : [];
+    return { cut, geom, root, tip, rp, tp, core, mw, zRoot, zTip, ox, oy, idx, mat, stege: stegeOn ? stR : null, sparGeoms };
   }
   /* 3D-Szene der Negativschale für die Simulation (ein waagrechter Block über der
    * Segment-Spannweite, Wurzel-/Randebene wie im G-Code). */
