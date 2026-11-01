@@ -489,7 +489,7 @@
 
     // Polaren (Rechenkern des Reiters „Aerodynamik“: NeuralFoil / 2D-Windkanal)
     box.appendChild(mk('div', 'gh', T('Polaren')));
-    if (window.Aero && Aero.openFoilView && (window.NeuralFoil || (App.aeroXfoil && App.aeroXfoil.ready()))) {
+    if (window.FoilPolar && FoilPolar.openFoilView && (window.NeuralFoil || (App.aeroXfoil && App.aeroXfoil.ready()))) {
       const row = mk('div', 'fdb-btns');
       const ids = [...U.cmp]; if (ids.indexOf(r.id) < 0) ids.unshift(r.id);
       const b = mk('button', 'primary', T('▶ Profilpolaren rechnen …'));
@@ -610,7 +610,7 @@
   }
   // Polaren-Feld rechts neben der Eingabemaske (statt der Kennwert-Tabelle).
   // Polaren-Feld rechts neben der Eingabemaske (statt der Kennwert-Tabelle).
-  // Diagramme wie im Reiter „Aerodynamik" (Aero.drawChart): je Feld wählbar,
+  // Diagramme wie im Reiter „Aerodynamik" (FoilPolar.drawChart): je Feld wählbar,
   // Rad = Zoom um den Zeiger, Ziehen = Achse strecken/stauchen, Shift-/Rechts-
   // Ziehen = verschieben, Doppelklick = alles, Legende = Kurve ein/aus.
   const KFM_CH = [
@@ -624,7 +624,7 @@
     { id: 'xtr', title: 'Umschlag x/c über α (oben/unten)', xlab: 'α (°)', ylab: 'x/c', fx: q => q.alpha, fy: q => q.xtrU, fy2: q => q.xtrL }
   ];
   const KFM_SNAP_COL = ['#4fc3f7', '#81c784', '#ba68c8', '#e57373', '#fff176', '#4db6ac', '#f06292', '#a1887f'];
-  const kfmCharts = () => !!(window.Aero && Aero.drawChart && Aero.chartRange);
+  const kfmCharts = () => !!(window.FoilPolar && FoilPolar.drawChart && FoilPolar.chartRange);
   let kfmPolRO = false;
   function kfmPolarPanel() {
     const box = $('fdbTable'), K = U.kfm; if (!box || !K) return;
@@ -760,7 +760,7 @@
     const D = KFM_CH.find(d => d.id === K.polCh[i]) || KFM_CH[0];
     const g = slot.c.getContext('2d');
     const ser = K.pol ? kfmSeries(D) : [];
-    const auto = ser.length && window.Aero ? Aero.chartRange(ser) : null;
+    const auto = ser.length && window.FoilPolar ? FoilPolar.chartRange(ser) : null;
     if (!auto) {
       const dpr = window.devicePixelRatio || 1, W = slot.c.clientWidth, H = slot.c.clientHeight;
       slot.c.width = W * dpr; slot.c.height = H * dpr; g.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -770,7 +770,7 @@
     if (D.id === 'pol') auto.x0 = Math.min(auto.x0, 0);
     slot.auto = auto;
     const r = slot.rng || auto;
-    slot.map = window.Aero && Aero.drawChart(slot.c, '', T(D.xlab), T(D.ylab), ser, { grid: true, xr: [r.x0, r.x1], yr: [r.y0, r.y1] });
+    slot.map = window.FoilPolar && FoilPolar.drawChart(slot.c, '', T(D.xlab), T(D.ylab), ser, { grid: true, xr: [r.x0, r.x1], yr: [r.y0, r.y1] });
     const m = slot.map, cur = slot.cur;
     // Betriebspunkt (α aus dem Feld „Punkt bei α“) als Ring markieren
     if (m && K.opPt && isFinite(K.opPt.cl)) {
@@ -970,7 +970,7 @@
   // Polaren-Ansicht des Aerodynamik-Reiters über diesem Reiter öffnen — mit dem
   // gewählten Profil und allen zum Vergleich angehakten.
   function openPolars() {
-    if (!(window.Aero && Aero.openFoilView)) return;
+    if (!(window.FoilPolar && FoilPolar.openFoilView)) return;
     // Alle Datenbankprofile stehen in den Reihen zur Wahl; gewähltes + angehakte
     // Profile werden als Reihen vorbelegt (erste = Hauptreihe).
     const ids = [...U.cmp]; if (U.sel && ids.indexOf(U.sel) < 0) ids.unshift(U.sel);
@@ -978,7 +978,7 @@
     const profs = all.map(r => ({ prof: toProf(r), name: r.name }));
     const rows = ids.map(id => all.findIndex(r => r.id === id)).filter(i => i >= 0);
     if (!profs.length) return;
-    window.Aero.openFoilView({ host: $('foildbView'), profs, rows: rows.length ? rows : [0] });
+    window.FoilPolar.openFoilView({ host: $('foildbView'), profs, rows: rows.length ? rows : [0] });
   }
   function computeEdit(E) {
     try {

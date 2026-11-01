@@ -652,12 +652,18 @@
         <button data-view="core">Kerndesign</button>
         <button data-view="neg">Negativschalendesign</button>
         <button data-view="form">Formenbau</button>
+        <button data-view="stegh">Steghöhen</button>
+        <button data-view="servo">Flächenservos</button>
       </div>
     </div>
     <div class="tab-more" data-group="Rumpf">
       <button type="button" class="tab-more-btn">Rumpf<span class="tab-more-ch">▾</span></button>
       <div class="tab-more-list">
-        <button data-view="rumpf">Rumpf</button>
+        <button data-view="rpro">Rumpf</button>
+        <button data-view="rprof">Rumpf Formenbau</button>
+        <button data-view="rprob">Rumpf Spanten</button>
+        <button data-view="rpss">Rumpf Schnittspanten</button>
+        <button data-view="cockpit">Cockpit</button>
       </div>
     </div>
     <div class="tab-more" data-group="Komplexe Formen">
@@ -665,6 +671,7 @@
       <div class="tab-more-list">
         <button data-view="dxf">DXF-Formen</button>
         <button data-view="model">3D-Modell</button>
+        <button data-view="meshed">3D-Bearbeitung</button>
       </div>
     </div>
     <button data-view="gcode">G-Code</button>
@@ -676,6 +683,7 @@
         <button data-view="ausschnitt">Ausschnitte</button>
         <button data-view="rib">Rippendesigner</button>
         <button data-view="schrift">Schriften</button>
+        <button data-view="decal">Decals</button>
         <button data-view="fraese">Fräse</button>
       </div>
     </div>
@@ -946,6 +954,27 @@
         </div>
       </div>
 
+      <div class="view" id="meshedView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">3D-Bearbeitung — STL / OBJ / STEP laden, zusammensetzen und bearbeiten</span>
+          <div class="simlegend" id="meshedInfo" style="left:10px;right:auto;top:34px;max-width:520px;z-index:3"></div>
+          <div class="simlegend" id="meshedMeasPanel" style="left:10px;right:auto;top:auto;bottom:46px;width:300px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <canvas id="cMeshed" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="meshedModeBody" title="Ganze Körper auswählen (Taste K)">Körper</button>
+            <button id="meshedModeFace" title="Einzelne Flächen auswählen (Taste F)">Fläche</button>
+            <button id="meshedUndo" title="Rückgängig (Strg+Z)">↶</button>
+            <button id="meshedRedo" title="Wiederholen (Strg+Y)">↷</button>
+            <button id="meshedIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="meshedTop">⬇ Draufsicht</button>
+            <button id="meshedSide">➡ Seitenansicht</button>
+            <button id="meshedFront">⬅ Vorderansicht</button>
+            <button id="meshedWire">Drahtgitter</button>
+            <button id="meshedMeas" title="Messwerkzeug: Abstand, Kette, Winkel, Radius und Wandstärke direkt am 3D-Modell messen (Taste M)">📏 Messen</button>
+            <button id="meshedSec" title="Schnitte entlang X/Y/Z oder frei durch die Körper — eigenes Fenster, Ausgabe als DXF, SVG oder gedruckt auf Blätter aufgeteilt">✂ Schnitte</button>
+          </div>
+        </div>
+      </div>
       <div class="view" id="modelView">
         <div class="wing-pane" style="position:absolute;inset:0;border:0">
           <span class="pane-label">3D-Modell — Segmentzerlegung</span>
@@ -1060,23 +1089,115 @@
         </div>
       </div>
 
-      <div class="view" id="rumpfView">
+      <div class="view" id="rproView">
         <div class="wing-pane" style="position:absolute;inset:0;border:0">
-          <span class="pane-label">Rumpf — Loft-Fläche aus Bezier-Splines (Seitenansicht, Draufsicht, Spanten)</span>
-          <div class="simlegend" id="rumpfInfo" style="left:10px;right:auto;top:10px;max-width:420px;z-index:3">Kein Rumpf.</div>
-          <canvas id="cRumpf" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
-          <input type="file" id="fileRumpfImg" accept="image/*" style="display:none">
+          <span class="pane-label">Rumpf — Umrisse und Spanten (nach DevFus)</span>
+          <div class="simlegend" id="rproInfo" style="left:10px;right:auto;top:10px;max-width:440px;z-index:3">Kein Rumpf.</div>
+          <canvas id="cRpro" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simlegend" id="rproCutPanel" style="left:10px;right:auto;top:auto;bottom:46px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <input type="file" id="fileRproImg" accept="image/*" style="display:none">
           <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
-            <button id="rumpfIso" title="3D-Ansicht (frei drehen)">⬚ 3D</button>
-            <button id="rumpf3dTop" title="3D von oben">⬇ 3D oben</button>
-            <button id="rumpfSideV" title="Seitenansicht bearbeiten: Ober-/Unterkante (Splines mit Tangenten) und Höhe der breitesten Stelle je Station">➡ Seitenansicht</button>
-            <button id="rumpfTopV" title="Draufsicht bearbeiten: halbe Breite je Station (Spline mit Tangenten)">⬇ Draufsicht</button>
-            <button id="rumpfSecV" title="Spant: Querschnitt an beliebiger X-Lage (Pfeiltasten), Export als DXF">✂ Spant</button>
+            <button id="rproIso" title="3D-Ansicht (frei drehen)">⬚ 3D</button>
+            <button id="rpro3dTop" title="3D von oben">⬇ 3D oben</button>
+            <button id="rproSideV" title="Seitenansicht: Ober-/Unterkante (Umriss-Splines), Spantlagen, breiteste Stelle der Ei-Spanten">➡ Seitenansicht</button>
+            <button id="rproTopV" title="Draufsicht: halbe Breite (Umriss-Spline) und Spantlagen">⬇ Draufsicht</button>
+            <button id="rproSecV" title="Spantansicht: Spant anklicken = auswählen, Querschnittsform des gewählten Spants bearbeiten (Pfeiltasten = voriger/nächster Spant)">◯ Spant</button>
+            <button id="rproCutV" title="Schnittansicht: Ebene senkrecht zu X, Y oder Z, in 3D aufgeschnitten oder als 2D-Schnitt (Bedienfeld links unten, Pfeiltasten verschieben die Ebene)">✂ Schnitt</button>
+            <button id="rproUndo" title="Rückgängig (Strg+Z)">↶</button>
+            <button id="rproRedo" title="Wiederholen (Strg+Y)">↷</button>
             <span class="hint" style="align-self:center">3D: Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Doppelklick = zurück</span>
           </div>
         </div>
       </div>
-
+      <div class="view" id="rprobView">
+        <div class="wing-stack core-mode" id="rprobStack">
+          <div class="wing-pane">
+            <span class="pane-label">Seitenansicht — Spantlagen, Gurte &amp; Helling</span>
+            <canvas id="cRprobPlan"></canvas>
+          </div>
+          <div class="wing-pane" style="border-left:0">
+            <span class="pane-label">Bauteile — geschachtelt wie im DXF</span>
+            <div class="simlegend" id="rprobInfo" style="left:10px;right:auto;top:10px;max-width:380px">Kein Rumpf.</div>
+            <canvas id="cRprob"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="rpssView">
+        <div style="position:absolute;inset:0;display:grid;grid-template-columns:1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr) minmax(0,1.35fr)">
+          <div class="wing-pane">
+            <span class="pane-label">Seitenansicht — waagrechte Schnittlagen (parallel Draufsicht) ziehen / drehen</span>
+            <canvas id="cRpssSide"></canvas>
+          </div>
+          <div class="wing-pane">
+            <span class="pane-label">Draufsicht — senkrechte Schnittlagen (parallel Seitenansicht) ziehen / drehen</span>
+            <canvas id="cRpssTop"></canvas>
+          </div>
+          <div class="wing-pane">
+            <span class="pane-label">Querschnitte — Bauteile</span>
+            <div class="simlegend" id="rpssInfo" style="left:10px;right:auto;top:10px;max-width:520px">Kein Rumpf.</div>
+            <canvas id="cRpssParts"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="rprofView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Rumpf Formenbau — Formen für Rumpf und Kabinenhaube (STL)</span>
+          <div class="simlegend" id="rprofInfo" style="left:10px;right:auto;top:10px;max-width:460px;z-index:3">Kein Rumpf.</div>
+          <canvas id="cRprof" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simlegend" id="rprofCutPanel" style="left:10px;right:auto;top:auto;bottom:46px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="rprofCut" title="Schnittansicht: 2D-Schnitt durch die Form ein-/ausblenden (Ebene und Lage im Fenster links unten)">✂ Schnitt</button>
+            <button id="rprofIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="rprofTop">⬇ Draufsicht</button>
+            <button id="rprofSide">➡ Seitenansicht</button>
+            <button id="rprofFront">⬅ Vorderansicht</button>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="cockpitView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Cockpit — Instrumentenpilz, Instrumentenbrett, Sitzwanne (STL / SVG / DXF)</span>
+          <div class="simlegend" id="cockpitInfo" style="left:10px;right:auto;top:34px;max-width:460px;z-index:3"></div>
+          <canvas id="cCockpit" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="ckView3d">3D</button>
+            <button id="ckViewBrett" title="Instrumentenbrett in Pilotensicht: Instrumente mit der Maus verschieben">Instrumentenbrett</button>
+            <button id="ckIso">⬚ Iso</button>
+            <button id="ckPilot">Pilotensicht</button>
+            <button id="ckSide">➡ Seitenansicht</button>
+            <button id="ckTop">⬇ Draufsicht</button>
+            <button id="ckFus">Rumpf</button>
+            <button id="ckWire">Drahtgitter</button>
+          </div>
+        </div>
+      </div>
+      <div class="view" id="decalView">
+        <div style="position:absolute;inset:0;display:flex">
+          <div class="wing-pane" style="position:relative;flex:1.4;min-width:0;border:0">
+            <span class="pane-label">Decals — Schriftzüge und Abbildungen maßgetreu platzieren</span>
+            <div class="simlegend" id="decalInfo" style="left:10px;right:auto;top:34px;max-width:430px;z-index:3">Keine Decals.</div>
+            <canvas id="cDecal" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+            <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+              <button id="decalAdd" class="primary" title="Motiv aus der Bibliothek einfügen">+ Motiv…</button>
+              <button id="decalFit" title="Ansicht einpassen (auch Doppelklick in die freie Fläche)">⬚ Einpassen</button>
+              <label class="ck"><input type="checkbox" id="decalFill" checked> Farbig</label>
+              <label class="ck"><input type="checkbox" id="decalDims" checked> Maße</label>
+              <label class="ck" title="Zeigt die Decals so, wie sie ausgegeben werden (Bögen, Schnittkonturen)"><input type="checkbox" id="decalSheet"> Ausgabe-Vorschau</label>
+              <button id="decalSvg" title="Decals als SVG speichern (Millimeter)">SVG…</button>
+              <button id="decalDxf" title="Schnittkonturen als DXF speichern (Ebene je Farbe)">DXF…</button>
+              <button id="decalSil" title="DXF für Silhouette Studio speichern">Silhouette…</button>
+            </div>
+          </div>
+          <div class="wing-pane" id="decalPane3d" style="position:relative;flex:1;min-width:0;display:none">
+            <span class="pane-label">Rumpf in 3D — Ziehen = drehen · Rad = Zoom · rechte Taste = schieben · Klick = Decal setzen · Umschalt+Ziehen = Decal schieben</span>
+            <canvas id="cDecal3d" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          </div>
+        </div>
+      </div>
+      <!-- Reiter „Steghöhen" (stegh.js): Holm- und Ruderstege aus dem Tragflächendesign -->
+      <div class="view" id="steghView"></div>
+      <!-- Reiter „Flächenservos" (servos.js): Servos, Hebel, Anlenkung, Kinematik -->
+      <div class="view" id="servoView"></div>
 
       <div class="view" id="fraeseView">
         <div class="mwrap cutwrap">
@@ -1621,6 +1742,7 @@
 <input type="file" id="fileFraeseDxf" accept=".dxf" style="display:none">
 <input type="file" id="fileFraeseGcode" accept=".gcode,.nc,.ngc,.tap,.txt" style="display:none">
 <input type="file" id="fileSchriftFont" accept=".ttf,.otf,.ttc" style="display:none">
+<input type="file" id="fileDecalFont" accept=".ttf,.otf,.ttc" style="display:none">
 <input type="file" id="fileSettings" accept=".json" style="display:none">
 <input type="file" id="fileMaterial" accept=".json" style="display:none">
 
@@ -1638,7 +1760,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261031gl1"></script>
+<script src="i18n.js?v=20261101rumpf1"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261022tr2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
@@ -1671,41 +1793,60 @@
 <script src="ribs.js?v=20261027mf3"></script>
 <script src="dxfshapes.js?v=20261031un1"></script>
 <script src="wingimport.js?v=20261010xflm"></script>
-<script src="filesys.js?v=20261031un1"></script>
+<script src="filesys.js?v=20261101rumpf1"></script>
 <script src="stlpreview.js?v=20261027mf3"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
-<script src="gmfc.js?v=20261017theme2"></script>
+<script src="gmfc.js?v=20261101rumpf1"></script>
 <script src="render.js?v=20261029nh3"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261031ecken"></script>
+<script src="sidebar.js?v=20261101rumpf1"></script>
 <script src="pathpreview.js?v=20261008bcl"></script>
 <script src="gcodegen.js?v=20261025wn"></script>
 <script src="cutpanel.js?v=20261025wn"></script>
 <script src="stege.js?v=20261029nh"></script>
 <script src="kernteile.js?v=20261025wn"></script>
 <script src="negholme.js?v=20261029nh4"></script>
+<script src="stegh.js?v=20261101srv10"></script>
+<script src="servos.js?v=20261101srv18"></script>
 <script src="pc2wing.js?v=20261010tol"></script>
 <script src="stepexport.js?v=20261010prof"></script>
 <script src="formenbau.js?v=20261027vm2"></script>
-<script src="rumpf.js?v=20261017theme2"></script>
+<script src="stlbody.js?v=20261101rumpf1"></script>
+<script src="rumpfpro.js?v=20261101rumpf1"></script>
+<script src="rproSpanten.js?v=20261101rumpf1"></script>
+<script src="rproSchnitte.js?v=20261101rumpf1"></script>
+<script src="rproForm.js?v=20261101rumpf1"></script>
+<script src="occad_lib.js?v=20261019oc1"></script>
+<script src="occad_wasm.js?v=20261019oc1"></script>
+<script src="meshocc.js?v=20261022tr2"></script>
+<script src="meshedit.js?v=20261101rumpf1"></script>
+<script src="meshsection.js?v=20261101rumpf1"></script>
+<script src="cockpit.js?v=20261101rumpf1"></script>
 <script src="fraese.js?v=20261026skew"></script>
 <script src="schrift_fonts.js?v=20261004gerade2"></script>
 <script src="schrift.js?v=20261004gerade2"></script>
-<script src="ausschnitt.js?v=20261027ref1"></script>
+<script src="ausschnitt.js?v=20261101rumpf1"></script>
 <script src="ausschnitt_seg.js?v=20261027seg4"></script>
 <script src="schrift_gcode.js?v=20261025wn"></script>
 <script src="ausschnitt_gcode.js?v=20261026blk"></script>
+<script src="decals_lib.js?v=20261004gerade2"></script>
+<script src="decals_design.js?v=20261004gerade2"></script>
+<script src="decals.js?v=20261101rumpf1"></script>
+<script src="neuralfoil_data.js?v=20261004gerade2"></script>
+<script src="neuralfoil.js?v=20261008align3"></script>
+<script src="profpolare.js?v=20261012re"></script>
+<script src="foilpolar.js?v=20261101b"></script>
 <script src="kfm.js?v=20261008align"></script>
-<script src="foildb.js?v=20261025strak2"></script>
+<script src="foildb.js?v=20261101a"></script>
 <script src="compute.js?v=20261025strak4"></script>
-<script src="wings.js?v=20261023mf2"></script>
+<script src="wings.js?v=20261101rumpf1"></script>
 <script src="overview_bg.js?v=20261004gerade2"></script>
 <script src="overview.js?v=20261023mf"></script>
 <script src="ptedit.js?v=20261011dat"></script>
 <script src="profedit.js?v=20261025strak4"></script>
 <script src="tabmenu.js?v=20261019tm1"></script>
-<script src="undo.js?v=20261031un1"></script>
-<script src="app.js?v=20261019me1"></script>
+<script src="undo.js?v=20261101rumpf1"></script>
+<script src="app.js?v=20261101rumpf1"></script>
 </body>
 </html>
 

@@ -36,6 +36,8 @@
     'rf',
     // Holmauslegung (holm.js)
     'holm',
+    // Steghöhen (stegh.js)
+    'stegH',
     // Werkstoff-Zuweisung (Reiter „Projektübersicht")
     'design', 'matId', 'matHeight', 'negMatId', 'negMatHeight', 'matHMode', 'designBlockH',
     // Gewichtsabschätzung (Reiter „Projektübersicht")
@@ -514,7 +516,7 @@
     const L = wingList();
     const grp = App.grp, hint = App.hint;
     // --- Folge-Reiter: nur Auswahl ---
-    const s = grp('Tragfläche', true, 'wing core neg rib form dxfexport rumpf rpro fraese', { key: 'wingsSelect', alwaysOpen: true });
+    const s = grp('Tragfläche', true, 'wing core neg rib form dxfexport rpro fraese', { key: 'wingsSelect', alwaysOpen: true });
     {
       const row = document.createElement('div'); row.className = 'row full';
       row.appendChild(wingSelectEl()); s.body.appendChild(row);

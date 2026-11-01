@@ -382,7 +382,7 @@ def run_build(cfg, log, cancel=None):
         cmd += ["--add-data", "%s;." % os.path.join(stage, f)]
     # xfoil.exe mitpacken (landet in _MEIPASS/XFOIL, xfoilrun sucht dort)
     xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
-    if "aero" in selected and os.path.isfile(xf):
+    if os.path.isfile(xf):
         cmd += ["--add-binary", "%s;XFOIL" % xf]
     cmd.append(os.path.join(stage, ENTRY))
 

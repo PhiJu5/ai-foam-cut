@@ -17,6 +17,9 @@ die hier aufgefuehrten Lizenzen gelten ausschliesslich fuer die jeweils genannte
 | 4 | PyInstaller (Bootloader) | 6.22.0 | GPL-2.0-or-later mit Ausnahme | PyInstaller-exe |
 | 5 | Pillow | 12.3.0 | MIT-CMU | nur Icon-Erzeugung (`make_icon.py`) |
 | 6 | occt-import-js / Open CASCADE Technology (`occt-import-js.js`, `occt_wasm.js`) | 0.0.23 (OCCT 7.x) | LGPL-2.1 | alle Ausgaben (STEP-Import im Reiter „3D-Modell“) |
+| 7 | replicad-opencascadejs / Open CASCADE Technology (`occad_lib.js`, `occad_wasm.js`) | siehe Abschnitt 7 | LGPL-2.1 | alle Ausgaben (CAD-Volumen im Reiter „3D-Bearbeitung“) |
+| 8 | NeuralFoil, AeroSandbox (JS-Portierung in `neuralfoil.js`, `neuralfoil_data.js`) | | MIT | alle Ausgaben (Profilpolaren) |
+| 9 | XFOIL (`XFOIL/xfoil.exe`) | 6.99 | GPL | Windows-Ausgaben (Profilpolaren) |
 
 ---
 
@@ -842,3 +845,42 @@ necessary.  Here is a sample; alter the names:
 
 That's all there is to it!
 ```
+
+---
+
+## 7. replicad-opencascadejs / Open CASCADE Technology — LGPL-2.1
+
+OpenCascade als WebAssembly, wird erst beim ersten Gebrauch gestartet. Quelle:
+https://github.com/sgenoud/replicad — Lizenztext: siehe Abschnitt 6.
+
+---
+
+## 8. NeuralFoil und AeroSandbox — MIT
+
+Copyright (c) Peter Sharpe. https://github.com/peterdsharpe/NeuralFoil ,
+https://github.com/peterdsharpe/AeroSandbox
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 9. XFOIL 6.99 — GNU General Public License
+
+Copyright (C) Mark Drela, Harold Youngren. Unverändertes Programm, läuft als
+eigener Prozess. Quellcode: https://web.mit.edu/drela/Public/web/xfoil/

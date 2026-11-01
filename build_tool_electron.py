@@ -202,6 +202,10 @@ def patch_package_json(src, name, version, target, stage_files):
     b = pkg.setdefault("build", {})
     b["productName"] = name
     b["files"] = stage_files
+    # xfoil.exe als Ressource ausserhalb der asar - aus ihr liesse es sich nicht starten
+    xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
+    if target == "win" and os.path.isfile(xf):
+        b["extraResources"] = [{"from": xf.replace("\\", "/"), "to": "XFOIL/xfoil.exe"}]
     if target == "linux":
         b["directories"] = {"output": LX_OUT}
         b.setdefault("linux", {})["artifactName"] = "${productName}.${ext}"

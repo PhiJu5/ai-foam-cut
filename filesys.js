@@ -1790,7 +1790,7 @@
   // Gleiches für den Systemdialog-Weg (App.nativeSave, z. B. NAS): Pfad statt Handle.
   let projNativePath = null;
   function setProjFileHandle(h) { projFileHandle = (h && h.createWritable) ? h : null; projNativePath = null; }
-  // Rumpf-Pro: Rückgängig reicht nach dem Speichern nur bis zu diesem Stand
+  // Rumpf: Rückgängig reicht nach dem Speichern nur bis zu diesem Stand
   const projSaved = () => { if (window.RumpfPro && RumpfPro.histMarkSaved) { try { RumpfPro.histMarkSaved(); } catch (e) {} } };
   async function saveProject(opts) {
     const quick = !!(opts && opts.quick);
@@ -1887,7 +1887,7 @@
     if (window.StlBody && StlBody.reset) { try { StlBody.reset(); } catch (e) {} }   // STL-Rumpfmodell des Vorprojekts verwerfen (kommt aus d.cfg.stlBody)
     if (window.Decals && Decals.reset) { try { Decals.reset(); } catch (e) {} }   // Altprojekte ohne cfg.decals: leer starten
     if (App.undoReset) { try { App.undoReset(); } catch (e) {} }
-    if (window.RumpfPro && RumpfPro.histReset) { try { RumpfPro.histReset(); } catch (e) {} }   // Rumpf-Pro: Rückgängig nur bis zum geladenen Stand
+    if (window.RumpfPro && RumpfPro.histReset) { try { RumpfPro.histReset(); } catch (e) {} }   // Rumpf: Rückgängig nur bis zum geladenen Stand
     ['negStegeOn', 'negStegeList', 'negStegeGap', 'negStegeOnly'].forEach(k => {
       const v = PROJECT_DEFAULTS.cfg[k]; state.cfg[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
     });

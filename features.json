@@ -32,6 +32,40 @@
       ]
     },
     {
+      "id": "meshedit",
+      "name": "3D-Bearbeitung (STL/OBJ/STEP zusammensetzen und bearbeiten)",
+      "description": "Reiter „3D-Bearbeitung“: STL-, OBJ-, STEP- und IGES-Dateien als einzelne Körper laden, zusammensetzen (Fläche an Fläche, aneinanderreihen, vereinen mit Entfernen der Stirnkappen) und bearbeiten: Körper verschieben, drehen, skalieren, spiegeln, an einer Ebene verlängern/kürzen; Flächen verschieben, extrudieren, drehen, skalieren, löschen; Löcher schließen. Ausgabe als STL oder Übergabe an den Reiter „3D-Modell“.",
+      "files": [
+        "meshedit.js",
+        "meshsection.js"
+      ],
+      "tabs": [
+        "meshed"
+      ],
+      "default": true,
+      "views": [
+        "meshedView"
+      ],
+      "requires": [
+        "model3d"
+      ]
+    },
+    {
+      "id": "occad",
+      "name": "CAD-Volumen in der 3D-Bearbeitung (OpenCascade)",
+      "description": "Reiter „3D-Bearbeitung“: STEP-Dateien als echte Volumenkörper mit exakten Freiformflächen laden und bearbeiten (Verschieben/Drehen/Spiegeln, Vereinen/Abziehen/Schnittmenge, Push/Pull, Querschnitt einfügen, Loft zwischen zwei Flächen, Kanten runden/fasen, Aushöhlen) und exakt als STEP speichern. OpenCascade als WebAssembly (replicad-opencascadejs, LGPL-2.1), ca. 10 MB; wird erst beim ersten Gebrauch gestartet.",
+      "files": [
+        "occad_lib.js",
+        "occad_wasm.js",
+        "meshocc.js"
+      ],
+      "tabs": [],
+      "default": true,
+      "requires": [
+        "meshedit"
+      ]
+    },
+    {
       "id": "stege",
       "name": "Kern-Stege (Negativ- und Kerndesign)",
       "description": "Im Negativschalendesign den Kern in einzelne Stege zerlegen (Glasschlauch, Holmgurt, Stegabstand) und im selben Schnitt wie die Schalen fahren; im Kerndesign den Kern ebenso zerteilen, optional mit erhaltener, auseinandergezogener Schale (eigener Schnitt, ein oder getrennte Programme).",
@@ -42,6 +76,39 @@
       ],
       "tabs": [],
       "default": true
+    },
+    {
+      "id": "steghoehe",
+      "name": "Steghöhen (Holm- und Ruderstege)",
+      "description": "Reiter „Steghöhen“: Holm- und Ruderstege aus dem Tragflächendesign festlegen, Höhenliste je Steg (alle x mm und an jedem Segmentstoß), Draufsicht, Vorderansicht und Schnitte, Übernahme in die CAD-Bearbeitung.",
+      "files": [
+        "stegh.js"
+      ],
+      "tabs": [
+        "stegh"
+      ],
+      "default": true,
+      "views": [
+        "steghView"
+      ]
+    },
+    {
+      "id": "servos",
+      "name": "Flächenservos (Servos, Ruderhörner, Anlenkung)",
+      "description": "Reiter „Flächenservos“: Servos aus einer Typenliste platzieren, Hebel, Ruderhorn, Anlenkung normal oder überkreuz, Kinematik mit Ausschlag, Übersetzung und Moment; Kollisionsprüfung gegen Stege, Gurt und Steckung; automatische Schnitte durch Servo und Anlenkung.",
+      "files": [
+        "servos.js"
+      ],
+      "tabs": [
+        "servo"
+      ],
+      "default": true,
+      "views": [
+        "servoView"
+      ],
+      "requires": [
+        "steghoehe"
+      ]
     },
     {
       "id": "formenbau",
@@ -60,18 +127,72 @@
       ]
     },
     {
-      "id": "rumpf",
-      "name": "Rumpf (Rumpf aus Bezier-Splines mit Tangenten: Dreitafel-Ansicht und Spanten)",
-      "description": "Reiter „Rumpf“: Rumpf als echte NURBS-Fläche aus Stationen (Oberkante, Unterkante, Breite, Querschnittsform), Bearbeitung in Seiten-/Draufsicht mit Hintergrundbild, Spantschnitte, Export STL und DXF.",
+      "id": "rumpfpro",
+      "name": "Rumpf (nach DevFus: Umrisse + parametrische Spanten)",
+      "description": "Reiter „Rumpf“ (eigenständig, unabhängig vom Reiter „Rumpf“): Umrisse in Seiten-/Draufsicht als eigene Splines (glatte Punkte, Tangenten, Ecken), frei platzierte Spanten mit Querschnittsform Ei, abgerundetes Rechteck/Trapez, Kreis oder frei; Werte je Spant als Steuerspant oder interpoliert (linear, Spline, proportional, gerade Kante); Hintergrundbilder, Tragflächenübergang und Seitenleitwerk, Export STL/DXF und Formen als STL (Halbschale, Positiv auf Block, Negativ im Block).",
       "files": [
-        "rumpf.js"
+        "rumpfpro.js"
       ],
       "tabs": [
-        "rumpf"
+        "rpro"
       ],
       "default": true,
       "views": [
-        "rumpfView"
+        "rproView"
+      ]
+    },
+    {
+      "id": "rproSpanten",
+      "name": "Rumpf Spanten (Bausatz: Spanten aus dem Rumpf ableiten)",
+      "description": "Reiter „Rumpf Spanten“: aus dem Rumpf die Spanten zum Bauen ableiten — Beplankungsabzug, Gurt-/Leistenaussparungen, Leichterung, Teilung links/rechts bzw. oben/unten, Helling (Füße bis zur Grundlinie + Hellingbrett mit Schlitzen, auch kopfüber); Ausgabe als geschachteltes DXF, Stückliste (CSV) und Übergabe in die CAD-Bearbeitung.",
+      "files": [
+        "rproSpanten.js"
+      ],
+      "tabs": [
+        "rprob"
+      ],
+      "default": true,
+      "views": [
+        "rprobView"
+      ],
+      "requires": [
+        "rumpfpro"
+      ]
+    },
+    {
+      "id": "rproSchnitte",
+      "name": "Rumpf Schnittspanten (Bauteile aus frei gelegten Schnittebenen)",
+      "description": "Reiter „Rumpf Schnittspanten“: aus dem Rumpf Bauteile aus frei gelegten Schnittebenen ableiten — senkrecht längs (parallel Seitenansicht) oder waagrecht (parallel Draufsicht), mit Winkel bis zum Querschnitt, in Seiten- und Draufsicht mit der Maus verschieben und drehen; Abzug für die Rumpfwand, Kreuzverzapfung oder Stutzen mit Zapfen bei Überschneidungen, Ausschnitte über die CAD-Bearbeitung; Ausgabe als geschachteltes DXF, Stückliste (CSV) und Übergabe in die CAD-Bearbeitung.",
+      "files": [
+        "rproSchnitte.js"
+      ],
+      "tabs": [
+        "rpss"
+      ],
+      "default": true,
+      "views": [
+        "rpssView"
+      ],
+      "requires": [
+        "rumpfpro"
+      ]
+    },
+    {
+      "id": "rproForm",
+      "name": "Rumpf Formenbau (Formen für Rumpf und Kabinenhaube als STL)",
+      "description": "Reiter „Rumpf Formenbau“: aus dem Rumpf Formen als STL ableiten — Rumpf als Negativform (zwei Halbschalen-Formen), geteiltes Urmodell auf Trennplatte oder ganzes Urmodell; Kabinenhaube als Tiefziehklotz oder Negativform (Haubenlinie aus dem Rumpf, mit Zugabe und Sockel); Formenrand mit Passlöchern, Teilung in Druckstücke.",
+      "files": [
+        "rproForm.js"
+      ],
+      "tabs": [
+        "rprof"
+      ],
+      "default": true,
+      "views": [
+        "rprofView"
+      ],
+      "requires": [
+        "rumpfpro"
       ]
     },
     {
@@ -243,6 +364,38 @@
       "default": true,
       "views": [
         "foildbView"
+      ]
+    },
+    {
+      "id": "decals",
+      "name": "Decals (Schriftzüge und Abbildungen für Plotter und Drucker)",
+      "description": "Reiter „Decals“: Hoheitszeichen, Flaggen, Haifischmaul, Streifen, Warnzeichen und Schriftzüge maßgetreu auf Tragfläche, Rumpf (3D-Ansicht, Zuschnitt abgewickelt) oder freier Fläche platzieren; Ausgabe als SVG, DXF und DXF für Silhouette Studio, wie platziert oder auf Bögen geschachtelt, mit Schneidekontur für Print & Cut. Schriftzüge nutzen die Schriftquellen der Funktion „Schriften“ (schrift_fonts.js); ohne sie gibt es nur Motive.",
+      "files": [
+        "decals_lib.js",
+        "decals_design.js",
+        "decals.js"
+      ],
+      "tabs": [
+        "decal"
+      ],
+      "default": true,
+      "views": [
+        "decalView"
+      ]
+    },
+    {
+      "id": "cockpit",
+      "name": "Cockpit (Instrumentenpilz, Instrumentenbrett, Sitzwanne)",
+      "description": "Reiter „Cockpit“: Instrumentenpilz (fest im Rumpf oder am Haubenrahmen mit Haubenrahmen), Instrumentenbrett in Pilz- oder Trapezform mit Instrumenten (Sacklöcher/Durchbrüche, Zierringe), Sitzwanne nach der Rumpfinnenseite mit Seitenstufen, Steuerknüppel, Vorlagen nach Segler-Typ und Stutzen überschneidender Teile; passt sich an Rumpf oder ein STL an; Ausgabe STL je Bauteil, Instrumentenblätter als SVG (1:1), Brett als DXF.",
+      "files": [
+        "cockpit.js"
+      ],
+      "tabs": [
+        "cockpit"
+      ],
+      "default": true,
+      "views": [
+        "cockpitView"
       ]
     }
   ]

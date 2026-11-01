@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const url = require('url');
 const CFG = require('./config');
+const XFOIL = require('./xfoilrun');   // XFOIL-Anbindung (Profilpolaren)
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -152,6 +153,28 @@ function createServer(rootDir, getState) {
       });
       req.on('error', () => sendJson(res, '{"ok":false}', 500));
       return;
+    }
+
+    // XFOIL (foilpolar.js): xfoil.exe im Ordner XFOIL neben der exe, in den
+    // Ressourcen (Build-Tool packt es dorthin) oder im App-Ordner
+    if (pathname === '/__xfoil__') {
+      const dirs = [process.env.PORTABLE_EXECUTABLE_DIR, path.dirname(process.execPath), process.resourcesPath, rootDir, path.dirname(rootDir)];
+      if (req.method === 'GET') {
+        sendJson(res, JSON.stringify(XFOIL.info(dirs, url.parse(req.url, true).query.exe)));
+        return;
+      }
+      if (req.method === 'POST') {
+        const chunks = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          if (!XFOIL.sameOrigin(req)) { sendJson(res, '{"ok":false}'); return; }
+          XFOIL.handle(Buffer.concat(chunks).toString('utf-8'), dirs)
+            .then(r => sendJson(res, JSON.stringify(r)), () => sendJson(res, '{"ok":false}'));
+        });
+        req.on('error', () => sendJson(res, '{"ok":false}', 500));
+        return;
+      }
+      res.statusCode = 405; res.end(); return;
     }
 
     // Profildatenbank (foildb.js): eine Datei neben der Einstellungsdatei,

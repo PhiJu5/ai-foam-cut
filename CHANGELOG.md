@@ -4,6 +4,18 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [2.0] — 2026-11-01
+### Neue Module
+- **Rumpf:** Rumpf aus Umrissen und parametrischen Spanten, Tragflächenübergang, Seitenleitwerk, Export STL/DXF.
+- **Rumpf Spanten und Schnittspanten:** Bauteile aus Spanten oder frei gelegten Schnittebenen, als DXF, Stückliste und ins CAD.
+- **Rumpf Formenbau:** Formen für Rumpf und Kabinenhaube als STL.
+- **Steghöhen:** Holm- und Ruderstege mit Höhenliste und Schnitten, Übernahme ins CAD.
+- **Flächenservos:** Servos, Hebel, Anlenkung und Kinematik mit Kollisionsprüfung und Schnitten.
+- **Cockpit:** Instrumentenpilz, Instrumentenbrett, Sitzwanne; passt sich an ein eigenes STL an.
+- **Decals:** Schriftzüge und Motive maßgetreu als SVG, DXF und für Silhouette.
+- **3D-Bearbeitung:** STL/OBJ/STEP/IGES zusammensetzen und bearbeiten, CAD-Volumen (OpenCascade), Schnitte.
+- **Profilpolaren in der Profildatenbank:** XFOIL und NeuralFoil, auch im direkten Vergleich; dazu Polaren in den Profil-Vergleichsfenstern und im KFm-Gestalter.
+
 ## [1.98] — 2026-10-31
 ### 3D-Modell: Abbrand korrigiert (Maßänderung!), scharfe Ecken
 - **Abbrand-Versatz korrigiert:** Bisher wurde auf Geraden nur etwa zwei Drittel des Soll-Versatzes ausgeglichen. Die Schnittspur liegt jetzt um den vollen halben Abbrand versetzt, Teile ändern dadurch ihr Maß gegenüber alten G-Codes. Ecken laufen als echte Gehrung, auch wenn ein Synchronpaar knapp neben einer Ecke liegt.

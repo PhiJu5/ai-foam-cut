@@ -1,13 +1,13 @@
 // undo.js — gemeinsames Rückgängig/Wiederholen (Strg+Z / Strg+Y bzw. Strg+Umschalt+Z) für alle
 // Reiter, in denen mit der Maus gezeichnet oder gezogen wird und die keinen eigenen Verlauf haben.
-// CAD, DXF-Formen, Punkte-Editor, 3D-Bearbeitung und Rumpf-Pro behalten ihren eigenen.
+// CAD, DXF-Formen, Punkte-Editor, 3D-Bearbeitung und Rumpf behalten ihren eigenen.
 // Prinzip: Die Reiter halten ihre Daten in state.cfg. Nach jeder Bedienung (Maus los, Feld geändert,
 // Taste los) wird je cfg-Schlüssel verglichen; ein Schritt speichert nur die geänderten Schlüssel.
 // Änderungen ohne Bedienung (Selbst-Ergänzung, Übergabe aus anderen Reitern) ergeben keinen Schritt.
 (function () {
   'use strict';
   const { state, T } = App;
-  const TABS = new Set(['rumpf', 'cockpit', 'decal', 'fraese', 'ausschnitt', 'schrift', 'form', 'rprob', 'rpss', 'model']);
+  const TABS = new Set(['cockpit', 'decal', 'fraese', 'ausschnitt', 'schrift', 'form', 'rprob', 'rpss', 'model', 'stegh', 'servo']);
   const MAX_STEPS = 100, MAX_KEY_SIZE = 5e6;   // größere Werte (eingebettete Netze/Bilder) laufen nicht mit
   const MG = '@modelGcode';                    // 3D-Modell: Segmentpaar/Platte liegen in state.modelGcode
   // Nur Ansicht/Auswahl: ändert sich mit, ist aber kein eigener Schritt.

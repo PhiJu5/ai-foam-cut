@@ -2211,13 +2211,10 @@
     // --- Reiter „Formenbau" (form, optionales Feature) ------------------
     if (App.formSidebar) App.formSidebar(side);
 
-    // --- Reiter „Rumpf" (rumpf, optionales Feature) ---------------------
-    if (App.rumpfSidebar) App.rumpfSidebar(side);
-
-    // --- Reiter „Rumpf-Pro" (rpro) und „Rumpf-Pro Spanten" (rprob), optionale Features ---
+    // --- Reiter „Rumpf" (rpro) und „Rumpf Spanten" (rprob), optionale Features ---
     if (App.rproSidebar) App.rproSidebar(side);
     if (App.rprobSidebar) App.rprobSidebar(side);
-    if (App.rpssSidebar) App.rpssSidebar(side);   // Reiter „Rumpf-Pro Schnittspanten“ (optional)
+    if (App.rpssSidebar) App.rpssSidebar(side);   // Reiter „Rumpf Schnittspanten“ (optional)
     if (App.rprofSidebar) App.rprofSidebar(side);
     if (App.meshedSidebar) App.meshedSidebar(side);   // Reiter „3D-Bearbeitung“ (optional)
     if (App.cockpitSidebar) App.cockpitSidebar(side);   // Reiter „Cockpit" (optional)
@@ -2242,6 +2239,8 @@
 
     // --- Reiter „Holmauslegung" (holm, optionales Feature) ---------------
     if (App.holmSidebar) App.holmSidebar(side);
+    if (App.stegHSidebar) App.stegHSidebar(side);   // Reiter „Steghöhen“
+    if (App.servoSidebar) App.servoSidebar(side);   // Reiter „Flächenservos“
 
     // --- Reiter „Profildatenbank" (foildb, optionales Feature) ------------
     if (App.foildbSidebar) App.foildbSidebar(side);

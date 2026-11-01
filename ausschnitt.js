@@ -83,7 +83,7 @@
     khPosF: 50, khPosB: 50, khPosR: 50,                  // Lage der größten Wölbung (% der Linie)
     khKeep: 'canopy',       // maßhaltig: 'canopy' (Haube) | 'fus' (Rumpf) | 'mid' (Draht auf der Linie)
     khDir: 'fwd',           // 'fwd' (vorne → hinten) | 'rev'
-    // freier Linienzug (khMode 'free', wie die Haubenlinie im Rumpf-Pro): Punkte von der Blockoberkante zur Blockoberkante
+    // freier Linienzug (khMode 'free', wie die Haubenlinie im Rumpf): Punkte von der Blockoberkante zur Blockoberkante
     khMode: 'std',          // 'std' (drei Linien) | 'free' (Linienzug)
     khPts: null             // [{ x (ab Blockvorderseite), y (Tiefe unter Oberkante), r, t line|spline|foil, curv, pos, fSrc naca|wing|dat, fThk, fProf, fSide, fNose a|b, fScale }]
   };
@@ -1400,7 +1400,7 @@
     sel(g1.body, 'Nase zeigt nach', 'waNose', [['left', 'links'], ['right', 'rechts']], 'Seite des Blocks, auf der die Rumpfnase (vordere Linie) liegt.');
     selectRow(g1.body, 'Art der Schnittlinie', [['std', 'drei Linien (vorne, unten, hinten)'], ['free', 'freier Linienzug (Geraden, Splines, Profil)']], () => isFree() ? 'free' : 'std',
       v => { if (v === 'free' && !(Array.isArray(C('khPts')) && C('khPts').length >= 2)) khToFree(lastRes && !lastRes.empty && !lastRes.free ? lastRes : null); S('khMode', v); khSel = 0; hover = null; upd(true); },
-      'Freier Linienzug: beliebig viele Punkte, je Abschnitt gerade, Spline oder Seite eines Tragflächenprofils — wie die Haubenlinie im Rumpf-Pro. Beim ersten Umschalten werden die drei Linien übernommen.');
+      'Freier Linienzug: beliebig viele Punkte, je Abschnitt gerade, Spline oder Seite eines Tragflächenprofils — wie die Haubenlinie im Rumpf. Beim ersten Umschalten werden die drei Linien übernommen.');
     if (isFree()) {
       canopyFreeSidebar(g1.body);
       const bar = document.createElement('div'); bar.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin:4px 0';

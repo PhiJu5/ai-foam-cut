@@ -1,3 +1,7 @@
+try:
+    import xfoilrun       # XFOIL-Anbindung fuer die Profilpolaren (/__xfoil__)
+except Exception:
+    xfoilrun = None
 import sys, os, json, glob, http.server, socketserver, threading, webbrowser, datetime, ctypes, urllib.parse
 
 # --- Ablaufdatum: App funktioniert nach diesem Datum nicht mehr ---
@@ -383,6 +387,13 @@ def main():
             if path == "/__savefile__":
                 self._send_json_bytes(b'{"avail":true}')   # zweiter Schreibweg vorhanden
                 return
+            if path == "/__xfoil__":
+                if not xfoilrun:
+                    self._send_json_bytes(b'{"ok":false}')
+                    return
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                self._send_json_bytes(xfoilrun.info([exe_dir(), base_dir()], q.get("exe", [None])[0]))
+                return
             if path == "/__foildb__":
                 try:
                     with open(foildb_file, "rb") as f:
@@ -415,6 +426,14 @@ def main():
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 r = native_save(q.get("name", [""])[0], data, q.get("path", [None])[0])
                 self._send_json_bytes(json.dumps(r).encode("utf-8"))
+                return
+            if path == "/__xfoil__":
+                length = int(self.headers.get("Content-Length", "0"))
+                data = self.rfile.read(length)
+                if not xfoilrun or not xfoilrun.same_origin(self.headers):
+                    self._send_json_bytes(b'{"ok":false}')
+                    return
+                self._send_json_bytes(xfoilrun.handle(data, [exe_dir(), base_dir()]))
                 return
             if path == "/__foildb__":
                 try:

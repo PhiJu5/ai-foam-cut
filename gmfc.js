@@ -691,7 +691,7 @@
   // Profile (Sehne 0…1, Selig-Reihenfolge), Sehnen, Spannweite, Pfeilung (LE-
   // Versatz), V-Form (Winkel), Schränkung, Blockhöhe, Nasen-/Endleistenrand,
   // Endleisten-Verlängerung und Beplankung werden übernommen. Holmausschnitte
-  // (Cutouts) nicht. Rumpf-Projekte (Segmenttyp 0) gehören in „DXF-Formen".
+  // (Cutouts) nicht. Rumpfjekte (Segmenttyp 0) gehören in „DXF-Formen".
   function sectionProfile(sec) {
     const ySign = sec.inverted ? -1 : 1;
     // Selig: Endleiste → Oberseite → Nase → Unterseite → Endleiste.
