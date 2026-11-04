@@ -1840,6 +1840,8 @@
       // DXF-/SVG-Formen und 3D-Modell (Netz + Bearbeitungen) mitspeichern.
       dxf: dxfClean,
       modelGcode: state.modelGcode || null,
+      // CAD-Hintergrundbilder (dataURL + Lage/Maßstab; Image-Objekte nicht).
+      cadBgs: ((state.cad && state.cad.bgs) || []).filter(b => b.url).map(b => ({ url: b.url, name: b.name || '', iw: b.iw, ih: b.ih, x: b.x, y: b.y, scale: b.scale, rot: b.rot, opacity: b.opacity, visible: b.visible !== false })),
       model3d: (window.Model3D && Model3D.serialize) ? Model3D.serialize() : null,
       meshedit: (window.MeshEdit && MeshEdit.serialize) ? MeshEdit.serialize() : null
     });
@@ -1999,6 +2001,12 @@
       const bg = state.dxf.bg;
       if (bg) { bg._drag = null; bg.img = null;
         if (bg.url) { const im = new Image(); im.onload = () => { bg.img = im; bg.iw = im.naturalWidth || im.width; bg.ih = im.naturalHeight || im.height; if (typeof renderDxf === 'function' && state.activeTab === 'dxf') renderDxf(); }; im.src = bg.url; } }
+    }
+    // CAD-Hintergrundbilder: Bilder aus den dataURLs neu aufbauen.
+    if (state.cad) {
+      state.cad.bgs = (Array.isArray(d.cadBgs) ? d.cadBgs : []).map(o => Object.assign({}, o, { img: null }));
+      state.cad.bgSel = 0;
+      state.cad.bgs.forEach(bg => { const im = new Image(); im.onload = () => { bg.img = im; bg.iw = im.naturalWidth || im.width; bg.ih = im.naturalHeight || im.height; if (state.activeTab === 'cad') { App.buildSidebar(); (App.refreshActiveView || App.render)(); } }; im.src = bg.url; });
     }
     // 3D-Modell-Bearbeitungen (Segment-/Platten-Konfiguration) und Netz.
     if (d.modelGcode && typeof d.modelGcode === 'object') {

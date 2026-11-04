@@ -219,10 +219,13 @@
   function capCenter(G, c, z) {
     const val = (q, v) => { const f = frame(G, q); return f.le + (c.capMode === 'mm' ? (+v || 0) : f.c * (+v || 0) / 100); };
     const P = [[0, val(0, c.capP0)]];
+    if (c.capOrtho) return P[0][1];   // von oben gesehen rechtwinklig zur Wurzelrippe: gleiche Rücklage über die ganze Spannweite
     if (c.capPerJoint) jointsIn(G, 0, G.L).forEach(q => { const v = c.capJ && c.capJ[q.k]; if (v != null) P.push([q.z, val(q.z, v)]); });
     P.push([G.L, val(G.L, c.capP1)]);
     return lerpPts(P, z);
   }
+  // Mitte der Steckung: folgt dem Gurt oder steht für sich rechtwinklig zur Wurzelrippe
+  const stkCenter = (G, c, z) => capCenter(G, c, c.stkOrtho ? 0 : z);
   function fillCapJoints(G, c) {
     if (!c.capJ) c.capJ = {};
     const J = jointsIn(G, 0, G.L);
@@ -241,7 +244,7 @@
   }
   function stkTrim(G, c, st, kind, a, b, xAt) {
     const S = stkData(G, c); if (!S || S.cy == null || !(S.oW > 0)) return a;
-    const e = Math.min(b, S.len), web = webOf(st, kind), hit = z => Math.abs(xAt(z) - capCenter(G, c, z)) < S.oW / 2 + web / 2;
+    const e = Math.min(b, S.len), web = webOf(st, kind), hit = z => Math.abs(xAt(z) - stkCenter(G, c, z)) < S.oW / 2 + web / 2;
     let last = null;
     for (let z = a; z < e; z += 1) if (hit(z)) last = z;
     if (e >= a && hit(e)) last = e;
@@ -258,7 +261,7 @@
     const box = w => {
       let top = Infinity, bot = -Infinity;
       for (const z of zs) {
-        const xc = capCenter(G, c, z), ins = insetOf(G, c, 'holm', z);
+        const xc = stkCenter(G, c, z), ins = insetOf(G, c, 'holm', z);
         for (let i = 0; i <= 8; i++) { const s = section(G, xc - w / 2 + w * i / 8, z); if (!s) return null; top = Math.min(top, s.top - ins - z * tan); bot = Math.max(bot, s.bot + ins - z * tan); }
       }
       return { top, bot, H: (top - bot) * cos };
@@ -403,12 +406,13 @@
       if (c.capJ) jointsIn(G, 0, L).forEach(q => { if (c.capJ[q.k] != null) c.capJ[q.k] = conv(q.z, c.capJ[q.k]); });
       c.capMode = v; refresh(true);
     });
-    if (G.segs.length > 1) App.boolRow(det, 'Lage je Segmentstoß einzeln', () => !!c.capPerJoint, v => { c.capPerJoint = v; refresh(true); });
+    App.boolRow(det, 'Rechtwinklig zur Wurzelrippe (Draufsicht)', () => !!c.capOrtho, v => { c.capOrtho = v; refresh(true); }, 'Gurt und Steckung laufen von oben gesehen gerade, rechtwinklig zur Wurzelrippe: gleiche Rücklage wie an der Wurzel über die ganze Spannweite.');
+    if (G.segs.length > 1 && !c.capOrtho) App.boolRow(det, 'Lage je Segmentstoß einzeln', () => !!c.capPerJoint, v => { c.capPerJoint = v; refresh(true); });
     {
       const u = c.capMode === 'mm' ? ' (mm)' : ' (%)', GP = Object.assign({}, NR, { step: 1 });
       numRow(det, T('Gurtmitte Wurzel') + u, () => c.capP0, v => { c.capP0 = v; upd(); }, GP);
-      if (c.capPerJoint && G.segs.length > 1) fillCapJoints(G, c).forEach(q => numRow(det, T('Gurtmitte') + ' ' + T('Segmentstoß') + ' ' + (q.k + 1) + '|' + (q.k + 2) + u, () => c.capJ[q.k], v => { c.capJ[q.k] = v; upd(); }, GP));
-      numRow(det, T('Gurtmitte außen') + u, () => c.capP1, v => { c.capP1 = v; upd(); }, GP);
+      if (c.capPerJoint && !c.capOrtho && G.segs.length > 1) fillCapJoints(G, c).forEach(q => numRow(det, T('Gurtmitte') + ' ' + T('Segmentstoß') + ' ' + (q.k + 1) + '|' + (q.k + 2) + u, () => c.capJ[q.k], v => { c.capJ[q.k] = v; upd(); }, GP));
+      if (!c.capOrtho) numRow(det, T('Gurtmitte außen') + u, () => c.capP1, v => { c.capP1 = v; upd(); }, GP);
     }
     // Steckung: aufklappbar, liegt immer zwischen den Gurten
     const dk = document.createElement('details'); dk.open = stkOpen; dk.ontoggle = () => { stkOpen = dk.open; };
@@ -422,6 +426,7 @@
     stkBox = null;
     if (c.stkOn) {
       selectRow(dk, 'Form', [['square', 'Vierkant'], ['round', 'Rund']], () => c.stkForm || 'square', v => { c.stkForm = v; refresh(true); });
+      if (!c.capOrtho) App.boolRow(dk, 'Rechtwinklig zur Wurzelrippe (Draufsicht)', () => !!c.stkOrtho, v => { c.stkOrtho = v; refresh(true); }, 'Nur die Steckung läuft von oben gesehen gerade, rechtwinklig zur Wurzelrippe, ab der Gurtmitte an der Wurzel. Der Gurt bleibt, wie er ist.');
       numRow(dk, 'Wandstärke Hülse (mm)', () => c.stkWall, v => { c.stkWall = Math.max(0, v); upd(); }, GR);
       numRow(dk, 'Einbindetiefe ab Wurzel (mm)', () => c.stkLen, v => { c.stkLen = clamp(v, 0, L); upd(); }, Object.assign({}, NR, { step: 10 }));
       if (c.stkForm !== 'round') numRow(dk, 'Breite Steckung (mm)', () => c.stkW, v => { c.stkW = Math.max(0, v); upd(); }, GB);
@@ -612,9 +617,9 @@
       const cc = cfg(), S = stkData(G, cc);
       if (S && S.len > 0 && S.oW > 0) {
         const Z = [0, S.len].concat(G.segs.slice(0, -1).map(q => q.z1).filter(z => z < S.len)).sort((p, q) => p - q);
-        line(Z.map(z => [z, -(capCenter(G, cc, z) - S.oW / 2)]).concat(Z.slice().reverse().map(z => [z, -(capCenter(G, cc, z) + S.oW / 2)])), true);
+        line(Z.map(z => [z, -(stkCenter(G, cc, z) - S.oW / 2)]).concat(Z.slice().reverse().map(z => [z, -(stkCenter(G, cc, z) + S.oW / 2)])), true);
         cx.fillStyle = 'rgba(255,240,106,.28)'; cx.fill(); cx.strokeStyle = '#fff06a'; cx.lineWidth = 1.3; cx.stroke();
-        cx.fillStyle = '#fff06a'; cx.fillText(T('Steckung'), X(S.len) + 4, Y(-capCenter(G, cc, S.len)) + 4);
+        cx.fillStyle = '#fff06a'; cx.fillText(T('Steckung'), X(S.len) + 4, Y(-stkCenter(G, cc, S.len)) + 4);
       }
     }
     // Segmentstöße (durch Draufsicht und Stege)
@@ -863,7 +868,7 @@
       {
         const cc = cfg(), S = stkData(G, cc);
         if (S && S.cy != null && q.z <= S.len + 1e-6 && S.oH > 0) {
-          const u = X(capCenter(G, cc, q.z) - q.le), v = Y(S.cy + q.z * S.tan + q.dy), k = PX, shape = (w, h) => { g.beginPath(); if (S.round) g.arc(u, v, Math.max(0, w) / 2 * k, 0, 7); else g.rect(u - w / 2 * k, v - h / 2 * k, w * k, h * k); };
+          const u = X(stkCenter(G, cc, q.z) - q.le), v = Y(S.cy + q.z * S.tan + q.dy), k = PX, shape = (w, h) => { g.beginPath(); if (S.round) g.arc(u, v, Math.max(0, w) / 2 * k, 0, 7); else g.rect(u - w / 2 * k, v - h / 2 * k, w * k, h * k); };
           shape(S.oW, S.oH); g.fillStyle = 'rgba(255,240,106,.25)'; g.fill(); g.strokeStyle = '#fff06a'; g.lineWidth = 1.2; g.stroke();
           if (S.inH > 0 && S.inW > 0) { shape(S.inW, S.inH); g.fillStyle = 'rgba(255,240,106,.65)'; g.fill(); g.stroke(); }
         }
@@ -952,6 +957,6 @@
   }
 
   App.stegHSidebar = stegHSidebar;
-  App.StegApi = { capFace, cfg, geo, frame, section, capCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp };
+  App.StegApi = { capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp };
   window.StegHoehen = { show, refresh, _test: { stkData, autoShift, ruderAt, distX, distFits, fillCapJoints, capAt, capCenter, webOf, setBottom, fillJoints, geo, section, stegData, allStege, dxfText, cfg } };
 })();

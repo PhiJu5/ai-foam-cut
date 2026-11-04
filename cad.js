@@ -468,6 +468,22 @@
         }
         break;
       }
+      case 'bgmove': {
+        // Bild verschieben wie ein CAD-Objekt: Bild wählen, Basispunkt, Zielpunkt.
+        const dr = ed.draft;
+        if (dr.phase === 'pick') { const i = cadBgHit(wpt); if (i < 0) { cadFlash('Kein Bild an dieser Stelle.'); return; } d.bgSel = i; dr.phase = 'base'; App.buildSidebar(); break; }
+        if (dr.phase === 'base') { dr.base = wpt; dr.phase = 'target'; break; }
+        const bg = cadBgCur(); if (bg) { bg.x += wpt.x - dr.base.x; bg.y += wpt.y - dr.base.y; cadLog(T('Bild verschoben.')); }
+        dr.phase = 'pick'; dr.base = null; App.buildSidebar(); break;
+      }
+      case 'bgref': {
+        // Bild über Referenzlänge skalieren: zwei Punkte auf dem Bild, dann wahre Länge tippen
+        // (oder dritten Punkt klicken: Abstand Punkt 1 -> Punkt 3). Punkt 1 bleibt fest.
+        const dr = ed.draft, bg = cadBgCur(); if (!bg) return;
+        if (!dr.r1) { const i = cadBgHit(wpt); if (i >= 0) d.bgSel = i; dr.r1 = wpt; break; }
+        if (!dr.r2) { if (cadDist(dr.r1, wpt) < 1e-9) return; dr.r2 = wpt; break; }
+        cadBgRefApply(cadDist(dr.r1, wpt)); return;
+      }
       case 'measure': {
         // Messen: Punkte klicken; erzeugt KEINE Geometrie (kein Undo). Zeigt
         // Länge/Richtung des letzten Segments und Winkel am mittleren Punkt.
@@ -542,21 +558,39 @@
   // Ausschnitt an alle Objekte anpassen (einfrieren) und Pan/Zoom zurücksetzen.
   function cadFitView() { state.cad.view = null; if (App.nav.cad) { App.nav.cad.z = 1; App.nav.cad.ox = 0; App.nav.cad.oy = 0; } renderCad(); }
   // Hintergrundbild (Vorlage zum Nachzeichnen) aus einer Datei laden.
+  // Liste der Hintergrundbilder; ein Altstand im Einzelbild state.cad.bg wird einmalig übernommen.
+  function cadBgs() {
+    const d = state.cad; if (!Array.isArray(d.bgs)) d.bgs = [];
+    if (d.bg && d.bg.img) { d.bgs.push(Object.assign({}, d.bg)); d.bg.img = null; d.bg.url = null; }
+    return d.bgs;
+  }
+  function cadBgCur() { const L = cadBgs(), d = state.cad; if (!L.length) return null; d.bgSel = Math.min(Math.max(0, d.bgSel | 0), L.length - 1); return L[d.bgSel]; }
+  // Oberstes sichtbares Bild unter dem Weltpunkt (gedrehtes Rechteck) -> Index oder -1.
+  function cadBgHit(p) {
+    const L = cadBgs();
+    for (let i = L.length - 1; i >= 0; i--) {
+      const bg = L[i]; if (!bg.img || !bg.visible) continue;
+      const a = -bg.rot * D2R, dx = p.x - bg.x, dy = p.y - bg.y;
+      const lx = dx * Math.cos(a) - dy * Math.sin(a), ly = dx * Math.sin(a) + dy * Math.cos(a);
+      if (Math.abs(lx) <= bg.iw * bg.scale / 2 && Math.abs(ly) <= bg.ih * bg.scale / 2) return i;
+    }
+    return -1;
+  }
+  // Bild um Faktor k um den Festpunkt f skalieren (Referenzlänge).
+  function cadBgScaleAbout(bg, f, k) { bg.scale *= k; bg.x = f.x + (bg.x - f.x) * k; bg.y = f.y + (bg.y - f.y) * k; }
   function cadLoadBgImage(file) {
     const rd = new FileReader();
     rd.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const bg = state.cad.bg;
-        bg.url = rd.result; bg.img = img; bg.iw = img.naturalWidth || img.width; bg.ih = img.naturalHeight || img.height; bg.visible = true;
+        const bg = { url: rd.result, img, iw: img.naturalWidth || img.width, ih: img.naturalHeight || img.height, x: 0, y: 0, scale: 1, rot: 0, opacity: 0.55, visible: true, name: file && file.name || '' };
         // Erstplatzierung: mittig über die Geometrie (bzw. Ursprung), Breite ~ Geometrie oder 200 mm.
-        if (!bg.scale || bg.scale === 1) {
-          const b = App.bounds.apply(null, cadEntities().map(e => e.loop));
-          const targetW = (isFinite(b.maxx) && b.maxx > b.minx) ? (b.maxx - b.minx) * 1.2 : 200;
-          bg.scale = bg.iw > 0 ? targetW / bg.iw : 1;
-          bg.x = (isFinite(b.maxx) && b.maxx > b.minx) ? (b.minx + b.maxx) / 2 : 0;
-          bg.y = (isFinite(b.maxy) && b.maxy > b.miny) ? (b.miny + b.maxy) / 2 : 0;
-        }
+        const b = App.bounds.apply(null, cadEntities().map(e => e.loop));
+        const targetW = (isFinite(b.maxx) && b.maxx > b.minx) ? (b.maxx - b.minx) * 1.2 : 200;
+        bg.scale = bg.iw > 0 ? targetW / bg.iw : 1;
+        bg.x = (isFinite(b.maxx) && b.maxx > b.minx) ? (b.minx + b.maxx) / 2 : 0;
+        bg.y = (isFinite(b.maxy) && b.maxy > b.miny) ? (b.miny + b.maxy) / 2 : 0;
+        const L = cadBgs(); L.push(bg); state.cad.bgSel = L.length - 1;
         App.buildSidebar(); renderCad();
       };
       img.src = rd.result;
@@ -564,13 +598,26 @@
     rd.readAsDataURL(file);
   }
   function buildCadBgSidebar(side) {
-    const bg = state.cad.bg;
-    const g = App.grp('Hintergrundbild', true, 'cad', { key: 'cadBg' });
-    const bl = document.createElement('button'); bl.className = bg.img ? '' : 'primary';
-    bl.textContent = bg.img ? T('Anderes Bild laden…') : T('Bild laden…');
+    const L = cadBgs(), bg = cadBgCur();
+    const g = App.grp('Hintergrundbilder', true, 'cad', { key: 'cadBg' });
+    const bl = document.createElement('button'); bl.className = bg ? '' : 'primary';
+    bl.textContent = bg ? T('Weiteres Bild laden…') : T('Bild laden…');
     bl.onclick = () => App.loadFileVia({ 'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'] }, f => cadLoadBgImage(f), 'fileCadBg', 'ldImg');
     g.body.appendChild(bl);
-    if (!bg.img) { App.hint(g.body, 'Lädt ein Referenz-/Vorlagenbild (PNG/JPG/SVG) unter die Zeichnung — danach verschiebbar, skalierbar und drehbar. Nur Vorlage, nicht Teil der Geometrie/des Exports.'); side.appendChild(g.g); return; }
+    if (!bg) { App.hint(g.body, 'Lädt Referenz-/Vorlagenbilder (PNG/JPG/SVG) unter die Zeichnung — beliebig viele, je Bild verschiebbar, skalierbar (auch über Referenzlänge) und drehbar. Nur Vorlage, nicht Teil der Geometrie/des Exports.'); side.appendChild(g.g); return; }
+    if (L.length > 1) {
+      const sl = document.createElement('select'); sl.style.width = '100%'; sl.style.marginTop = '6px';
+      L.forEach((b, i) => { const o = document.createElement('option'); o.value = i; o.textContent = (i + 1) + ': ' + (b.name || T('Bild')); sl.appendChild(o); });
+      sl.value = state.cad.bgSel; sl.onchange = () => { state.cad.bgSel = +sl.value; App.buildSidebar(); renderCad(); };
+      g.body.appendChild(sl);
+    }
+    const tb = document.createElement('div'); tb.style.cssText = 'display:flex;gap:4px;margin:6px 0';
+    [['bgmove', 'Bild verschieben'], ['bgref', 'Referenzlänge']].forEach(([id, l]) => {
+      const b = document.createElement('button'); b.textContent = T(l); b.style.flex = '1';
+      if (state.cad.edit.tool === id) b.classList.add('primary');
+      b.onclick = () => cadSetTool(id); tb.appendChild(b);
+    });
+    g.body.appendChild(tb);
     App.boolRow(g.body, 'Sichtbar', () => bg.visible, v => { bg.visible = v; renderCad(); });
     App.numRow(g.body, 'Deckkraft (%)', () => Math.round(bg.opacity * 100), v => { bg.opacity = Math.min(1, Math.max(0, v / 100)); renderCad(); }, { int: true, min: 0, max: 100, norender: true });
     App.numRow(g.body, 'Position X (mm)', () => bg.x, v => { bg.x = v; renderCad(); }, { step: 1, norender: true });
@@ -579,13 +626,13 @@
     App.numRow(g.body, 'Skalierung (%)', () => +(bg.scale * 100).toFixed(1), v => { if (v > 0) bg.scale = v / 100; renderCad(); }, { step: 1, min: 0.1, norender: true });
     App.numRow(g.body, 'Drehung (°)', () => bg.rot, v => { bg.rot = v; renderCad(); }, { step: 1, norender: true });
     const br = document.createElement('button'); br.textContent = T('Bild entfernen'); br.style.color = 'var(--bad)';
-    br.onclick = () => { bg.img = null; bg.url = null; App.buildSidebar(); renderCad(); };
+    br.onclick = () => { L.splice(state.cad.bgSel, 1); state.cad.bgSel = Math.max(0, state.cad.bgSel - 1); App.buildSidebar(); renderCad(); };
     g.body.appendChild(br);
     side.appendChild(g.g);
   }
   // Objektfang „Mitte zwischen 2 Punkten": nach dem Start liefern die nächsten
   // zwei Punkte (Klick ODER Koordinaten) ihren Mittelpunkt an das aktive Werkzeug.
-  function cadIsPointTool(t) { return ['line', 'rect', 'circle', 'ellipse', 'arc', 'polyline', 'spline', 'splinetan', 'move', 'copy', 'mirror', 'measure', 'offset', 'rotate', 'scale', 'align', 'array', 'stretch', 'fillet', 'chamfer', 'extend', 'break', 'point', 'xline', 'polygon', 'dim', 'origin', 'zoom', 'area', 'layer', 'matchprop', 'explode', 'reverse'].indexOf(t) >= 0; }
+  function cadIsPointTool(t) { return ['line', 'rect', 'circle', 'ellipse', 'arc', 'polyline', 'spline', 'splinetan', 'move', 'copy', 'mirror', 'measure', 'offset', 'rotate', 'scale', 'align', 'array', 'stretch', 'fillet', 'chamfer', 'extend', 'break', 'point', 'xline', 'polygon', 'dim', 'origin', 'zoom', 'area', 'layer', 'matchprop', 'explode', 'reverse', 'bgmove', 'bgref'].indexOf(t) >= 0; }
   // =====================================================================
   //  Erweiterte 2D-Befehle: Drehen, Skalieren, Ausrichten, Reihe, Strecken,
   //  Abrunden, Fasen, Dehnen, Bruch, Punkt, Hilfslinie, Polygon, Bemaßung,
@@ -951,8 +998,16 @@
   }
   // Zahleingabe für die erweiterten Befehle (Phase/Abfrage des laufenden Drafts).
   // true = verbraucht.
+  function cadBgRefApply(len) {
+    const dr = state.cad.edit.draft, bg = cadBgCur(), rl = cadDist(dr.r1, dr.r2);
+    if (!bg || !(len > 0) || !(rl > 1e-9)) { cadFlash('Referenzlänge ist 0.'); return; }
+    cadBgScaleAbout(bg, dr.r1, len / rl);
+    cadLog(T('Bild skaliert: ') + rl.toFixed(2) + ' → ' + len.toFixed(2) + ' mm');
+    dr.r1 = dr.r2 = null; App.buildSidebar(); renderCad();
+  }
   function cadNumInput(dr, num) {
     const ed = state.cad.edit, t = dr.type;
+    if (t === 'bgref' && dr.r2) { cadBgRefApply(num); return true; }
     if (t === 'rotate') {
       if (dr.phase === 'angle') { cadFinishRotate(num * D2R); return true; }
       if (dr.phase === 'refnew') { cadFinishRotate(num * D2R - cadAng(dr.r1, dr.r2)); return true; }
@@ -1017,6 +1072,8 @@
     else if (id === 'xline') ed.draft = { type: 'xline', phase: 'p1', mode: null };
     else if (id === 'polygon') ed.draft = { type: 'polygon', ask: 'n', n: ed.polyN || 6 };
     else if (id === 'dim') ed.draft = { type: 'dim', pts: [] };
+    else if (id === 'bgmove') ed.draft = { type: 'bgmove', phase: cadBgs().length > 1 ? 'pick' : 'base' };
+    else if (id === 'bgref') ed.draft = { type: 'bgref', r1: null, r2: null };
     else if (id === 'zoom') ed.draft = { type: 'zoom', phase: 'opt' };
     else if (id === 'zoomwin') { ed.tool = 'zoom'; ed.lastTool = 'zoom'; ed.draft = { type: 'zoom', phase: 'w1' }; }
     else if (id === 'extend' || id === 'area' || id === 'point' || id === 'origin') ed.draft = { type: id };
@@ -1135,6 +1192,8 @@
     if (dr && dr.ask === 'pang') return P('Winkel angeben (° zur X-Achse, gegen den Uhrzeigersinn):');
     const found = nSel ? '  (' + nSel + T(' gefunden') + ')' : '';
     if (ed.m2p) return P(ed.m2p.pts.length ? 'Mitte zwischen 2 Punkten: zweiten Punkt angeben:' : 'Mitte zwischen 2 Punkten: ersten Punkt angeben:');
+    if (dr && dr.type === 'bgmove') return P(dr.phase === 'pick' ? 'BILD VERSCHIEBEN  Bild anklicken:' : dr.phase === 'base' ? 'BILD VERSCHIEBEN  Basispunkt angeben:' : 'Zweiten Punkt angeben:', [oEnd]);
+    if (dr && dr.type === 'bgref') return P(!dr.r1 ? 'REFERENZLÄNGE  ersten Punkt auf dem Bild angeben:' : !dr.r2 ? 'Referenzlänge: zweiten Punkt angeben:' : 'Wahre Länge in mm tippen (oder Punkt klicken):', [oEnd]);
     if (dr && dr.phase === 'select') return P('Objekte wählen (Klick / Fenster):' + found, [], nSel ? T('Enter = weiter') : '');
     switch (t) {
       case 'select': return P('Befehl:', [], ed.lastTool ? T('Enter = ') + cadCmdName(ed.lastTool) : '');
@@ -1691,7 +1750,7 @@
   }
   function cadToolLabel(t) { return ({ select: 'Auswählen', vertex: 'Punkt', delpt: 'Punkt löschen', line: 'Linie', rect: 'Rechteck', circle: 'Kreis', ellipse: 'Ellipse', polyline: 'Polylinie', spline: 'Spline', move: 'Verschieben', copy: 'Kopieren', mirror: 'Spiegeln', trim: 'Trimmen', erase: 'Löschen', measure: 'Messen', arc: 'Kreisbogen', splinetan: 'Spline tangential', offset: 'Versetzen',
     rotate: 'Drehen', scale: 'Skalieren', align: 'Ausrichten', array: 'Reihe', stretch: 'Strecken', fillet: 'Abrunden', chamfer: 'Fasen', extend: 'Dehnen', 'break': 'Bruch',
-    point: 'Punkt setzen', xline: 'Hilfslinie', polygon: 'Polygon', dim: 'Bemaßung', origin: 'Ursprung', zoom: 'Zoom', area: 'Fläche', layer: 'Layer ändern', matchprop: 'Eigenschaften angleichen', explode: 'Auflösen', reverse: 'Umkehren' })[t] || t; }
+    point: 'Punkt setzen', xline: 'Hilfslinie', polygon: 'Polygon', dim: 'Bemaßung', origin: 'Ursprung', zoom: 'Zoom', area: 'Fläche', layer: 'Layer ändern', matchprop: 'Eigenschaften angleichen', explode: 'Auflösen', reverse: 'Umkehren', bgmove: 'Bild verschieben', bgref: 'Referenzlänge' })[t] || t; }
   function cadToolHint(t) {
     switch (t) {
       case 'select': return T('Klick wählt eine Kontur (Umschalt = mehrere). Ziehen einer gewählten Kontur verschiebt sie. Aufziehfenster: links→rechts = nur vollständig umschlossene Konturen; rechts→links = auch berührte. Space/Enter beendet bzw. wiederholt den letzten Befehl.');
@@ -1749,7 +1808,11 @@
     }
     const V = App.makeView(w, h, state.cad.view, 50, App.nav.cad); cadDraw = { V };
     const ed = state.cad.edit;
-    if (state.cad.bg && state.cad.bg.img && state.cad.bg.visible) App.dxfDrawBg(ctx, V, state.cad.bg);
+    cadBgs().forEach((bg, i) => {
+      if (!bg.img || !bg.visible) return;
+      bg.moveMode = (state.cad.edit.tool === 'bgmove' || state.cad.edit.tool === 'bgref') && i === state.cad.bgSel;
+      App.dxfDrawBg(ctx, V, bg);
+    });
     if (ed.showGrid) cadDrawGrid(ctx, w, h, V);
     // Konturen je Layer.
     ents.forEach(e => {
@@ -1857,6 +1920,15 @@
         if (dr.phase === 'angle' || dr.phase === 'refnew') { const a = dr.phase === 'angle' ? cadAng(dr.base, hv) : cadAng(dr.base, hv) - cadAng(dr.r1, dr.r2); cadPreviewSel(ctx, V, cadRot(dr.base, a)); }
         ctx.beginPath(); ctx.moveTo(V.X(dr.base.x), V.Y(dr.base.y)); ctx.lineTo(V.X(hv.x), V.Y(hv.y)); ctx.stroke();
         ctx.fillStyle = '#57d38c'; ctx.font = '11px Consolas, monospace'; ctx.fillText(((cadAng(dr.base, hv) / D2R + 360) % 360).toFixed(1) + '°', V.X(hv.x) + 10, V.Y(hv.y) + 14);
+      }
+      else if (dr.type === 'bgmove' && dr.base) {
+        const bg = cadBgCur(), dx = hv.x - dr.base.x, dy = hv.y - dr.base.y;
+        if (bg) { const c = App.bgCorners(bg); ctx.beginPath(); c.forEach((p, i) => i ? ctx.lineTo(V.X(p.x + dx), V.Y(p.y + dy)) : ctx.moveTo(V.X(p.x + dx), V.Y(p.y + dy))); ctx.closePath(); ctx.stroke(); }
+        ctx.beginPath(); ctx.moveTo(V.X(dr.base.x), V.Y(dr.base.y)); ctx.lineTo(V.X(hv.x), V.Y(hv.y)); ctx.stroke();
+      }
+      else if (dr.type === 'bgref' && dr.r1) {
+        ctx.beginPath(); ctx.moveTo(V.X(dr.r1.x), V.Y(dr.r1.y)); ctx.lineTo(V.X((dr.r2 || hv).x), V.Y((dr.r2 || hv).y)); ctx.stroke();
+        ctx.fillStyle = '#57d38c'; ctx.font = '11px Consolas, monospace'; ctx.fillText(cadDist(dr.r1, dr.r2 || hv).toFixed(2) + ' mm', V.X(hv.x) + 10, V.Y(hv.y) + 14);
       }
       else if (dr.type === 'scale' && dr.base) {
         if (dr.phase === 'factor') cadPreviewSel(ctx, V, cadScl(dr.base, cadDist(dr.base, hv)));
@@ -2283,16 +2355,24 @@
             const g = App.sparOnProfile(sp, o.pts, null, fl, App.sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, sh));
             App.sparPolys(g).forEach(pl => spars.push(pl));
           });
-          return { outer: o.pts, core, spars, w: maxx - minx, h: maxy - miny, minx, miny };
+          // Teilstücke wie im Rippendesigner (Halbrippen, an Stegen gestutzt)
+          const pieces = App.ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
+            const outer = App.applyHalfSpec(o.pts, spec); if (!outer) return null;
+            const c = core ? App.applyHalfSpec(core, spec) : null;
+            return { outer, core: c, spars: spars.map(sp => App.applyHalfSpec(sp, spec)).filter(Boolean) };
+          }).filter(Boolean);
+          return { pieces, w: maxx - minx, h: maxy - miny, minx, miny };
         });
         const cols = Math.max(1, Math.ceil(Math.sqrt(baked.length)));
         const cellW = Math.max.apply(null, baked.map(r => r.w)) + 25, cellH = Math.max.apply(null, baked.map(r => r.h)) + 32;
         baked.forEach((r, i) => {
           const ox = (i % cols) * cellW - r.minx, oy = yCursor - Math.floor(i / cols) * cellH - r.miny;
           const tr = p => ({ x: p.x + ox, y: p.y + oy });
-          if (sel.profiles) put('Rippen', r.outer.map(tr));
-          if (r.core) put('Beplankung', r.core.map(tr));
-          r.spars.forEach(sp => put('Holme', sp.map(tr)));
+          r.pieces.forEach(pc => {
+            if (sel.profiles) put('Rippen', pc.outer.map(tr));
+            if (pc.core) put('Beplankung', pc.core.map(tr));
+            pc.spars.forEach(sp => put('Holme', sp.map(tr)));
+          });
         });
         yCursor -= Math.ceil(baked.length / cols) * cellH + 40;
       }

@@ -131,6 +131,10 @@ def main():
     xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
     if os.path.isfile(xf):
         cmd += ["--add-binary", "%s;XFOIL" % xf]
+    # xoptfoil2.exe (Reiter „Profiloptimierung“, xoptrun sucht in _MEIPASS/XOPTFOIL)
+    xo = os.path.join(HERE, "XOPTFOIL", "xoptfoil2.exe")
+    if os.path.isfile(xo):
+        cmd += ["--add-binary", "%s;XOPTFOIL" % xo]
     cmd.append(ENTRY)
 
     subprocess.run(cmd, cwd=HERE, check=True)

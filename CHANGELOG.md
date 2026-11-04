@@ -4,6 +4,21 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [Unveröffentlicht]
+
+### Steghöhen: Gurt/Steckung rechtwinklig zur Wurzelrippe (2026-11-04)
+- Holmgurt: Schalter **„Rechtwinklig zur Wurzelrippe (Draufsicht)“** – Gurt (und damit Steckung und „auf dem Gurt verteilte“ Holmstege) läuft von oben gesehen gerade mit der Rücklage der Wurzel; Lage außen/je Segmentstoß entfällt dann.
+- Steckung: derselbe Schalter einzeln – nur die Steckung läuft rechtwinklig ab der Gurtmitte an der Wurzel, der Gurt bleibt gepfeilt. Gilt auch für Flächenservos (Kollision, Draufsicht, Schnitte).
+
+### CAD-Bearbeitung: mehrere Hintergrundbilder (2026-11-04)
+- Gruppe **„Hintergrundbilder“**: beliebig viele Vorlagenbilder laden („Weiteres Bild laden…“), Auswahl des Bildes per Liste; Deckkraft, Lage, Breite, Skalierung, Drehung und Entfernen gelten je Bild.
+- **„Bild verschieben“** wie ein CAD-Objekt: Bild anklicken, Basispunkt, Zielpunkt (mit Fang, Koordinateneingabe und Vorschau-Rahmen).
+- **„Referenzlänge“**: zwei Punkte auf dem Bild angeben, dann die wahre Länge in mm tippen (oder dritten Punkt klicken) — das Bild wird um den ersten Punkt maßstäblich skaliert.
+
+### Rippendesigner: Stege berücksichtigen (2026-11-01)
+- Neue Option **„Stege berücksichtigen“** (Gruppe Halbrippen): Die Rippen werden an den Holm- und Ruderstegen aus dem Reiter Steghöhen getrennt, die Stegbreite bleibt frei. Es zählt nur ein Steg, der in der Spannweitenlage der Rippe verläuft; auch die schräge Wurzelrippe wird richtig getroffen. Der Grundriss zeigt die Stege.
+- Die Teilstücke gehen in Galerie und STL. Die Übernahme ins CAD und in die Fräse nimmt jetzt ebenfalls die Teilstücke, also auch Halbrippen, die dort bisher als ganze Rippe ankamen.
+
 ## [2.0] — 2026-11-01
 ### Neue Module
 - **Rumpf:** Rumpf aus Umrissen und parametrischen Spanten, Tragflächenübergang, Seitenleitwerk, Export STL/DXF.

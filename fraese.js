@@ -447,7 +447,12 @@
           App.sparPolys(g).forEach(pl => spars.push(pl));
         } catch (e) {}
       });
-      return { outer: o.pts, spars, w: maxx - minx, h: maxy - miny, minx, miny };
+      // Teilstücke wie im Rippendesigner (Halbrippen, an Stegen gestutzt)
+      const pieces = App.ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
+        const outer = App.applyHalfSpec(o.pts, spec); if (!outer) return null;
+        return { outer, spars: spars.map(sp => App.applyHalfSpec(sp, spec)).filter(Boolean) };
+      }).filter(Boolean);
+      return { pieces, w: maxx - minx, h: maxy - miny, minx, miny };
     });
     const cols = Math.max(1, Math.ceil(Math.sqrt(baked.length)));
     const cellW = Math.max.apply(null, baked.map(r => r.w)) + 15, cellH = Math.max.apply(null, baked.map(r => r.h)) + 15;
@@ -455,8 +460,10 @@
     baked.forEach((r, i) => {
       const ox = (i % cols) * cellW - r.minx, oy = -Math.floor(i / cols) * cellH - r.miny;
       const tr = p => ({ x: p.x + ox, y: p.y + oy });
-      const L = r.outer.map(tr); L.closed = true; L.jobName = T('Rippe') + ' ' + (i + 1); loops.push(L);
-      r.spars.forEach((sp, k) => { const H = sp.map(tr); H.closed = true; H.jobName = T('Rippe') + ' ' + (i + 1) + ' · ' + T('Holm') + ' ' + (k + 1); loops.push(H); });
+      r.pieces.forEach(pc => {
+        const L = pc.outer.map(tr); L.closed = true; L.jobName = T('Rippe') + ' ' + (i + 1); loops.push(L);
+        pc.spars.forEach((sp, k) => { const H = sp.map(tr); H.closed = true; H.jobName = T('Rippe') + ' ' + (i + 1) + ' · ' + T('Holm') + ' ' + (k + 1); loops.push(H); });
+      });
     });
     const n = addJobsFromLoops(loops, 'Rippe');
     afterGeom(n + T(' Konturen aus dem Rippendesigner übernommen.'));

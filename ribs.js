@@ -57,6 +57,7 @@
     // immer zu Lasten des Werkstücks: das hintere bzw. vordere Ende bleibt an der Wurzel stehen.
     if (r.rootSkew == null) r.rootSkew = 0;
     if (r.rootShift == null) r.rootShift = 0;   // Wurzelrippe parallel nach außen eingerückt (mm, Spannweite)
+    if (r.useStege == null) r.useStege = false; // Rippen an den Stegen aus dem Reiter Steghöhen stutzen
     return r;
   }
   // Setzt die Handpositionen aus den aktuell berechneten Stationen (beim ersten
@@ -232,15 +233,75 @@
   }
   // Halbrippen-Stücke einer Rippe: liefert Liste von Klipp-Spezifikationen.
   // Jede Spezifikation = Array von {xc, front}. Leeres Array = ganze Rippe.
-  function ribHalfSpecs(pts, chord) {
+  // Mit st und o (Station, ribOutline) werden die Stücke zusätzlich an den Stegen getrennt.
+  function ribHalfSpecs(pts, chord, st, o) {
     const hf = ribCfg().half, m = hf.mode || 'full';
-    if (m === 'full') return [[]];
-    const xf = ribCutX(pts, chord, hf.posMode, hf.frontPos);
-    const xr = ribCutX(pts, chord, hf.posMode, hf.rearPos);
-    if (m === 'front') return [[{ xc: xf, front: true }]];
-    if (m === 'rear') return [[{ xc: xr, front: false }]];
-    // both: vorderes Stück (bis xf) UND hinteres Stück (ab xr)
-    return [[{ xc: xf, front: true }], [{ xc: xr, front: false }]];
+    let base;
+    if (m === 'full') base = [[]];
+    else {
+      const xf = ribCutX(pts, chord, hf.posMode, hf.frontPos);
+      const xr = ribCutX(pts, chord, hf.posMode, hf.rearPos);
+      if (m === 'front') base = [[{ xc: xf, front: true }]];
+      else if (m === 'rear') base = [[{ xc: xr, front: false }]];
+      // both: vorderes Stück (bis xf) UND hinteres Stück (ab xr)
+      else base = [[{ xc: xf, front: true }], [{ xc: xr, front: false }]];
+    }
+    const iv = st ? ribStegIntervals(pts, st, o) : null;
+    if (!iv) return base;
+    return base.flatMap(spec => iv.map(q => spec.concat(q)));   // q = Liste von {xc, front}
+  }
+  // Stege aus dem Reiter Steghöhen, solange Tragfläche und Angaben gleich bleiben.
+  let ribStegCache = null;
+  function ribStegeData() {
+    if (!App.StegApi || !ribCfg().useStege || !App.wing) return null;
+    const A = App.StegApi, G = A.geo(); if (!G) return null;
+    const c = A.cfg(), key = JSON.stringify(c);
+    if (!ribStegCache || ribStegCache.wing !== App.wing || ribStegCache.key !== key)
+      ribStegCache = { wing: App.wing, key, G, list: A.allStege(G, c) };
+    return ribStegCache;
+  }
+  // Bänder der Stege in der Rippe, [lo, hi] in Rippen-x. Die Stegbreite zählt in Sehnenrichtung.
+  function ribStegBands(st, o) {
+    const D = ribStegeData(); if (!D) return [];
+    const q = D.G.segs[Math.min(st.seg, D.G.segs.length - 1)], sk = o && o.skew, out = [];
+    D.list.forEach(d => {
+      const w = App.StegApi.webOf(d.st, d.kind);
+      if (!(w > 0) || !(d.b > d.a)) return;
+      if (sk) {
+        // Schräge Wurzelrippe: dort, wo die Rippenebene die Stegbahn im ersten Segment trifft
+        const f = p => p.z - sk.shift + (p.x - sk.xP) * sk.k;
+        for (let i = 1; i < d.path.length; i++) {
+          const p0 = d.path[i - 1], p1 = d.path[i], f0 = f(p0), f1 = f(p1);
+          if (p0.z > q.z1 || f0 * f1 > 0) continue;
+          const x = p0.x + (p1.x - p0.x) * (f0 !== f1 ? f0 / (f0 - f1) : 0), u = (x - sk.xP) / sk.cb;
+          out.push([u - w / 2 / sk.cb, u + w / 2 / sk.cb]);
+          break;
+        }
+        return;
+      }
+      const z = q.z0 + (q.z1 - q.z0) * st.t;
+      if (z < d.a - 1e-6 || z > d.b + 1e-6) return;
+      const x = d.at(z, 0).x - q.le0;
+      out.push([x - w / 2, x + w / 2]);
+    });
+    return out;
+  }
+  // Was von der Rippe zwischen den Stegen bleibt, als Klipp-Spezifikationen; null = kein Steg in der Rippe.
+  function ribStegIntervals(pts, st, o) {
+    const xs = pts.map(p => p.x), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    const bands = ribStegBands(st, o).filter(b => b[1] > x0 && b[0] < x1).sort((a, b) => a[0] - b[0]);
+    if (!bands.length) return null;
+    const out = []; let lo = x0;
+    bands.concat([[x1, x1]]).forEach(b => {
+      if (b[0] - lo >= 1) {   // Reste unter 1 mm lassen sich nicht bauen
+        const spec = [];
+        if (lo > x0) spec.push({ xc: lo, front: false });
+        if (b[0] < x1) spec.push({ xc: b[0], front: true });
+        out.push(spec);
+      }
+      lo = Math.max(lo, b[1]);
+    });
+    return out;
   }
   function applyHalfSpec(poly, spec) {
     let p = poly;
@@ -582,7 +643,7 @@
         const g = sparOnProfile(sp, o.pts, null, fl, sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, ribSheet(st, list.indexOf(st))));
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
-      ribHalfSpecs(o.pts, o.chord).forEach(spec => {
+      ribHalfSpecs(o.pts, o.chord, st, o).forEach(spec => {
         const outer = applyHalfSpec(o.pts, spec); if (!outer || outer.length < 3) return;
         const holes = sparFull.map(sp => applyHalfSpec(sp, spec)).filter(h => h && h.length >= 3);
         const xs = outer.map(p => p.x), ys = outer.map(p => p.y);
@@ -872,6 +933,12 @@
       if (hf.mode === 'both')
         App.hint(gr.body, 'Vorne < hinten wählen — dazwischen (Mitte) wird entfernt.');
     }
+    if (App.StegApi)
+      App.boolRow(gr.body, 'Stege berücksichtigen', () => rc.useStege,
+        v => { rc.useStege = v; renderRib(); },
+        'Stutzt die Rippen an den Holm- und Ruderstegen aus dem Reiter „Steghöhen“: Jede Rippe wird dort '
+        + 'getrennt, wo ein Steg in ihrer Spannweitenlage verläuft, die Stegbreite bleibt frei. Die Teilstücke '
+        + 'gehen so auch in STL, CAD und Fräse.');
     side.appendChild(gr.g);
 
     const gs = App.grp('Beplankung', true, 'rib');
@@ -1052,6 +1119,15 @@
       ctx.fillStyle = App.hexA(App.PAL.spar, 0.18); ctx.strokeStyle = App.PAL.spar; ctx.lineWidth = 1.2;
       ctx.setLineDash(dashFor('spar', [])); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
     });
+    // Stege, an denen die Rippen gestutzt werden, in wahrer Breite
+    const sd = ribStegeData();
+    if (sd) sd.list.forEach(d => {
+      const w = App.StegApi.webOf(d.st, d.kind), col = d.kind === 'holm' ? '#5aa9ff' : '#ffa94d';
+      if (d.path.length < 2) return;
+      const band = d.path.map(p => ({ x: p.z, y: -(p.x - w / 2 + arr[0].le) })).concat(d.path.slice().reverse().map(p => ({ x: p.z, y: -(p.x + w / 2 + arr[0].le) })));
+      App.poly(ctx, V, band, true);
+      ctx.fillStyle = App.hexA(col, 0.35); ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.fill(); ctx.stroke();
+    });
     // Rippenlinien (Chord an jeder Station)
     const { list } = ribStations();
     ctx.font = '10px system-ui';
@@ -1100,7 +1176,7 @@
         const g = sparOnProfile(sp, o.pts, null, fl, sparYc(sp), st.t < 0.5 ? 'root' : 'tip', App.sparCoreFromSheet(o.pts, sh));
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
-      const pieces = ribHalfSpecs(o.pts, o.chord).map(spec => {
+      const pieces = ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
         const outer = applyHalfSpec(o.pts, spec); if (!outer) return null;
         const core = coreFull ? applyHalfSpec(coreFull, spec) : null;
         const spars = sparFull.map(sp => applyHalfSpec(sp, spec)).filter(Boolean);
@@ -1183,5 +1259,5 @@
   Object.assign(App, { ribBodyTrisAll, ribCfg, ribCollectBodies, ribCollectTemplates, ribCutX, ribHalfSpecs, ribInset, ribLeTeArr });
   Object.assign(App, { ribInset, ribLeTeAt, ribModeLabel, ribOutline, ribProcessOutline, ribReseedManual, ribSeedManual, ribSheet, ribStations });
   Object.assign(App, { ribStlPreviewClose, ribStlPreviewOpen, ribTemplate2D, ribTemplateSTL, ribTemplateTris, setupStlPreviewNav, stlFacet, stlView });
-  Object.assign(App, { templateTris, triangulate, ribRootShift, ribRootSkew, ribSparFL, ribRootPlanEnds });
+  Object.assign(App, { templateTris, triangulate, ribRootShift, ribRootSkew, ribSparFL, ribRootPlanEnds, ribStegBands });
 })();

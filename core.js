@@ -487,6 +487,8 @@
       view: null,
       // Referenz-/Hintergrundbild (nur Vorlage, nicht Teil der Geometrie).
       bg: { url: null, img: null, iw: 0, ih: 0, x: 0, y: 0, scale: 1, rot: 0, opacity: 0.55, visible: true },
+      // Mehrere Hintergrundbilder (Liste wie bg) + gewähltes Bild; bg oben nur noch Altstand.
+      bgs: [], bgSel: 0,
       // Textelemente (z. B. importierte Maßtexte): {x,y,h,text,rot,layer}.
       texts: [],
       edit: { tool: 'select', lastTool: null, active: null, sel: [], draft: null, drag: null, hover: null, pan: null,

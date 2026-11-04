@@ -361,6 +361,8 @@ def run_build(cfg, log, cancel=None):
     # XFOIL-Anbindung (Reiter „Aerodynamik“): launcher.py importiert xfoilrun
     if os.path.isfile(os.path.join(HERE, "xfoilrun.py")):
         shutil.copy2(os.path.join(HERE, "xfoilrun.py"), stage)
+    if os.path.isfile(os.path.join(HERE, "xoptrun.py")):
+        shutil.copy2(os.path.join(HERE, "xoptrun.py"), stage)
     with open(os.path.join(stage, "build_info.json"), "w", encoding="utf-8") as f:
         json.dump(build_info, f, indent=2, ensure_ascii=False)
 
@@ -384,6 +386,10 @@ def run_build(cfg, log, cancel=None):
     xf = os.path.join(HERE, "XFOIL", "xfoil.exe")
     if os.path.isfile(xf):
         cmd += ["--add-binary", "%s;XFOIL" % xf]
+    # xoptfoil2.exe mitpacken (landet in _MEIPASS/XOPTFOIL, xoptrun sucht dort)
+    xo = os.path.join(HERE, "XOPTFOIL", "xoptfoil2.exe")
+    if os.path.isfile(xo):
+        cmd += ["--add-binary", "%s;XOPTFOIL" % xo]
     cmd.append(os.path.join(stage, ENTRY))
 
     # Die exe erbt Bitbreite und Mindest-Windows vom bauenden Python
