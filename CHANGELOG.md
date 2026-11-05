@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
-## [Unveröffentlicht]
+## [2.1] — 2026-11-05
 
 ### Neuer Reiter „Flugsimulator“ (2026-11-05)
 - Menü **Flugzeug → Flugsimulator**: mit dem zusammengesetzten Flugzeug aus „Flugzeug gesamt“ (Rumpf, Tragflächen, Leitwerk, Farben und Decals) wie mit einem Modellflugzeug fliegen.
