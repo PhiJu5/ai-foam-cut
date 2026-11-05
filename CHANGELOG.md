@@ -6,6 +6,50 @@ Neueste Einträge oben.
 
 ## [Unveröffentlicht]
 
+### Neuer Reiter „Flugsimulator“ (2026-11-05)
+- Menü **Flugzeug → Flugsimulator**: mit dem zusammengesetzten Flugzeug aus „Flugzeug gesamt“ (Rumpf, Tragflächen, Leitwerk, Farben und Decals) wie mit einem Modellflugzeug fliegen.
+- **Pilotensicht am Boden** (Blickfeld holt das Modell mit der Entfernung heran) oder **Verfolgerkamera**; Mausrad = Zoom. Wiese mit Piste, Bäumen und Hügeln, Schatten unter dem Modell.
+- Flugmodell aus Fläche, Spannweite und Streckung der Haupttragfläche; Masse aus **Flächenbelastung** oder fest, Schwerpunkt, Nullwiderstand, Motor mit Standschub (oder Segler). Strömungsabriss, Bruch-/Absturzerkennung.
+- **Handstart, Hochstart (120 m), Bodenstart**; **Wind** mit Böen und Richtung, **Thermik**-Blasen.
+- Steuerung per **Tastatur** (Pfeile, A/D, W/S, Leertaste, R, C, P) oder **Fernsteuerung/Gamepad** über USB — Achsen und Umkehr frei zuordenbar, Ruderausschlag und Expo einstellbar.
+- Eigenes, abwählbares Feature `flugsim` im Build-Tool (braucht „Flugzeug gesamt“).
+- **Hang zum Hangfliegen** (Landschaft → Gelände): Pilot an der Hangkante, Hanghöhe und -neigung einstellbar, Wind aus dem Tal. **Hangaufwind** folgt dem Gelände und reicht vor und über die Kante, nimmt mit der Höhe ab; dahinter sinkende, böige Lee-Luft.
+- **Flugphysik verfeinert**: Eigenfrequenzen aus Fahrt und Modellgröße, Stabilität aus **Schwerpunkt und Neutralpunkt** (instabil, wenn der Schwerpunkt dahinter liegt), Rollrate aus Spannweite, negatives Wendemoment, Rollen aus Gieren, **Abkippen über eine Fläche** beim Strömungsabriss, **Bodeneffekt**, Reynolds-Einfluss auf den Widerstand, Propellerstrahl macht Höhen-/Seitenruder im Stand wirksam, Bugradsteuerung über das Seitenruder, stärkere Böen in Bodennähe. Landen auf geneigtem Gelände, Flügelspitze im Boden = Bruch. Startfahrt gilt gegenüber der Luft. Anzeige Höhe über Grund/über Pilot und Strömungsabriss.
+- **Gasstellung** als Balken links unten (nur mit Motor). Simulator-Einstellungen (Gelände, Wind, Steuerung …) bleiben jetzt auch nach einem Neustart erhalten — vorher sprang der Hang auf den Flugplatz zurück, weil Laden/Rückgängig `state.cfg` ersetzte; die Simulator-Werte liegen jetzt getrennt vom Projekt.
+- Steuertasten (Pfeile, A/D/W/S …) verstellen keine Auswahlliste der Seitenleiste mehr: Hatte die Geländeauswahl noch den Fokus, schalteten die Pfeiltasten beim Steuern den Hang auf „Flugplatz“ um. Der Fokus springt jetzt aufs Flugbild.
+- **Kein Selbststart mehr:** Beim Öffnen und nach R hält der Pilot das Modell in der Hand, Gas steht auf 0. **Leertaste = Handstart**, **B = Bodenstart** (dann mit W Gas geben); Gas aus W vor dem Wurf wird übernommen. Die Auswahl „Start“ in der Seitenleiste entfällt.
+- **Eingebauter F3F-Hangrennsegler als Standardmodell**: 2,95 m Spannweite, rund 60 dm², gewölbtes Profil, V-Leitwerk 110°, schlanker Rumpf, Rot/Gelb/Weiß; Segler ohne Motor, eigene Flächenbelastung (Vorgabe 40 g/dm² ≈ 2,4 kg). Auswahl **Flugzeug**: F3F oder **eigenes Flugzeug** aus „Flugzeug gesamt“.
+- Am Hang steht der Pilot jetzt direkt an der Kante (1,5 m statt 6 m dahinter).
+
+### Steghöhen: Stützrippen und 3D-Ansicht (2026-11-05)
+- Neues aufklappbares Menü **„Stützrippen“** im Reiter Steghöhen: Rippen parallel zur Wurzelrippe, **gleichmäßig über die Spannweite**, **gleichmäßig je Segment** (optional zusätzlich an Wurzel, Stößen und Außenende) oder **frei** an beliebiger Stelle. Rippendicke, Spiel zur Schale/zum Gurt und zum Steg einstellbar; Kontur = Profil innen, im Gurtbereich unter dem Gurt.
+- **Schnitt durch die Stege** global je Steg und einzeln je Rippe überschreibbar: geschnitten (geht vor und hinter dem Steg weiter), endet am Steg (nur davor), beginnt am Steg (nur dahinter) oder nicht geschnitten.
+- **Löcher** (rund oder Langloch, z. B. für Servokabel) für alle Rippen und je Rippe, Lage in % der Sehne + Höhe ab Mitte; passt ein Loch nicht, wird es gemeldet. Automatischer **Ausschnitt für die Steckungshülse**.
+- Rippen erscheinen in der Draufsicht; **„Rippen in CAD übernehmen“** lädt alle Rippen mit Löchern, je Rippe eine Ebene. Auch **„In CAD übernehmen“** (Ausgabe) nimmt die Stützrippen jetzt mit, unter den Stegen.
+- **Teilstücke entfernen**: Zwischenstücke der Rippen, z. B. zwischen Holmsteg 1 und Holmsteg 2, für alle Rippen wegnehmen und je Rippe überschreiben (wie für alle / behalten / entfernen). Entfernte Stücke sind in Draufsicht und Schnitt gestrichelt, in 3D ausgeblendet.
+- Gewählte Rippe: der Schnitt in Spannweite springt genau an ihre Stelle und zeigt die Rippe mit Löchern.
+- Seitenleiste von Steghöhen in eigene Menügruppen aufgeteilt wie in den anderen Modulen: **Steghöhen** (Schale, Raster), **Holmgurt**, **Steckung**, **Stege**, **Stützrippen**, **Ausgabe** (standardmäßig zugeklappt). Der Knopf **„3D-Ansicht“** sitzt jetzt oben rechts im Ansichtsbereich.
+- **Anklicken wählt im Menü**: in der Draufsicht Rippe oder Steg, in der 3D-Ansicht Rippe, Steg, Holmgurt oder Steckung (Menü klappt auf); gewählte Rippe/Steg sind hervorgehoben.
+- Knopf **„3D-Ansicht“** (Ausgabe): eigenes Fenster mit Schale bzw. Außenlage/Stützstoff/Innenlage (durchscheinend), Holmgurt, Holm- und Ruderstegen, Stützrippen, Steckung und Hülse — alles einzeln ein-/ausblendbar.
+
+### Negativschalendesign: Schalenränder an gerader Latte ausrichten (2026-11-05)
+- Neues Menü **„Ausrichtung an gerader Latte“** im Reiter Negativschalendesign: die Formüberstände vorne und hinten werden je Rippe so verlängert, dass die Schalenränder aller Segmente in der Draufsicht auf einer geraden Linie liegen — als **Rechteck** (parallel zur Spannweite) oder **Trapez** (schräge Linie mit möglichst wenig Überstand).
+- Einstellbar: Mindestüberstand vorne/hinten, Schnittverlängerung über die Latte hinaus (läuft automatisch mit), Abbrand der Schnittverlängerung **aus lokaler Bahngeschwindigkeit** oder **wie Profilschnitt** (Sehnenverhältnis).
+- Die Ränder werden als Vertikal-Vorschnitte gefahren (G-Code, Vorschau, 3D-Simulation). Draufsicht-Skizze und Tabelle der Überstände je Rippe im Menü.
+- Aktiv ersetzt das Menü Schneideweg, Schnittverlängerung vorne/hinten und den konstanten Schalenrand.
+- Oberes Ansichtsfenster im Negativschalendesign umschaltbar **Vorderansicht / Draufsicht**: die Draufsicht zeigt Profil-Grundriss, Formblock mit Schnittverlängerung und Schalenrand (bzw. die Latten) aller Segmente; Klick schaltet das Segment aktiv.
+- Umschalter Vorder-/Draufsicht jetzt im verschiebbaren Bedienfeld des Ansichtsfensters, dazu Knopf **„3D-Ansicht“**: eigenes Fenster mit allen Segmenten in 3D, Ober-/Unterschale, Kern und Stützstoff einzeln ein-/ausblendbar; in Stege zerlegte Kerne erscheinen zusammengesetzt mit sichtbaren Trennschnitten (drehen/verschieben/zoomen mit der Maus).
+- Negativschale, Abbrand „aus lokaler Bahngeschwindigkeit“: keine Schlaufen mehr an der Nase und kein Huckel am Übergang Schnittverlängerung → Endleiste. Der Abbrand wird entlang der Bahn geglättet (läuft an Ecken über einige mm über), jede gerade Kante bekommt ihren eigenen Abbrand, und der Versatz nutzt denselben Parallel-Offset wie der Profilschnitt-Modus.
+- Negativschale: Band „Abbrand in wahrer Dicke“ passt bei lokaler Bahngeschwindigkeit jetzt zum tatsächlichen Versatz (je Kante deren eigener Spalt); Legende und Heatmap zeigen bei aktiver Latten-Ausrichtung deren Abbrand-Art statt „Sehnenverhältnis“.
+
+### Neuer Reiter „Flugzeug gesamt“ mit flow5-Netz (2026-11-05)
+- Anzeige übernimmt den Rumpf genau wie im Reiter „Rumpf“ (Anformungen, Leitwerk, Rohr; glatte Oberfläche), die Haupttragfläche sitzt wie dort (Wurzelnase, Einstellwinkel, Wurzelrippe der Anformung; Formenbau-Ringe werden auf die Wurzelrippe ausgerichtet, dort war die Fläche um die Blocklage in der Höhe versetzt); Decals liegen darauf.
+- flow5-Netz wird aus diesem Modell abgeleitet und in einem eigenen Vorschaufenster gezeigt; das Rumpfgitter wird nach Formänderung ausgedünnt, die Grenzen der Anformung bleiben immer erhalten; das Höhenleitwerk aus „Rumpf“ wird im flow5-Netz als eigene Tragfläche vernetzt (Hälften rechts/links, Endleisten-Paare) (Dreieckskanten, offene Kanten rot, Prüfliste je Bauteil), erst dort gespeichert.
+- Eigenes Übermenü **Flugzeug → Flugzeug gesamt** (neben Tragflächen und Rumpf): Rumpf (inkl. Leitwerk/Anformungen aus „Rumpf“) und alle Tragflächen mit Randbogen bzw. Winglet aus dem Formenbau in einer 3D-Ansicht.
+- Je Tragfläche: Rolle (Tragfläche, Höhenleitwerk/V-Leitwerk, Seitenleitwerk), Lage X/Y der Wurzelnase, Einstellwinkel, beide Hälften, eigene Farbe und Farbe für Randbogen/Winglet. Rumpf- und Haubenfarbe frei.
+- Decals aus dem Reiter „Decals“ erscheinen auf Rumpf und Tragflächen (Ober-/Unterseite).
+- **flow5-STL…**: ganzes Flugzeug als ein STL-Netz für flow5 (Plane → Import → From an STL file), Einheit m oder mm, Achsen wie flow5 (x hinten, z oben). Jedes Bauteil ist ein geschlossener Körper mit Normalen nach außen, Flächen an der Rumpfwand gekürzt (keine Überschneidung), strukturiertes Netz mit Kosinus-Teilung und gleich vielen Dreiecken oben/unten an der Endleiste. Vor dem Speichern wird auf offene Kanten und entartete Dreiecke geprüft. **Einzelteile…** speichert je Bauteil eine STL. Bezugsfläche, -flügeltiefe und Spannweite stehen in der Info.
+
 ### Steghöhen: Gurt/Steckung rechtwinklig zur Wurzelrippe (2026-11-04)
 - Holmgurt: Schalter **„Rechtwinklig zur Wurzelrippe (Draufsicht)“** – Gurt (und damit Steckung und „auf dem Gurt verteilte“ Holmstege) läuft von oben gesehen gerade mit der Rücklage der Wurzel; Lage außen/je Segmentstoß entfällt dann.
 - Steckung: derselbe Schalter einzeln – nur die Steckung läuft rechtwinklig ab der Gurtmitte an der Wurzel, der Gurt bleibt gepfeilt. Gilt auch für Flächenservos (Kollision, Draufsicht, Schnitte).
