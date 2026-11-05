@@ -7,7 +7,7 @@
 (function () {
   'use strict';
   const { state, T } = App;
-  const TABS = new Set(['cockpit', 'decal', 'fraese', 'ausschnitt', 'schrift', 'form', 'rprob', 'rpss', 'model', 'stegh', 'servo']);
+  const TABS = new Set(['cockpit', 'decal', 'fraese', 'ausschnitt', 'schrift', 'form', 'rprob', 'rpss', 'model', 'stegh', 'servo', 'flz']);
   const MAX_STEPS = 100, MAX_KEY_SIZE = 5e6;   // größere Werte (eingebettete Netze/Bilder) laufen nicht mit
   const MG = '@modelGcode';                    // 3D-Modell: Segmentpaar/Platte liegen in state.modelGcode
   // Nur Ansicht/Auswahl: ändert sich mit, ist aber kein eigener Schritt.

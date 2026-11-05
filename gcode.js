@@ -363,8 +363,8 @@
       if (stegeOn) { stR = App.stegePieces(cR); stT = App.stegePieces(cT); }
       else { coresR.push(cR); coresT.push(cT); }
     }
-    const root = App.negShell(rPts, App.negRibGeom(geom, blockCy, coresR, cut.root.chord, supOffsets, stR));
-    const tip = App.negShell(tPts, App.negRibGeom(geom, blockCy, coresT, cut.tip.chord, supOffsets, stT));
+    const root = App.negShell(rPts, App.negRibGeom(geom, blockCy, coresR, cut.root.chord, supOffsets, stR, { idx, rib: 'root' }));
+    const tip = App.negShell(tPts, App.negRibGeom(geom, blockCy, coresT, cut.tip.chord, supOffsets, stT, { idx, rib: 'tip' }));
     // Von Hand bearbeiteter Schnittverlauf (Punkte-Editor): ersetzt die Nennbahn.
     const negOv = state.negEdit[idx];
     if (negOv) { root.path = negOv.root.map(p => ({ x: p.x, y: p.y })); tip.path = negOv.tip.map(p => ({ x: p.x, y: p.y })); }
@@ -414,10 +414,10 @@
     // Schneideweg „ein Zug": kein Vorschnitt — die hintere Blockkante IST dann der
     // (echt geschnittene) Schalenrand -> normale Blockschnitt-Maße statt edge.
     const direct = !!(App.negDirectPath && App.negDirectPath());
-    const se = direct ? 0 : (state.cfg.negShellEdge || 0);
+    const se = direct ? 0 : (P.root.geom.latte ? P.root.geom.edgeR : (state.cfg.negShellEdge || 0));
     const edge = se > 0 ? {
       se,
-      rearIn:   P.ox - (P.root.xT + se), rearOut:  P.ox - (P.tip.xT + se)   // Endleiste (hinten)
+      rearIn:   P.ox - (P.root.xT + P.root.geom.edgeR), rearOut:  P.ox - (P.tip.xT + P.tip.geom.edgeR)   // Endleiste (hinten)
     } : null;
     return {
       machineWidth: P.mw,

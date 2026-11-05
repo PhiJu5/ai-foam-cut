@@ -715,7 +715,8 @@
       let run = null;
       const flush = () => { if (run) { c2.lineWidth = run.w; c2.strokeStyle = run.c; c2.stroke(); run = null; } };
       for (let i = 0; i < m; i++) {
-        const j = (i + 1) % n, kv = (kOf(i) + kOf(j)) / 2;
+        const j = (i + 1) % n, ke = arr || kk ? null : pts[i].ke;
+        const kv = (ke != null && isFinite(ke)) ? ke : (kOf(i) + kOf(j)) / 2;
         if (!(kv > 0)) { flush(); continue; }
         const w = Math.max(0.5, Math.round(kv * V.s * 4) / 4);
         const c = o.heat ? kerfColor(Math.round((kv - o.heat.lo) / span * 23) / 23) : (o.color || App.PAL.kerf);
@@ -2372,36 +2373,57 @@
     const eN = (p, q) => { const dx = q.x - p.x, dy = q.y - p.y, L = Math.hypot(dx, dy) || 1; return { x: dir * dy / L, y: -dir * dx / L }; };
     // Nachbar-Index ohne Nulllängenkanten (wie HotWire.neighborIdx).
     const nb = (i, s) => { for (let k = 1; k <= n; k++) { const j = (i + s * k + n * k) % n; if (Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y) > 1e-9) return j; } return (i + s + n) % n; };
-    const kk = Math.abs(g) * 2;
+    // g als Zahl (konstant) oder Feld je Punkt (Speed-Modus, vorher geglättet):
+    // jede Kante wird um den Mittelwert ihrer Endpunkt-Abstände versetzt.
+    const G = Array.isArray(g) ? g : null, gOf = i => G ? G[i] : g;
     const out = new Array(n);
     for (let i = 0; i < n; i++) {
-      const a = pts[nb(i, -1)], b = pts[i], c = pts[nb(i, 1)];
+      const ia = nb(i, -1), ic = nb(i, 1);
+      const a = pts[ia], b = pts[i], c = pts[ic];
       const n1 = eN(a, b), n2 = eN(b, c);
+      // Kantenabstand: im Speed-Modus der eigene (geglättete) Abbrand der Kante
+      // (G.edge, Kante i -> i+1) — eine gerade Kante läuft mit konstanter Geschwin-
+      // digkeit, ihr Versatz bleibt parallel (sonst schiefe Kanten = Schlaufen/Huckel).
+      const eG = (p, q) => (G && G.edge && q === (p + 1) % n && p < G.edge.length) ? G.edge[p] : (gOf(p) + gOf(q)) / 2;
+      const g1 = eG(ia, i), g2 = eG(i, ic), gi = gOf(i), kk = Math.abs(gi) * 2;
       // Begrenzter Winkelhalbierenden-Miter (Rückfall für scharfe/parallele Ecken).
       let bx = n1.x + n2.x, by = n1.y + n2.y; const bl = Math.hypot(bx, by);
       const miter = () => {
-        if (bl < 1e-9) return { x: b.x + n1.x * g, y: b.y + n1.y * g, k: kk };
+        if (bl < 1e-9) return { x: b.x + n1.x * gi, y: b.y + n1.y * gi, k: kk };
         const nx = bx / bl, ny = by / bl;
         const cosHalf = Math.max(0.35, n1.x * nx + n1.y * ny);
-        const s = g / cosHalf;
+        const s = gi / cosHalf;
         return { x: b.x + nx * s, y: b.y + ny * s, k: kk };
       };
       // Schnittpunkt der beiden PARALLEL versetzten Kanten (echter Parallel-Offset).
-      const p1x = a.x + n1.x * g, p1y = a.y + n1.y * g, d1x = b.x - a.x, d1y = b.y - a.y;
-      const p2x = b.x + n2.x * g, p2y = b.y + n2.y * g, d2x = c.x - b.x, d2y = c.y - b.y;
+      const p1x = a.x + n1.x * g1, p1y = a.y + n1.y * g1, d1x = b.x - a.x, d1y = b.y - a.y;
+      const p2x = b.x + n2.x * g2, p2y = b.y + n2.y * g2, d2x = c.x - b.x, d2y = c.y - b.y;
       const den = d1x * d2y - d1y * d2x;
       if (Math.abs(den) < 1e-9) { out[i] = miter(); continue; }
+      // Variable Abstände: bei flachem Knick (< ~20°) wandert der Kantenschnittpunkt
+      // um Δg/sinθ entlang der Bahn -> Winkelhalbierende (g je Punkt ist geglättet).
+      if (G && Math.abs(den) < 0.34 * Math.hypot(d1x, d1y) * Math.hypot(d2x, d2y)) { out[i] = miter(); continue; }
       const t = ((p2x - p1x) * d2y - (p2y - p1y) * d2x) / den;
       const ix = p1x + t * d1x, iy = p1y + t * d1y;
       // Miterlänge begrenzen — bei scharfer Ecke Spike vermeiden.
-      if (Math.hypot(ix - b.x, iy - b.y) > Math.abs(g) / 0.35) { out[i] = miter(); continue; }
+      if (Math.hypot(ix - b.x, iy - b.y) > Math.abs(gi) / 0.35) { out[i] = miter(); continue; }
+      // Variable Abstände: bei fast kollinearen Kanten liegt der Schnittpunkt schon
+      // bei kleinem Abstandsunterschied hinter a bzw. jenseits von c -> Rücklauf.
+      if (G) {
+        const u = ((ix - p2x) * d2x + (iy - p2y) * d2y) / ((d2x * d2x + d2y * d2y) || 1);
+        if (t < 0 || u > 1) { out[i] = miter(); continue; }
+      }
       out[i] = { x: ix, y: iy, k: kk };
     }
+    // Band „wahre Dicke": je Kante deren eigener Spalt (ke an ihrem Startpunkt),
+    // sonst passte die Bandbreite auf langen Kanten nicht zum Versatz.
+    if (G && G.edge) for (let i = 0; i < n; i++) if (i < G.edge.length) out[i].ke = Math.abs(G.edge[i]) * 2;
     return out;
   }
   function negShellOffset(path, gap) {
-    if (Array.isArray(gap)) return HotWire.offsetPath(path, gap, null);   // Speed-Modus: alter Miter
-    if (!gap) return path.map(p => ({ x: p.x, y: p.y }));
+    // Speed-Modus: Feld je Punkt (in negSpeedGaps geglättet) -> derselbe Parallel-
+    // Offset wie im Sehnenverhältnis-Modus (der alte Miter erzeugte Nasen-Schlaufen).
+    if (!Array.isArray(gap) && !gap) return path.map(p => ({ x: p.x, y: p.y }));
     return negParallelOffset(path, gap);
   }
   // Selbstüberschneidungen in einem OFFENEN Teilstück entfernen (Endpunkte
@@ -2452,7 +2474,7 @@
    * bleiben synchron. `maxSpan` begrenzt das Fenster auf echte lokale Loops. */
   function negDeloopSync(A, B, maxSpan) {
     const cap = maxSpan || 24;
-    A = A.map(p => ({ x: p.x, y: p.y, k: p.k })); B = B.map(p => ({ x: p.x, y: p.y, k: p.k }));
+    A = A.map(p => ({ x: p.x, y: p.y, k: p.k, ke: p.ke })); B = B.map(p => ({ x: p.x, y: p.y, k: p.k, ke: p.ke }));
     for (let pass = 0; pass < 60; pass++) {
       const n = Math.min(A.length, B.length); if (n < 6) break;
       let hit = null;
@@ -2502,16 +2524,37 @@
       kR[i] = App.kerfForSpeed(id, F * dR / md, F);
       kT[i] = App.kerfForSpeed(id, F * dT / md, F);
     }
+    // Glätten über die Bogenlänge (Gauß, σ ≈ 4 mm der längeren Bahn): die Punkt-
+    // abstände von Wurzel und Rand rauschen an der Nase -> sprunghafter Abbrand
+    // = Schlaufen; an Knicken (Schnittverlängerung -> Endleiste) springt das
+    // Längenverhältnis hart -> Stufe/Huckel. Geglättet läuft der Abbrand dort
+    // weich über ein paar mm über.
+    const sArc = [0];
+    for (let i = 0; i < nSeg; i++) sArc.push(sArc[i] + Math.max(
+      Math.hypot(rp[i + 1].x - rp[i].x, rp[i + 1].y - rp[i].y), Math.hypot(tp[i + 1].x - tp[i].x, tp[i + 1].y - tp[i].y)));
+    const mid = kR.map((_, i) => (sArc[i] + sArc[i + 1]) / 2), len = kR.map((_, i) => sArc[i + 1] - sArc[i]);
+    const SIG = 4, smooth = (K, s0) => {
+      let w = 0, v = 0;
+      // Abstand zur KANTE (nicht zu ihrer Mitte): an einer Ecke lange gerade Kante ->
+      // Profil steigt der Abbrand so über ~2σ an statt zu springen (sonst Kerbe/Schlaufe).
+      for (let i = 0; i < nSeg; i++) {
+        const d = s0 < sArc[i] ? sArc[i] - s0 : s0 > sArc[i + 1] ? s0 - sArc[i + 1] : 0;
+        if (d > 3 * SIG) continue;
+        const wi = Math.exp(-0.5 * d * d / (SIG * SIG)) * Math.min(Math.max(len[i], 1e-3), 2 * SIG); w += wi; v += wi * K[i];
+      }
+      return w > 0 ? v / w : K[0];
+    };
     const gapR = new Array(n), gapT = new Array(n);
-    for (let i = 0; i < n; i++) {
-      const a = Math.max(0, i - 1), b = Math.min(nSeg - 1, i);
-      gapR[i] = (kR[a] + kR[b]) / 4;                   // halber (gemittelter) kerf
-      gapT[i] = (kT[a] + kT[b]) / 4;
-    }
+    for (let i = 0; i < n; i++) { gapR[i] = smooth(kR, sArc[i]) / 2; gapT[i] = smooth(kT, sArc[i]) / 2; }   // halber kerf
+    // Je Kante: Abbrand an ihrer Mitte (lange Kanten behalten ihren eigenen Wert).
+    gapR.edge = mid.map(m => smooth(kR, m) / 2); gapT.edge = mid.map(m => smooth(kT, m) / 2);
     return { gapR, gapT };
   }
+  // Wirksame Abbrand-Berechnung der Negativschale (Latten-Menü hat Vorrang).
+  function negKerfModeEff() { return (App.negLatteKerf && App.negLatteKerf()) || state.cfg.negKerfMode || 'ratio'; }
   function negKerf(rootPath, tipPath, rootChord, tipChord) {
-    if ((state.cfg.negKerfMode || 'ratio') === 'speed') return negSpeedGaps(rootPath, tipPath);
+    const km = negKerfModeEff();
+    if (km === 'speed') return negSpeedGaps(rootPath, tipPath);
     const ck = App.cutKerf(rootChord, tipChord);           // kerf je Rippe (innen/außen) aus dem Geschwindigkeitsverhältnis
     return { gapR: ck.root / 2, gapT: ck.tip / 2 };
   }
@@ -2522,15 +2565,23 @@
    * und Randquerschnitt geometrisch ähnlich -> die Draht-Geschwindigkeit bleibt
    * über die Spannweite konstant und die einfache (Sehnenverhältnis-)kerf-
    * Kompensation ist exakt. */
-  function negRibGeom(geom, blockCy, cores, chord, supOffsets, stege) {
+  function negRibGeom(geom, blockCy, cores, chord, supOffsets, stege, at) {
     const s = (chord || 0) / negRefChord();
     // Schneideweg „ein Zug": Block vorne/hinten = KONSTANTER Schalenüberstand je Rippe.
     const se = negDirectPath() ? Math.max(0, state.cfg.negShellEdge || 0) : null;
-    return Object.assign({}, geom, {
+    const base = {
       blockCy, cores: cores || [], supOffsets: supOffsets || [], noseExt: state.cfg.negNoseExt, teStyle: state.cfg.negTeStyle || 'horizontal', stege: stege || null, stegeOnly: !!state.cfg.negStegeOnly,
-      ovF: se != null ? se : (geom.ovF || 0) * s, ovR: se != null ? se : (geom.ovR || 0) * s
-    });
+      ovF: se != null ? se : (geom.ovF || 0) * s, ovR: se != null ? se : (geom.ovR || 0) * s,
+      edgeF: state.cfg.negShellEdge || 0, edgeR: state.cfg.negShellEdge || 0
+    };
+    // Ausrichtung an gerader Latte (neglatte.js): Schalenrand je Rippe auf der Latte,
+    // Schnittverlängerung um „Abstand" darüber hinaus — überschreibt alles obige.
+    const la = at && App.negLatteEdges && App.negLatteEdges(at.idx, at.rib);
+    if (la) Object.assign(base, { ovF: la.f + la.clear, ovR: la.r + la.clear, edgeF: la.f, edgeR: la.r, latte: true });
+    return Object.assign({}, geom, base);
   }
+  // Schalenrand-Vorschnitte an? (konstanter Rand > 0 oder Latten-Ausrichtung)
+  function negEdgeCuts() { return !!(App.negLatteOn && App.negLatteOn()) || (state.cfg.negShellEdge || 0) > 0; }
   /* Schneideweg „Konstanter Schalenüberstand, ein Zug" (cfg.negCutPath 'direct'):
    * Blockvorder-/-hinterkante liegen genau auf Nase − negShellEdge / EL + negShellEdge
    * (konstant, nicht proportional zur Sehne). Keine Schnittverlängerung, keine
@@ -2538,6 +2589,7 @@
    * hinten oben Start, oben nach vorne, runter auf Nasenhöhe, waagrecht auf die Nase …
    * Bei „Nur Stege schneiden" gibt es keine Schalen -> bisheriger Weg. */
   function negDirectPath() {
+    if (App.negLatteOn && App.negLatteOn()) return false;   // Latten-Ausrichtung braucht Vorschnitte
     return state.cfg.negCutPath === 'direct' && !(App.stegeOn && App.stegeOn() && state.cfg.negStegeOnly);
   }
 
@@ -2608,9 +2660,68 @@
     });
   }
   let negElevPick = null;   // {inv, segZ} — Klick im Aufriss -> Segment aktivieren
+  /* Draufsicht über die ganze Spannweite: waagrecht = Spannweite, senkrecht =
+   * Sehnenrichtung (Nase oben). Je Rippe Profil Nase/EL, Schalenrand und Block-
+   * kante (Schnittverlängerung) aus negRibGeom — mit Latten-Ausrichtung (neglatte.js)
+   * werden die geraden Latten sichtbar. */
+  function drawNegPlan(cv, ctx, w, h) {
+    const cuts = (App.wing && App.wing.cuts) || [];
+    if (!cuts.length) { negElevPick = null; return; }
+    const geom = { H: state.cfg.negBlockH, ovF: state.cfg.negOvF, ovR: state.cfg.negOvR, split: state.cfg.negSplit };
+    const R = []; let z = 0, dx = 0;
+    const segZ = [];
+    cuts.forEach((cut, k) => {
+      if (k >= state.segments.length) return;
+      ['root', 'tip'].forEach(rib => {
+        const pts = negRibPts(cut, k, rib);
+        let a = Infinity, b = -Infinity; for (const p of pts) { if (p.x < a) a = p.x; if (p.x > b) b = p.x; }
+        const g = negRibGeom(geom, 0, [], rib === 'root' ? cut.root.chord : cut.tip.chord, [], null, { idx: k, rib });
+        const se = negDirectPath() ? 0 : (g.edgeF || 0), seR = negDirectPath() ? 0 : (g.edgeR || 0);
+        R.push({ k, z: rib === 'root' ? z : z + (cut.span || 0), xF: a + dx, xT: b + dx, bF: a + dx - g.ovF, bR: b + dx + g.ovR,
+                 eF: se > 0 ? a + dx - se : null, eR: seR > 0 ? b + dx + seR : null });
+      });
+      segZ.push({ z0: z, z1: z + (cut.span || 0) });
+      z += cut.span || 0; dx += (cut.tip.pl && cut.tip.pl.leOffset) || 0;
+    });
+    const P = (zz, x) => ({ x: zz, y: -x });
+    const all = []; R.forEach(r => { all.push(P(r.z, r.bF), P(r.z, r.bR)); });
+    const pad = Math.max(6, Math.min(46, Math.min(w, h) * 0.18));
+    const V = makeView(w, h, bounds(all), pad, nav.negelev);
+    grid(ctx, w, h, V);
+    const act = Math.max(0, Math.min(App.activeIdx(), segZ.length - 1));
+    for (let k = 0; k < segZ.length; k++) {
+      const r0 = R[2 * k], r1 = R[2 * k + 1], c = SEGCOL[k % SEGCOL.length];
+      drawBlock(ctx, V, [P(r0.z, r0.bF), P(r1.z, r1.bF), P(r1.z, r1.bR), P(r0.z, r0.bR)], App.PAL.block);
+      poly(ctx, V, [P(r0.z, r0.xF), P(r1.z, r1.xF), P(r1.z, r1.xT), P(r0.z, r0.xT)], true);
+      ctx.fillStyle = hexA(c, k === act ? 0.28 : 0.10); ctx.strokeStyle = c; ctx.lineWidth = k === act ? 2.5 : 1.5;
+      ctx.setLineDash([]); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = App.PAL.shellEdge || '#c78bff'; ctx.lineWidth = 1.6;
+      if (r0.eF != null) { poly(ctx, V, [P(r0.z, r0.eF), P(r1.z, r1.eF)], false); ctx.stroke(); }
+      if (r0.eR != null) { poly(ctx, V, [P(r0.z, r0.eR), P(r1.z, r1.eR)], false); ctx.stroke(); }
+      ctx.fillStyle = k === act ? c : '#8b98a8'; ctx.font = '11px Segoe UI'; ctx.textAlign = 'center';
+      ctx.fillText('Seg ' + (k + 1), (V.X(r0.z) + V.X(r1.z)) / 2, V.Y(-Math.min(r0.bF, r1.bF)) - 8);
+    }
+    ctx.textAlign = 'left';
+    negElevPick = { inv: V.inv, segZ };
+    const leg = [L(SEGCOL[act % SEGCOL.length], T('Profil-Grundriss (Nase oben, aktives Segment kräftig)'), [], 'line', 2.5),
+      L(App.PAL.block, T('Formblock inkl. Schnittverlängerung'), dashFor('block', [7, 5]), 'rect')];
+    if (R.some(r => r.eF != null)) leg.push(L(App.PAL.shellEdge || '#c78bff', App.negLatteOn && App.negLatteOn()
+      ? T('Schalenrand an gerader Latte') : T('Schalenrand (Vorschnitt)'), [], 'line', 1.6));
+    leg.push(['#8b98a8', T('Klick: Segment aktiv schalten')]);
+    drawLegend(ctx, 14, 20, leg, { top: true });
+  }
   function drawNegElev() {
     const cv = document.getElementById('cNegElev'); if (!cv) return;
     const { ctx, w, h } = fitCanvas(cv); ctx.clearRect(0, 0, w, h);
+    const top = state.cfg.negElevView === 'top';
+    const sel = document.getElementById('negElevMode'), lab = document.getElementById('negElevLabel');
+    if (sel && !sel.dataset.wired) {
+      sel.dataset.wired = '1';
+      sel.addEventListener('change', () => { state.cfg.negElevView = sel.value; if (nav.negelev) Object.assign(nav.negelev, { z: 1, ox: 0, oy: 0 }); drawNegElev(); });
+    }
+    if (sel) sel.value = top ? 'top' : 'front';
+    if (lab) lab.textContent = top ? T('Draufsicht (Negativschalen über die Spannweite)') : T('Aufriss — Ansicht von vorne (Negativschalen über die Spannweite)');
+    if (top) return drawNegPlan(cv, ctx, w, h);
     const G = negElevGeom();
     if (!G.length) {
       negElevPick = null;
@@ -2731,7 +2842,7 @@
   // Während der Negativschalen-Darstellung gilt die Werkstoff-Zuweisung „Negativschalen".
   function renderNeg() {
     App.matCtxOverride = 'neg';
-    try { renderNeg_(); drawNegElev(); } finally { App.matCtxOverride = null; if (App.meas2dOverlay) App.meas2dOverlay('neg'); }
+    try { renderNeg_(); drawNegElev(); if (App.neg3dRefresh) App.neg3dRefresh(); } finally { App.matCtxOverride = null; if (App.meas2dOverlay) App.meas2dOverlay('neg'); }
   }
   function renderNeg_() {
     const cv = document.getElementById('cNeg');
@@ -2764,8 +2875,8 @@
       if (stegeOn) { stR = App.stegePieces(cR); stT = App.stegePieces(cT); }
       else { coresR.push(cR); coresT.push(cT); }
     }
-    const root = negShell(rPts, negRibGeom(geom, blockCy, coresR, cut.root.chord, supOffsets, stR));
-    const tip = negShell(tPts, negRibGeom(geom, blockCy, coresT, cut.tip.chord, supOffsets, stT));
+    const root = negShell(rPts, negRibGeom(geom, blockCy, coresR, cut.root.chord, supOffsets, stR, { idx, rib: 'root' }));
+    const tip = negShell(tPts, negRibGeom(geom, blockCy, coresT, cut.tip.chord, supOffsets, stT, { idx, rib: 'tip' }));
     // Von Hand bearbeiteter Schnittverlauf (Punkte-Editor): ersetzt die Nennbahn
     // dieser Schale. Nur die Bahn (.path) wird getauscht — Block/Bemaßung bleiben
     // aus der abgeleiteten Geometrie. Bei Override entfällt das Nasen-Enthaken.
@@ -2824,19 +2935,20 @@
     // Schneideweg „ein Zug": der Überstand IST die Blockkante -> keine Vorschnitt-Linien.
     const direct = negDirectPath();
     const se = (stegeOn && state.cfg.negStegeOnly) ? 0 : (state.cfg.negShellEdge || 0);
-    if (se > 0 && !direct) {
+    const latte = !!root.geom.latte && !(stegeOn && state.cfg.negStegeOnly);
+    if ((se > 0 || latte) && !direct) {
       ctx.lineWidth = 1.4;
       if (shR) {   // innen (Wurzel)
         ctx.strokeStyle = App.PAL.shellEdge || '#c78bff';
         ctx.setLineDash(dashFor('shellEdge', [4, 3]));
-        poly(ctx, V, [{ x: root.xL - se, y: mat.yBot }, { x: root.xL - se, y: mat.yTop }], false); ctx.stroke();
-        poly(ctx, V, [{ x: root.xT + se, y: mat.yBot }, { x: root.xT + se, y: mat.yTop }], false); ctx.stroke();
+        poly(ctx, V, [{ x: root.xL - root.geom.edgeF, y: mat.yBot }, { x: root.xL - root.geom.edgeF, y: mat.yTop }], false); ctx.stroke();
+        poly(ctx, V, [{ x: root.xT + root.geom.edgeR, y: mat.yBot }, { x: root.xT + root.geom.edgeR, y: mat.yTop }], false); ctx.stroke();
       }
       if (shT) {   // außen (Rand)
         ctx.strokeStyle = App.PAL.shellEdgeOuter || '#c78bff';
         ctx.setLineDash(dashFor('shellEdgeOuter', [2, 4]));
-        poly(ctx, V, [{ x: tip.xL - se, y: mat.yBot }, { x: tip.xL - se, y: mat.yTop }], false); ctx.stroke();
-        poly(ctx, V, [{ x: tip.xT + se, y: mat.yBot }, { x: tip.xT + se, y: mat.yTop }], false); ctx.stroke();
+        poly(ctx, V, [{ x: tip.xL - tip.geom.edgeF, y: mat.yBot }, { x: tip.xL - tip.geom.edgeF, y: mat.yTop }], false); ctx.stroke();
+        poly(ctx, V, [{ x: tip.xT + tip.geom.edgeR, y: mat.yBot }, { x: tip.xT + tip.geom.edgeR, y: mat.yTop }], false); ctx.stroke();
       }
       ctx.setLineDash([]);
     }
@@ -2864,7 +2976,7 @@
     // segmentweise nach dem lokalen kerf (p.k) — für Innen- UND Außenprofil.
     let kheat = null;
     if (rSpur) {
-      if (state.cfg.kerfHeat && (state.cfg.negKerfMode || 'ratio') === 'speed') {
+      if (state.cfg.kerfHeat && negKerfModeEff() === 'speed') {
         let lo = Infinity, hi = -Infinity;
         const scan = pts => pts.forEach(p => { if (p.k != null) { lo = Math.min(lo, p.k); hi = Math.max(hi, p.k); } });
         scan(rSpur); scan(tSpur);
@@ -2947,7 +3059,7 @@
     if (negOv) leg.push(['#8b98a8', T('Schnittverlauf von Hand bearbeitet (Punkte-Editor) — Nasen-Enthaken entfällt')]);
     if (rSpur && (shR || shT)) {
       const ktext = T('Schnittspur inkl. Abbrand: innen ') + ck.root.toFixed(2)
-        + T(' · außen ') + ck.tip.toFixed(2) + ' mm (' + ((state.cfg.negKerfMode || 'ratio') === 'speed' ? T('Bahngeschwindigkeit') : T('Sehnenverhältnis')) + ')'
+        + T(' · außen ') + ck.tip.toFixed(2) + ' mm (' + (negKerfModeEff() === 'speed' ? T('Bahngeschwindigkeit') : T('Sehnenverhältnis')) + ')'
         + (kheat ? T(' · Farbe = lokaler Spalt') : '') + (burnOv ? T(' · von Hand bearbeitet, immer sichtbar') : '');
       leg.push(kerfLeg(kheat ? Object.assign(L(null, ktext, [], 'grad'), { tc: '#ffffffcc' })
                              : L(App.PAL.kerf, ktext, dashFor('kerf', []), 'line', 1.4), 'neg'));
@@ -2967,12 +3079,15 @@
       { f: MAT_FILL }));
     if (direct) leg.push(['#ffb454', T('Schalenüberstand konstant vorne/hinten ') + (Math.round(se * 10) / 10)
       + T(' mm · ein Zug ohne Freifahren (keine Schnittverlängerung, keine Vorschnitte)')]);
+    else if (latte) leg.push(['#ffb454', T('Ausrichtung an gerader Latte: Schalenrand innen vorne ') + root.geom.edgeF.toFixed(1)
+      + T(' / hinten ') + root.geom.edgeR.toFixed(1) + T(' · außen vorne ') + tip.geom.edgeF.toFixed(1) + T(' / hinten ') + tip.geom.edgeR.toFixed(1)
+      + T(' mm · Schnittverlängerung ') + (root.geom.ovF - root.geom.edgeF).toFixed(1) + T(' mm darüber hinaus')]);
     else leg.push(['#ffb454', T('Überstand Wurzel vorne ') + Math.round(root.xL - root.xBL) + T(' / hinten ') + Math.round(root.xBR - root.xT)
       + T(' mm · proportional zur Sehne (Vorgabe ') + Math.round(geom.ovF) + '/' + Math.round(geom.ovR) + T(' für 1. Seg.)')]);
     if (geom.split > 0.01) leg.push(['#57d38c', T('Ober-/Unterseite ') + Math.round(geom.split) + T(' mm auseinandergezogen')]);
     if (Math.abs(vRise) > 0.05) leg.push(['#8b98a8', T('V-Form berücksichtigt: Außenprofil ') + vRise.toFixed(1) + T(' mm höher als Wurzel')]);
-    if (se > 0 && !direct) {
-      const seTxt = Math.round(se) + T(' mm (Vorschnitt, Referenzkante · vertikal durch den ganzen Werkstoff)');
+    if ((se > 0 || latte) && !direct) {
+      const seTxt = (latte ? T('an der Latte') : Math.round(se) + T(' mm')) + T(' (Vorschnitt, Referenzkante · vertikal durch den ganzen Werkstoff)');
       if (shR) leg.push(L(App.PAL.shellEdge || '#c78bff', T('Schalenrand konstant innen ') + seTxt, dashFor('shellEdge', [4, 3]), 'line', 1.4));
       if (shT) leg.push(L(App.PAL.shellEdgeOuter || '#c78bff', T('Schalenrand konstant außen ') + seTxt, dashFor('shellEdgeOuter', [2, 4]), 'line', 1.4));
     }
@@ -3063,7 +3178,7 @@
   Object.assign(App, { applyNegSplit, setupNegSplit, setupNegElevPick });
   Object.assign(App, { exportSweepCmpDxf, fitCanvas, grid, hexA, kerfBand, kerfColor, kerfColorbar, kerfLeg, kerfTrueSet, makeDraggable, makeSplitDraggable });
   Object.assign(App, { makeView, nav, negBaseRibPts, negBlockCy, negChordMidY, negCoreContour, negDeloopSync, negKerf, negMatBlock });
-  Object.assign(App, { negDirectPath, negNoseMiter, negParallelOffset, negRefChord, negRibGeom, negRibPts, negShell, negShellOffset, negSnapNoseApex });
+  Object.assign(App, { negDirectPath, negEdgeCuts, negNoseMiter, negParallelOffset, negRefChord, negRibGeom, negRibPts, negShell, negShellOffset, negSnapNoseApex });
   Object.assign(App, { negSpeedGaps, negSupportOffsets, niceStep, openSweepCmp, pointInPoly, poly, polyKerf, profNavKey });
   Object.assign(App, { rect, render, renderMaterial, renderNeg, renderProfEdit, renderSweepCmp });
   Object.assign(App, { renderSeg3D, renderSeg3DWin, seg3dOpen, seg3dClose, seg3dIsOpen, seg3dWire, wingSeg3DList, seg3dSnapAxis, seg3dGizmoHit, seg3dPickModel, seg3dCam: () => seg3d });

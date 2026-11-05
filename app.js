@@ -76,6 +76,8 @@
       else if (name === 'ausl' && window.Auslegung) Auslegung.show();
       else if (name === 'holm' && window.Holm) Holm.show();
     else if (name === 'stegh' && window.StegHoehen) StegHoehen.show();
+    else if (name === 'flz' && window.Flugzeug) Flugzeug.show();
+    else if (name === 'fsim' && window.Flugsim) Flugsim.show();
     else if (name === 'servo' && window.Servos) Servos.show();
       else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
@@ -110,6 +112,8 @@
     else if (name === 'ausl' && window.Auslegung) Auslegung.show();
     else if (name === 'holm' && window.Holm) Holm.show();
     else if (name === 'stegh' && window.StegHoehen) StegHoehen.show();
+    else if (name === 'flz' && window.Flugzeug) Flugzeug.show();
+    else if (name === 'fsim' && window.Flugsim) Flugsim.show();
     else if (name === 'servo' && window.Servos) Servos.show();
     else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();

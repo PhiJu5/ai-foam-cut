@@ -2092,7 +2092,9 @@
         + '(Höhe aus dem Reiter „Projektübersicht") — für alle Segmente gemeinsam. Positiv = nach oben, '
         + 'negativ = nach unten, 0 = mittig. Der G-Code-Nullpunkt (Y) liegt an der Werkstoff-Unterkante.' });
     const negDirect = state.cfg.negCutPath === 'direct';
-    selectRow(ng.body, 'Schneideweg',
+    const negLatte = !!(App.negLatteOn && App.negLatteOn());
+    if (negLatte) hint(ng.body, 'Schneideweg, Schnittverlängerung und Schalenrand kommen aus dem Menü „Ausrichtung an gerader Latte".');
+    if (!negLatte) selectRow(ng.body, 'Schneideweg',
       [['precut', 'Schnittverlängerung + Randvorschnitte (mit Freifahren)'],
        ['direct', 'Konstanter Schalenüberstand, ein Zug (ohne Freifahren)']],
       () => negDirect ? 'direct' : 'precut',
@@ -2102,7 +2104,7 @@
       + '„Ein Zug": KEINE Schnittverlängerung und keine Vertikalschnitte zu Beginn — der Block endet genau auf dem '
       + 'konstanten Schalenüberstand. Start hinten oben, oben nach vorne, runter auf Nasenhöhe, waagrecht (Überstand) '
       + 'auf die Nase, Profil, … alles in einem durchgehenden Schnitt.');
-    if (!negDirect) {
+    if (!negDirect && !negLatte) {
       numRow(ng.body, 'Schnittverlängerung vorne / Nase (mm)', () => state.cfg.negOvF,
         v => { state.cfg.negOvF = v; render(); }, { min: 0, norender: true,
         hint: 'Schnittverlängerung vor der Profilnase (LE) — vorgegeben für die Wurzel. '
@@ -2113,7 +2115,7 @@
           + 'Rand proportional zur Profillänge. So bleibt die Draht-Geschwindigkeit konstant und die '
           + 'einfache Abbrand-Kompensation (Sehnenverhältnis) ist exakt.' });
     }
-    numRow(ng.body, 'Überstand Schalenrand konstant (mm)', () => state.cfg.negShellEdge,
+    if (!negLatte) numRow(ng.body, 'Überstand Schalenrand konstant (mm)', () => state.cfg.negShellEdge,
       v => { state.cfg.negShellEdge = v; render(); }, { min: 0, norender: true,
       hint: negDirect
         ? 'KONSTANTER Überstand der Schalen vor der Nase und hinter der Endleiste (Wurzel und Rand gleich). '
@@ -2124,7 +2126,7 @@
           + 'Profilschnitt als zwei planare Vertikalschnitte gefahren (wie der Blockschnitt beim Kern) '
           + '— dient als konstante Referenzkante beim späteren Bauen. Bezug ist der Werkstoff: die Schnitte gehen '
           + 'immer vertikal durch den ganzen Werkstoff-Block. 0 = aus. Sollte ≤ Überstand vorne/hinten sein.' });
-    if (!negDirect && (state.cfg.negShellEdge || 0) > 0) blockCutLowRows(ng.body);
+    if (negLatte || (!negDirect && (state.cfg.negShellEdge || 0) > 0)) blockCutLowRows(ng.body);
 
     subhead(ng.body, 'Schalentrennung');
     selectRow(ng.body, 'Schnittverlauf an der Endleiste',
@@ -2146,6 +2148,7 @@
     boolRow(ng.body, 'Bemaßung', () => state.cfg.showDim,
       v => { state.cfg.showDim = v; renderNeg(); });
     side.appendChild(ng.g);
+    if (App.negLatteRows) App.negLatteRows(side);   // eigenes Menü „Ausrichtung an gerader Latte" (neglatte.js)
 
     // --- Eigener Menüpunkt „Abbrand" (Negativschale) ------------------
     // Bewusst getrennt vom Kerndesign: die Negativschale hat ihre eigene
@@ -2230,6 +2233,8 @@
 
     // --- Reiter „Decals" (decal, optionales Feature) ----------------------
     if (App.decalSidebar) App.decalSidebar(side);
+    if (App.flzSidebar) App.flzSidebar(side);   // Reiter „Flugzeug gesamt“ (optional)
+    if (App.fsimSidebar) App.fsimSidebar(side); // Reiter „Flugsimulator“ (optional)
 
     // --- Reiter „Aerodynamik" (aero, optionales Feature) ------------------
     if (App.aeroSidebar) App.aeroSidebar(side);

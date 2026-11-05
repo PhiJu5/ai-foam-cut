@@ -538,7 +538,7 @@
     em('; ' + T('Teil ') + (P.idx + 1) + T(' von ') + App.wing.cuts.length
       + T(' · Punkte/Kontur: ') + n + T(' · Vorschub: ') + feed + ' mm/min'
       + T(' · Abbrand innen ') + ckH.root.toFixed(2) + T(' / außen ') + ckH.tip.toFixed(2) + ' mm'
-      + ' (' + T((state.cfg.negKerfMode || 'ratio') === 'speed' ? 'Bahngeschwindigkeit' : 'Sehnenverhältnis') + ')');
+      + ' (' + T(((App.negLatteKerf && App.negLatteKerf()) || state.cfg.negKerfMode || 'ratio') === 'speed' ? 'Bahngeschwindigkeit' : 'Sehnenverhältnis') + ')');
     if (P.stege) em('; ' + T('Kern in ') + P.stege.length + T(' Stege zerlegt (') + T(state.cfg.negStegeOnly ? 'NUR Stege, ohne Schalen' : 'im selben Schnitt') + T(') · Stegabstand ') + (state.cfg.negStegeGap || 0)
       + T(' mm · Nennbreiten Wurzel ') + P.stege.map(pc => pc.w.toFixed(1)).join(' + ') + ' mm'
       + P.stege.map(pc => (pc.st.sleeve || pc.st.capTop || pc.st.capBot) ? ' · S' + (pc.k + 1) + T(': Glasschlauch ') + pc.st.sleeve + T(' / Holmgurt ') + pc.st.capTop + '+' + pc.st.capBot : '').join(''));
@@ -551,7 +551,8 @@
     // --- Konstanter Schalenrand: VOR dem Profilschnitt zwei planare Vertikal-
     //     schnitte (Nase/EL) auf konstantem Überstand — wie der Blockschnitt beim
     //     Kern. Ergibt die konstante Referenzkante der Schalen. ---
-    const se = (P.stege && state.cfg.negStegeOnly) ? 0 : (state.cfg.negShellEdge || 0);   // Vorschnitte nur mit Schalen
+    const latte = !!P.root.geom.latte && !(P.stege && state.cfg.negStegeOnly);   // Ausrichtung an gerader Latte (neglatte.js)
+    const se = (P.stege && state.cfg.negStegeOnly) ? 0 : (latte ? 1 : (state.cfg.negShellEdge || 0));   // Vorschnitte nur mit Schalen
     // Schneideweg „ein Zug": die Blockkanten liegen schon auf dem konstanten Überstand,
     // der Umriss schneidet die Schalenränder selbst -> keine Vorschnitte, kein Freifahren.
     if (se > 0 && App.negDirectPath && App.negDirectPath())
@@ -561,9 +562,12 @@
       // Abbrand-Kompensation (wie beim Kern-Blockschnitt): der Draht fährt um den
       // HALBEN Abbrand weiter nach vorne (Nase) bzw. hinten (EL), damit die stehen
       // bleibende Schalenrandkante genau auf Nennmaß + Überstand liegt.
-      const hkR = ckH.root / 2, hkT = ckH.tip / 2;
-      const front = { l: at(P.root.xL - se - hkR, P.tip.xL - se - hkT, 0), r: at(P.root.xL - se - hkR, P.tip.xL - se - hkT, mw) }; // Nase
-      const rear = { l: at(P.root.xT + se + hkR, P.tip.xT + se + hkT, 0), r: at(P.root.xT + se + hkR, P.tip.xT + se + hkT, mw) };   // Endleiste
+      // Latte + lokale Geschwindigkeit: beide Türme fahren den Vertikalschnitt gleich schnell -> gleicher Abbrand.
+      const ckE = latte && App.negLatteKerf() === 'speed' ? App.cutKerf(1, 1) : ckH;
+      const hkR = ckE.root / 2, hkT = ckE.tip / 2;
+      const eRF = P.root.geom.edgeF, eTF = P.tip.geom.edgeF, eRR = P.root.geom.edgeR, eTR = P.tip.geom.edgeR;
+      const front = { l: at(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, 0), r: at(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, mw) }; // Nase
+      const rear = { l: at(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, 0), r: at(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, mw) };   // Endleiste
       const fdn = capF(feed).toFixed(0);   // Randschnitt mit vollem Schnittvorschub in einem Zug
       // Y-Ziel = Maschinen-Vertikal 0: Der Randschnitt für den konstanten Überstand
       // fährt IMMER ganz auf Vertikal 0 hinunter — auch wenn der Block über die
@@ -580,7 +584,8 @@
         if (dwl > 0) em('G4 P' + dwl + ' ; ' + T('auf Vertikal 0 verweilen (durchschmelzen)'));
         em(`G0 ${ax.x}${fx(pos.l)} ${ax.y}${f(safeY)} ${ax.u}${fx(pos.r)} ${ax.v}${f(safeY)} ; hoch auf Sicherheitshöhe`);
       };
-      em('; --- ' + T('Überstand Schalenrand (konstant ') + se + T(' mm) — vor dem Profilschnitt') + ' ---');
+      em('; --- ' + (latte ? T('Schalenrand an gerader Latte (innen vorne ') + eRF.toFixed(1) + T(' / hinten ') + eRR.toFixed(1) + T(', außen vorne ') + eTF.toFixed(1) + T(' / hinten ') + eTR.toFixed(1) + ' mm)'
+        : T('Überstand Schalenrand (konstant ') + se + ' mm)') + T(' — vor dem Profilschnitt') + ' ---');
       edgeCut(rear, T('hinterer Schalenrand'));
       edgeCut(front, T('vorderer Schalenrand'));
       em(`G0 ${ax.x}${f(0)} ${ax.y}${f(safeY)} ${ax.u}${f(0)} ${ax.v}${f(safeY)} ; über den Block zurück`);

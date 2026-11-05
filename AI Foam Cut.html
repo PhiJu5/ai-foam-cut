@@ -688,6 +688,8 @@
       </div>
     </div>
     <button data-view="cad">CAD-Bearbeitung</button>
+    <button data-view="flz">Flugzeug gesamt</button>
+    <button data-view="fsim">Flugsimulator</button>
   </div>
 
   <aside id="side"></aside>
@@ -846,7 +848,11 @@
              Querschnitt des aktiven Segments. Teiler = #negElevSplit (cfg.negViewSplit). -->
         <div class="wing-stack core-mode" id="negStack">
           <div class="wing-pane">
-            <span class="pane-label">Aufriss — Ansicht von vorne (Negativschalen über die Spannweite)</span>
+            <span class="pane-label" id="negElevLabel">Aufriss — Ansicht von vorne (Negativschalen über die Spannweite)</span>
+            <div class="pane-toggles" id="negElevToggles">
+              <label>Ansicht: <select id="negElevMode" title="Ansicht umschalten"><option value="front">Vorderansicht</option><option value="top">Draufsicht</option></select></label>
+              <button type="button" id="neg3dBtn" title="3D-Ansicht der Schalen, Kerne/Stege und des Stützstoffs über die ganze Tragfläche (eigenes Fenster)">🧊 3D-Ansicht</button>
+            </div>
             <canvas id="cNegElev"></canvas>
           </div>
           <div class="wing-pane" style="border-left:0">
@@ -1196,6 +1202,10 @@
       </div>
       <!-- Reiter „Steghöhen" (stegh.js): Holm- und Ruderstege aus dem Tragflächendesign -->
       <div class="view" id="steghView"></div>
+      <!-- Reiter „Flugzeug gesamt" (flugzeug.js): ganzes Modell in 3D, Farben, Decals, flow5-Netz -->
+      <div class="view" id="flzView"></div>
+      <!-- Reiter „Flugsimulator" (flugsim.js): mit dem Flugzeug aus „Flugzeug gesamt" fliegen -->
+      <div class="view" id="fsimView"></div>
       <!-- Reiter „Flächenservos" (servos.js): Servos, Hebel, Anlenkung, Kinematik -->
       <div class="view" id="servoView"></div>
 
@@ -1760,7 +1770,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261104orth1"></script>
+<script src="i18n.js?v=20261105fsim11"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261022tr2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
@@ -1788,7 +1798,7 @@
 <script src="core.js?v=20261104b"></script>
 <script src="cad.js?v=20261104b"></script>
 <script src="cadpdf.js?v=20261023pv2"></script>
-<script src="gcode.js?v=20261029nh"></script>
+<script src="gcode.js?v=20261105lat1"></script>
 <script src="spars.js?v=20261029nh"></script>
 <script src="ribs.js?v=20261101rst1"></script>
 <script src="dxfshapes.js?v=20261031un1"></script>
@@ -1797,16 +1807,19 @@
 <script src="stlpreview.js?v=20261027mf3"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
 <script src="gmfc.js?v=20261101rumpf1"></script>
-<script src="render.js?v=20261029nh3"></script>
+<script src="render.js?v=20261105kf6"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261101rumpf1"></script>
-<script src="pathpreview.js?v=20261008bcl"></script>
-<script src="gcodegen.js?v=20261025wn"></script>
+<script src="sidebar.js?v=20261105lat1"></script>
+<script src="pathpreview.js?v=20261105lat1"></script>
+<script src="gcodegen.js?v=20261105lat1"></script>
 <script src="cutpanel.js?v=20261025wn"></script>
 <script src="stege.js?v=20261029nh"></script>
 <script src="kernteile.js?v=20261025wn"></script>
 <script src="negholme.js?v=20261029nh4"></script>
-<script src="stegh.js?v=20261104orth1"></script>
+<script src="neglatte.js?v=20261105lat1"></script>
+<script src="neg3d.js?v=20261105n3d1"></script>
+<script src="stegh.js?v=20261105rip5"></script>
+<script src="stuetzrippen.js?v=20261105rip5"></script>
 <script src="servos.js?v=20261104orth1"></script>
 <script src="pc2wing.js?v=20261010tol"></script>
 <script src="stepexport.js?v=20261010prof"></script>
@@ -1831,7 +1844,9 @@
 <script src="ausschnitt_gcode.js?v=20261026blk"></script>
 <script src="decals_lib.js?v=20261004gerade2"></script>
 <script src="decals_design.js?v=20261004gerade2"></script>
-<script src="decals.js?v=20261101rumpf1"></script>
+<script src="decals.js?v=20261105flz1"></script>
+<script src="flugzeug.js?v=20261105fsim1"></script>
+<script src="flugsim.js?v=20261105fsim12"></script>
 <script src="neuralfoil_data.js?v=20261004gerade2"></script>
 <script src="neuralfoil.js?v=20261008align3"></script>
 <script src="profpolare.js?v=20261012re"></script>
@@ -1845,8 +1860,8 @@
 <script src="ptedit.js?v=20261011dat"></script>
 <script src="profedit.js?v=20261025strak4"></script>
 <script src="tabmenu.js?v=20261019tm1"></script>
-<script src="undo.js?v=20261101rumpf1"></script>
-<script src="app.js?v=20261101rumpf1"></script>
+<script src="undo.js?v=20261105fsim6"></script>
+<script src="app.js?v=20261105fsim1"></script>
 </body>
 </html>
 

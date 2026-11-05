@@ -278,15 +278,16 @@
   // (halber Abbrand je Rippe nach außen), Ziel immer Maschinen-Vertikal 0. Rückgabe:
   // Bewegungsliste, die am Nullpunkt beginnt UND endet (schließt an die Kontur an).
   function negShellEdgeMoves(P, safeY, feed) {
-    const se = (P.stege && state.cfg.negStegeOnly) ? 0 : (state.cfg.negShellEdge || 0);
+    const latte = !!P.root.geom.latte && !(P.stege && state.cfg.negStegeOnly);
+    const se = (P.stege && state.cfg.negStegeOnly) ? 0 : (latte ? 1 : (state.cfg.negShellEdge || 0));
     if (!(se > 0) || (App.negDirectPath && App.negDirectPath())) return [];   // „ein Zug": keine Vorschnitte
-    const ck = App.cutKerf(P.cut.root.chord, P.cut.tip.chord);
+    const ck = latte && App.negLatteKerf() === 'speed' ? App.cutKerf(1, 1) : App.cutKerf(P.cut.root.chord, P.cut.tip.chord);
     const hkR = ck.root / 2, hkT = ck.tip / 2;
     const zR = P.zRoot, zT = P.zTip, mw = P.mw, ox = P.ox;
     const at = (a, b, z) => a + (b - a) * (z - zR) / ((zT - zR) || 1);
     const pos = (a, b) => ({ l: ox - at(a, b, 0), r: ox - at(a, b, mw) });   // Maschinen-X je Turm
-    const front = pos(P.root.xL - se - hkR, P.tip.xL - se - hkT);            // Nase
-    const rear  = pos(P.root.xT + se + hkR, P.tip.xT + se + hkT);            // Endleiste
+    const front = pos(P.root.xL - P.root.geom.edgeF - hkR, P.tip.xL - P.tip.geom.edgeF - hkT);   // Nase
+    const rear  = pos(P.root.xT + P.root.geom.edgeR + hkR, P.tip.xT + P.tip.geom.edgeR + hkT);   // Endleiste
     const mv = [], P4 = (lx, ly, rx, ry) => ({ lx, ly, rx, ry });
     let cur = P4(0, 0, 0, 0);
     const go = (to, rapid) => { mv.push({ from: cur, to, rapid: !!rapid, feed: rapid ? 0 : feed }); cur = to; };

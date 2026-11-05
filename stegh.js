@@ -19,7 +19,7 @@
   const f1 = v => (Math.round(v * 10) / 10).toFixed(1);
   const COL = { holm: '#5aa9ff', ruder: '#ffa94d' };
 
-  let sel = null, capOpen = false, stkOpen = false, stkBox = null;
+  let sel = null, stkBox = null;
 
   function cfg() {
     let c = state.cfg.stegH;
@@ -338,6 +338,12 @@
     const cw = document.createElement('div'); cw.style.cssText = 'flex:3;position:relative;min-height:0';
     cv = document.createElement('canvas'); cv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%';
     cw.appendChild(cv);
+    if (App.StegRippen) {
+      const b3 = document.createElement('button'); b3.type = 'button'; b3.textContent = '🧊 ' + T('3D-Ansicht');
+      b3.title = T('Schale, Gurt, Stege, Stützrippen und Steckung in 3D, einzeln ein-/ausblendbar (eigenes Fenster)');
+      b3.style.cssText = 'position:absolute;top:8px;right:10px;z-index:2'; b3.onclick = () => App.StegRippen.open3d();
+      cw.appendChild(b3);
+    }
     const strip = document.createElement('div'); strip.style.cssText = 'display:flex;gap:4px;padding:4px 10px;border-top:1px solid var(--border,#2a3038)';
     [['list', 'Höhenliste'], ['sec', 'Schnitte in Spannweite']].forEach(([k, t]) => { const b = document.createElement('button'); b.textContent = T(t); b.onclick = () => setBottom(k); tabBtns[k] = b; strip.appendChild(b); });
     const low = document.createElement('div'); low.style.cssText = 'flex:3;display:flex;min-height:0;position:relative';
@@ -358,40 +364,55 @@
       const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;   // Klick wählt den nächsten Steg
       let best = null, bd = 12;
       for (const h of hits) { const q = Math.hypot(h[0] - mx, h[1] - my) - (h[3] || 0); if (q < bd) { bd = q; best = h[2]; } }
-      if (best && best !== sel) { sel = best; refresh(true); const nb = side.querySelector('[data-selsteg]'); if (nb) nb.scrollIntoView({ block: 'nearest' }); }
+      if (best && best.rib != null) { if (App.StegRippen) App.StegRippen.select(best.rib); }   // Stützrippe
+      else if (best && best !== sel) { sel = best; refresh(true); const nb = side.querySelector('[data-selsteg]'); if (nb) nb.scrollIntoView({ block: 'nearest' }); }
     });
     cv.addEventListener('dblclick', () => { fitNext = autoFit = true; draw(); });
   }
 
   // Seitenleiste des Reiters (Aufbau nur bei Strukturänderung, Zahlen rechnen ohne Neuaufbau)
+  // Eigene Menügruppen wie in den anderen Modulen (Standard zugeklappt): Steghöhen (allgemein), Holmgurt, Steckung, Stege, Stützrippen, Ausgabe
+  const GRP = { cap: ['Holmgurt', 'stegHcap'], stk: ['Steckung', 'stegHstk'], steg: ['Stege', 'stegHsteg'], rip: ['Stützrippen', 'stegHrip'], out: ['Ausgabe', 'stegHout'] };
+  function mkGrp(part) {
+    const [title, key] = GRP[part], g = App.grp(title, false, 'stegh', { key });
+    g.g.dataset.part = part; side.appendChild(g.g);
+    return g.body;
+  }
+  function openGrp(el) { const b = el && el.querySelector('.body'), h = el && el.querySelector('h3'); if (b && h && b.style.display === 'none') h.click(); }
   function buildSide() {
     if (!side) return;
     const { numRow, selectRow, hint, subhead, txtRow } = App, c = cfg(), G = geo(), L = G ? G.L : 0, scr = document.getElementById('side'), keep = scr ? scr.scrollTop : 0;
     side.innerHTML = '';
+    const gm = App.grp('Steghöhen', true, 'stegh', { key: 'stegH', alwaysOpen: true }); side.appendChild(gm.g);
+    let box = gm.body;
+    if (App.wingSelectEl) {
+      const row = document.createElement('div'); row.className = 'row';
+      const l = document.createElement('label'); l.textContent = T('Tragfläche');
+      const s = App.wingSelectEl(); s.style.cssText = '';
+      row.append(l, s); box.appendChild(row);
+    }
     const NR = { step: 0.5, min: 0, norender: true, enter: true };
     const upd = () => { update(); };
-    hint(side, 'Höhen aus der Außenkontur der aktiven Tragfläche im Tragflächendesign, senkrecht gemessen. Holmsteg: Abzug 2 × (Schale + Gurt). Rudersteg: Abzug 2 × Schale. Ansicht: Rad = Zoom, Ziehen = verschieben, Klick = Steg wählen, Doppelklick = einpassen.');
-    if (!G) { hint(side, 'Keine Tragfläche vorhanden.'); return; }
-    App.boolRow(side, 'Schale aus Außenlage, Stützstoff, Innenlage', () => !!c.layOn, v => {
+    hint(box, 'Höhen aus der Außenkontur der aktiven Tragfläche im Tragflächendesign, senkrecht gemessen. Holmsteg: Abzug 2 × (Schale + Gurt). Rudersteg: Abzug 2 × Schale. Ansicht: Rad = Zoom, Ziehen = verschieben, Klick = Steg wählen, Doppelklick = einpassen.');
+    if (!G) { hint(box, 'Keine Tragfläche vorhanden.'); return; }
+    App.boolRow(box, 'Schale aus Außenlage, Stützstoff, Innenlage', () => !!c.layOn, v => {
       c.layOn = v;
       if (v && c.layA == null) { c.layA = 0.2; c.layS = Math.max(0, (+c.shell || 0) - 0.4); c.layI = 0.2; c.capOn = 'inner'; c.ruderOn = 'inner'; c.capOver = true; }
       refresh(true);
     });
     if (c.layOn) {
       const NL = Object.assign({}, NR, { step: 0.1 });
-      numRow(side, 'Außenlage je Seite (mm)', () => c.layA, v => { c.layA = Math.max(0, v); upd(); }, NL);
-      numRow(side, 'Stützstoff je Seite (mm)', () => c.layS, v => { c.layS = Math.max(0, v); upd(); }, NL);
-      numRow(side, 'Innenlage je Seite (mm)', () => c.layI, v => { c.layI = Math.max(0, v); upd(); }, NL);
+      numRow(box, 'Außenlage je Seite (mm)', () => c.layA, v => { c.layA = Math.max(0, v); upd(); }, NL);
+      numRow(box, 'Stützstoff je Seite (mm)', () => c.layS, v => { c.layS = Math.max(0, v); upd(); }, NL);
+      numRow(box, 'Innenlage je Seite (mm)', () => c.layI, v => { c.layI = Math.max(0, v); upd(); }, NL);
       const ON = [['inner', 'Innenlage'], ['outer', 'Außenlage']];
-      selectRow(side, 'Holmgurt liegt auf', ON, () => c.capOn || 'inner', v => { c.capOn = v; refresh(true); });
-      if (c.capOn === 'outer') App.boolRow(side, 'Innenlage läuft über den Gurt', () => c.capOver !== false, v => { c.capOver = v; upd(); }, 'An: Der Steg steht auf der Innenlage über dem Gurt. Aus: Der Steg steht direkt auf dem Gurt.');
-      selectRow(side, 'Ruderstege liegen auf', ON, () => c.ruderOn || 'inner', v => { c.ruderOn = v; upd(); });
-    } else numRow(side, 'Schalendicke je Seite (mm)', () => c.shell, v => { c.shell = Math.max(0, v); upd(); }, NR);
-    numRow(side, 'Höhe alle … mm Steglänge', () => c.step, v => { c.step = Math.max(1, v); upd(); }, Object.assign({}, NR, { step: 10, min: 1 }));
+      selectRow(box, 'Holmgurt liegt auf', ON, () => c.capOn || 'inner', v => { c.capOn = v; refresh(true); });
+      if (c.capOn === 'outer') App.boolRow(box, 'Innenlage läuft über den Gurt', () => c.capOver !== false, v => { c.capOver = v; upd(); }, 'An: Der Steg steht auf der Innenlage über dem Gurt. Aus: Der Steg steht direkt auf dem Gurt.');
+      selectRow(box, 'Ruderstege liegen auf', ON, () => c.ruderOn || 'inner', v => { c.ruderOn = v; upd(); });
+    } else numRow(box, 'Schalendicke je Seite (mm)', () => c.shell, v => { c.shell = Math.max(0, v); upd(); }, NR);
+    numRow(box, 'Höhe alle … mm Steglänge', () => c.step, v => { c.step = Math.max(1, v); upd(); }, Object.assign({}, NR, { step: 10, min: 1 }));
     // Holmgurt: aufklappbar, fest definiert und unabhängig von den Stegen
-    const det = document.createElement('details'); det.open = capOpen; det.ontoggle = () => { capOpen = det.open; };
-    const sum = document.createElement('summary'); sum.textContent = T('Holmgurt'); sum.style.cssText = 'cursor:pointer;font-weight:700;font-size:13px;margin-top:6px';
-    det.appendChild(sum); side.appendChild(det);
+    const det = mkGrp('cap');
     const GR = Object.assign({}, NR, { step: 0.1 }), GB = Object.assign({}, NR, { step: 1 });
     numRow(det, 'Gurtdicke je Seite Wurzel (mm)', () => c.capT0, v => { c.capT0 = Math.max(0, v); upd(); }, GR);
     numRow(det, 'Gurtdicke je Seite außen (mm)', () => c.capT1, v => { c.capT1 = Math.max(0, v); upd(); }, GR);
@@ -415,9 +436,7 @@
       if (!c.capOrtho) numRow(det, T('Gurtmitte außen') + u, () => c.capP1, v => { c.capP1 = v; upd(); }, GP);
     }
     // Steckung: aufklappbar, liegt immer zwischen den Gurten
-    const dk = document.createElement('details'); dk.open = stkOpen; dk.ontoggle = () => { stkOpen = dk.open; };
-    const sk = document.createElement('summary'); sk.textContent = T('Steckung'); sk.style.cssText = 'cursor:pointer;font-weight:700;font-size:13px;margin-top:6px';
-    dk.appendChild(sk); side.appendChild(dk);
+    const dk = mkGrp('stk');
     App.boolRow(dk, 'Steckung vorsehen', () => !!c.stkOn, v => {
       c.stkOn = v;
       if (v && c.stkWall == null) { c.stkWall = 1; c.stkLen = Math.round(Math.min(200, L)); c.stkForm = 'square'; c.stkW = 15; }
@@ -436,50 +455,51 @@
       stkBox = document.createElement('div'); dk.appendChild(stkBox);
     }
     if (!sel || (c.holm.indexOf(sel) < 0 && c.ruder.indexOf(sel) < 0)) sel = c.holm[0] || c.ruder[0] || null;
+    box = mkGrp('steg');
     for (const [kind, label] of [['holm', 'Holmstege'], ['ruder', 'Ruderstege']]) {
-      subhead(side, label, COL[kind]);
-      numRow(side, 'Anzahl', () => c[kind].length, v => setCount(kind, v), { step: 1, min: 0, max: 20, int: true, norender: true, enter: true });
+      subhead(box, label, COL[kind]);
+      numRow(box, 'Anzahl', () => c[kind].length, v => setCount(kind, v), { step: 1, min: 0, max: 20, int: true, norender: true, enter: true });
       c[kind].forEach((st, i) => {
         const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;align-items:center';
         const nb = document.createElement('button'); nb.textContent = st.name || (T(label) + ' ' + (i + 1)); nb.style.cssText = 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left';
         if (st === sel) { nb.className = 'primary'; nb.dataset.selsteg = '1'; } nb.onclick = () => { sel = st; refresh(true); };
         const del = document.createElement('button'); del.textContent = '✕'; del.title = T('Steg löschen'); del.style.padding = '2px 7px';
         del.onclick = () => { c[kind].splice(i, 1); if (sel === st) sel = null; fitNext = autoFit = true; refresh(true); };
-        row.append(nb, del); side.appendChild(row);
+        row.append(nb, del); box.appendChild(row);
       });
     }
     if (sel) {
       const st = sel, kind = c.holm.indexOf(st) >= 0 ? 'holm' : 'ruder';
-      subhead(side, 'Gewählter Steg');
-      txtRow(side, 'Name', () => st.name || '', v => { st.name = v; upd(); });
+      subhead(box, 'Gewählter Steg');
+      txtRow(box, 'Name', () => st.name || '', v => { st.name = v; upd(); });
       const lenNow = () => stegData(G, c, st, kind).len;
       let iFrom, iTo, iLen;
       const after = () => { if (st.perJoint) refresh(true); else upd(); };   // andere Stöße im Bereich -> neue Zeilen
       const sync = () => { if (iFrom) iFrom.value = f1(+st.from || 0); if (iTo) iTo.value = f1(+st.to || 0); if (iLen) iLen.value = f1(lenNow()); };
-      iFrom = numRow(side, 'Von (mm ab Wurzel)', () => st.from, v => { st.from = clamp(v, 0, L); sync(); after(); }, Object.assign({}, NR, { step: 10 }));
-      iTo = numRow(side, 'Bis (mm ab Wurzel)', () => st.to, v => { st.to = clamp(v, 0, L); sync(); after(); }, Object.assign({}, NR, { step: 10 }));
-      iLen = numRow(side, 'Länge des Stegs (mm)', () => f1(lenNow()), v => {
+      iFrom = numRow(box, 'Von (mm ab Wurzel)', () => st.from, v => { st.from = clamp(v, 0, L); sync(); after(); }, Object.assign({}, NR, { step: 10 }));
+      iTo = numRow(box, 'Bis (mm ab Wurzel)', () => st.to, v => { st.to = clamp(v, 0, L); sync(); after(); }, Object.assign({}, NR, { step: 10 }));
+      iLen = numRow(box, 'Länge des Stegs (mm)', () => f1(lenNow()), v => {
         const l0 = lenNow(), d = Math.abs((+st.to || 0) - (+st.from || 0));
         st.to = clamp((+st.from || 0) + Math.max(0, v) * (l0 > 0 ? d / l0 : 1), 0, L); sync(); after();
       }, Object.assign({}, NR, { step: 10 }));
-      hint(side, T('Spannweite gesamt: ') + f1(L) + ' mm');
+      hint(box, T('Spannweite gesamt: ') + f1(L) + ' mm');
       const units = [['pct', '% der Sehne ab Nase'], ['mm', 'mm ab Nase']];
       if (kind === 'ruder') units.push(['hinge', 'an der Scharnierlinie']);
       if (kind === 'holm') units.push(['gurt', 'auf dem Gurt verteilt']);
-      selectRow(side, 'Lage angeben', units, () => st.unit || 'pct', v => { if (v === 'gurt') c.holm.forEach(q => { q.unit = 'gurt'; }); st.unit = v; fitNext = autoFit = true; refresh(true); });
+      selectRow(box, 'Lage angeben', units, () => st.unit || 'pct', v => { if (v === 'gurt') c.holm.forEach(q => { q.unit = 'gurt'; }); st.unit = v; fitNext = autoFit = true; refresh(true); });
       const onCap = st.unit === 'gurt', joints = G.segs.length > 1 && !onCap ? (st.perJoint ? fillJoints(G, st) : null) : null;
-      if (G.segs.length > 1 && !onCap) App.boolRow(side, 'Lage je Segmentstoß einzeln', () => !!st.perJoint, v => { st.perJoint = v; refresh(true); }, 'An: eigene Lage an jedem Segmentstoß im Bereich des Stegs; dazwischen läuft er im Grundriss gerade.');
+      if (G.segs.length > 1 && !onCap) App.boolRow(box, 'Lage je Segmentstoß einzeln', () => !!st.perJoint, v => { st.perJoint = v; refresh(true); }, 'An: eigene Lage an jedem Segmentstoß im Bereich des Stegs; dazwischen läuft er im Grundriss gerade.');
       const jName = q => T('Segmentstoß') + ' ' + (q.k + 1) + '|' + (q.k + 2);
       if (onCap) {
         const grp = distGroup(c), thr = distThrough(grp);
-        hint(side, 'Erster Steg an der Vorderkante des Gurts, letzter an der Hinterkante, die übrigen gleichmäßig dazwischen. Reicht die Gurtbreite nicht mehr, läuft nur der gewählte durch, die anderen enden dort.');
-        selectRow(side, 'Durchlaufender Steg', grp.map((q, i) => [String(i), q.name || String(i + 1)]), () => String(grp.indexOf(thr)), v => { grp.forEach((q, i) => { q.through = i === +v; }); refresh(true); });
+        hint(box, 'Erster Steg an der Vorderkante des Gurts, letzter an der Hinterkante, die übrigen gleichmäßig dazwischen. Reicht die Gurtbreite nicht mehr, läuft nur der gewählte durch, die anderen enden dort.');
+        selectRow(box, 'Durchlaufender Steg', grp.map((q, i) => [String(i), q.name || String(i + 1)]), () => String(grp.indexOf(thr)), v => { grp.forEach((q, i) => { q.through = i === +v; }); refresh(true); });
       } else if (st.unit === 'hinge') {
         // Abstand zur Scharnierlinie: intern mit Vorzeichen (> 0 = vor dem Scharnier), Richtung als eigene Wahl
         const hRow = (name, get, set) => {
           let dir = get() < 0 ? -1 : 1;
-          selectRow(side, name, [['1', 'vor der Scharnierlinie'], ['-1', 'nach der Scharnierlinie']], () => String(dir), v => { dir = +v; set(Math.abs(get()) * dir); upd(); });
-          numRow(side, 'Abstand (mm)', () => Math.abs(get()), v => { set(Math.max(0, v) * dir); upd(); }, Object.assign({}, NR));
+          selectRow(box, name, [['1', 'vor der Scharnierlinie'], ['-1', 'nach der Scharnierlinie']], () => String(dir), v => { dir = +v; set(Math.abs(get()) * dir); upd(); });
+          numRow(box, 'Abstand (mm)', () => Math.abs(get()), v => { set(Math.max(0, v) * dir); upd(); }, Object.assign({}, NR));
         };
         if (st.perJoint) {
           hRow(T('Anfang'), () => +st.off || 0, v => { st.off = v; });
@@ -488,18 +508,19 @@
         } else hRow('Lage', () => +st.off || 0, v => { st.off = v; });
       } else {
         const u = st.unit === 'mm' ? ' (mm)' : ' (%)', NP = Object.assign({}, NR, { step: 1 });
-        numRow(side, T('Lage Anfang') + u, () => st.pos0, v => { st.pos0 = v; upd(); }, NP);
-        if (st.perJoint) joints.forEach(q => numRow(side, T('Lage') + ' ' + jName(q) + u, () => st.jpos[q.k], v => { st.jpos[q.k] = v; upd(); }, NP));
-        numRow(side, T('Lage Ende') + u, () => st.pos1, v => { st.pos1 = v; upd(); }, NP);
-        if (!st.perJoint) hint(side, 'Zwischen Anfang und Ende läuft der Steg im Grundriss gerade.');
+        numRow(box, T('Lage Anfang') + u, () => st.pos0, v => { st.pos0 = v; upd(); }, NP);
+        if (st.perJoint) joints.forEach(q => numRow(box, T('Lage') + ' ' + jName(q) + u, () => st.jpos[q.k], v => { st.jpos[q.k] = v; upd(); }, NP));
+        numRow(box, T('Lage Ende') + u, () => st.pos1, v => { st.pos1 = v; upd(); }, NP);
+        if (!st.perJoint) hint(box, 'Zwischen Anfang und Ende läuft der Steg im Grundriss gerade.');
       }
-      numRow(side, 'Stegbreite (mm)', () => webOf(st, kind), v => { st.web = Math.max(0, v); upd(); }, Object.assign({}, NR));
+      numRow(box, 'Stegbreite (mm)', () => webOf(st, kind), v => { st.web = Math.max(0, v); upd(); }, Object.assign({}, NR));
     }
-    subhead(side, 'Ausgabe');
+    if (App.StegRippen) App.StegRippen.sidebar(mkGrp('rip'), { upd, refresh: () => refresh(true) });   // Stützrippen (stuetzrippen.js)
+    box = mkGrp('out');
     const bar = document.createElement('div'); bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
-    if (App.cadImportDxfText) { const b = document.createElement('button'); b.textContent = T('In CAD übernehmen'); b.className = 'primary'; b.title = T('Alle Stege in den Reiter „CAD-Bearbeitung" laden, je Steg eine Ebene (ersetzt dessen Inhalt nach Rückfrage)'); b.onclick = toCad; bar.appendChild(b); }
+    if (App.cadImportDxfText) { const b = document.createElement('button'); b.textContent = T('In CAD übernehmen'); b.className = 'primary'; b.title = T('Alle Stege und Stützrippen in den Reiter „CAD-Bearbeitung" laden, je Steg/Rippe eine Ebene (ersetzt dessen Inhalt nach Rückfrage)'); b.onclick = toCad; bar.appendChild(b); }
     const cp = document.createElement('button'); cp.textContent = T('Liste kopieren'); cp.title = T('Höhenliste als Tabelle in die Zwischenablage (z. B. für Excel)'); cp.onclick = copyList; bar.appendChild(cp);
-    side.appendChild(bar);
+    box.appendChild(bar);
     if (scr) scr.scrollTop = keep;
   }
 
@@ -515,6 +536,7 @@
       layers.push({ name: nm, color: d.kind === 'holm' ? 5 : 30, polys: d.polys.map(P => ({ closed: true, pts: P.map(p => ({ x: p[0], y: p[1] - hi + yc })) })) });
       yc -= (hi - lo) + 20;
     });
+    if (App.StegRippen) layers.push(...App.StegRippen.cadLayers(yc - 20));   // Stützrippen mit Löchern darunter
     return layers.length ? Dxf.write(layers, { precision: state.cfg.precision != null ? state.cfg.precision : 3 }) : null;
   }
   function toCad() {
@@ -622,6 +644,7 @@
         cx.fillStyle = '#fff06a'; cx.fillText(T('Steckung'), X(S.len) + 4, Y(-stkCenter(G, cc, S.len)) + 4);
       }
     }
+    if (App.StegRippen) App.StegRippen.drawPlan(cx, X, Y, G, view.s, hits);
     // Segmentstöße (durch Draufsicht und Stege)
     const yBottom = yc + gap;
     cx.setLineDash([5, 4]); cx.strokeStyle = 'rgba(200,210,224,.35)'; cx.lineWidth = 1;
@@ -932,9 +955,24 @@
         if (wq) fillPoly(d.kind === 'ruder' && RU && wq.x > RU.xh ? wq.Q.map(rr) : wq.Q, col + '55');
         g.fillStyle = col; g.fillText((d.st.name || '') + ': ' + (a.h != null ? f1(a.h) : '—') + ' mm', u + 6, Y(q.lo + q.dy) + 16 + 14 * (n++ % 3));
       });
+      if (App.StegRippen) App.StegRippen.drawSec(g, G, q, X, Y);   // Stützrippe an dieser Stelle
+  }
+  // Schnitt an die Stelle z (z. B. gewählte Stützrippe)
+  function showSecAt(z) {
+    if (!isOpen()) return;
+    const G = geo(); secZ = G ? clamp(z, 0, G.L) : z; secAll = false;
+    if (bottom !== 'sec') setBottom('sec'); else { secBar(); draw(); drawSec(); }
+  }
+  // Teil im Menü wählen (Klick in der 3D-Ansicht): Steg, Gurt, Steckung
+  function focus(what, st) {
+    if (what === 'steg' && st) sel = st;
+    refresh(true);
+    openGrp(side.querySelector('.grp[data-part="' + what + '"]'));
+    const el = what === 'steg' ? side.querySelector('[data-selsteg]') : side.querySelector('.grp[data-part="' + what + '"]');
+    if (el) el.scrollIntoView({ block: 'nearest' });
   }
 
-  function update() { stkResult(); buildTable(); draw(); drawSec(); }
+  function update() { stkResult(); buildTable(); draw(); drawSec(); if (App.StegRippen) App.StegRippen.refresh3d(); }
   function refresh(rebuild) {
     if (!isOpen()) return;
     if (rebuild) buildSide();
@@ -944,19 +982,12 @@
 
   // ---------- Seitenleiste ----------
   function stegHSidebar(side0) {
-    const g = App.grp('Steghöhen', true, 'stegh', { key: 'stegH', alwaysOpen: true });
-    if (App.wingSelectEl) {
-      const row = document.createElement('div'); row.className = 'row';
-      const l = document.createElement('label'); l.textContent = T('Tragfläche');
-      const s = App.wingSelectEl(); s.style.cssText = '';
-      row.append(l, s); g.body.appendChild(row);
-    }
-    side = document.createElement('div'); side.style.cssText = 'display:flex;flex-direction:column;gap:6px';
-    g.body.appendChild(side); side0.appendChild(g.g);
+    side = document.createElement('div'); side.dataset.tabs = 'stegh';
+    side0.appendChild(side);
     if (isOpen()) refresh(true);   // Tragfläche/Geometrie gewechselt
   }
 
   App.stegHSidebar = stegHSidebar;
-  App.StegApi = { capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp };
+  App.StegApi = { showSecAt, focus, getSel: () => sel, capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp };
   window.StegHoehen = { show, refresh, _test: { stkData, autoShift, ruderAt, distX, distFits, fillCapJoints, capAt, capCenter, webOf, setBottom, fillJoints, geo, section, stegData, allStege, dxfText, cfg } };
 })();

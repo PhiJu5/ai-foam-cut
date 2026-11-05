@@ -82,7 +82,8 @@
       "name": "Steghöhen (Holm- und Ruderstege)",
       "description": "Reiter „Steghöhen“: Holm- und Ruderstege aus dem Tragflächendesign festlegen, Höhenliste je Steg (alle x mm und an jedem Segmentstoß), Draufsicht, Vorderansicht und Schnitte, Übernahme in die CAD-Bearbeitung.",
       "files": [
-        "stegh.js"
+        "stegh.js",
+        "stuetzrippen.js"
       ],
       "tabs": [
         "stegh"
@@ -381,6 +382,42 @@
       "default": true,
       "views": [
         "decalView"
+      ]
+    },
+    {
+      "id": "flugzeug",
+      "name": "Flugzeug gesamt (3D-Ansicht, flow5-Netz)",
+      "description": "Reiter „Flugzeug gesamt“: Rumpf mit Leitwerken und allen Tragflächen samt Randbogen/Winglet in 3D, Teile frei einfärbbar, Decals sichtbar; Ausgabe als geschlossenes STL-Netz für flow5 (Plane → Import → From an STL file) oder je Bauteil. Braucht den Formenbau (Tragflächen-Ringe).",
+      "files": [
+        "flugzeug.js"
+      ],
+      "tabs": [
+        "flz"
+      ],
+      "default": true,
+      "views": [
+        "flzView"
+      ],
+      "requires": [
+        "formenbau"
+      ]
+    },
+    {
+      "id": "flugsim",
+      "name": "Flugsimulator (mit dem Gesamtmodell fliegen)",
+      "description": "Reiter „Flugsimulator“: mit dem Flugzeug aus „Flugzeug gesamt“ wie mit einem Modellflugzeug fliegen — Pilotensicht am Boden oder Verfolgerkamera, Hand-/Hoch-/Bodenstart, Wind und Thermik, Steuerung per Tastatur oder Fernsteuerung (USB-Joystick).",
+      "files": [
+        "flugsim.js"
+      ],
+      "tabs": [
+        "fsim"
+      ],
+      "default": true,
+      "views": [
+        "fsimView"
+      ],
+      "requires": [
+        "flugzeug"
       ]
     },
     {

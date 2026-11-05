@@ -831,15 +831,28 @@
   function texture3d() {
     const gl = G3.gl, c = cfg(), tc = G3.tc, items = c.items.filter(it => isFus(it.surf)), f = fus(), cano = f && fusCanopy(f), key = c.surfCol + '|' + fusStamp + '|' + (cano ? cano.col : '') + '|' + JSON.stringify(items);
     if (key === G3.texKey) return; G3.texKey = key;
-    const ctx = tc.getContext('2d'), TW = tc.width, TH = tc.height;
-    ctx.fillStyle = RAW(c.surfCol); ctx.fillRect(0, 0, TW, TH);
+    paintFus(tc.getContext('2d'), tc.width, tc.height, { bg: RAW(c.surfCol) });
+    gl.bindTexture(gl.TEXTURE_2D, G3.tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc); gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+  }
+  /* Rumpf-Decals (und Kabinenhaube) in eine Textur malen: u = (x − x0)/(x1 − x0), v = Umfang (0,5 = Rückenlinie),
+   * passend zum Gitter aus fus(). opt.bg = Grundfarbe (sonst durchsichtig), opt.canoCol = Haubenfarbe, opt.cano false = ohne Haube.
+   * Auch für den Reiter „Flugzeug gesamt" (flugzeug.js). */
+  function paintFus(ctx, TW, TH, opt) {
+    opt = opt || {};
+    const c = cfg(), items = c.items.filter(it => isFus(it.surf)), f = fus(), cano = f && opt.cano !== false && fusCanopy(f);
+    if (!f) return false;
+    if (opt.bg) { ctx.fillStyle = opt.bg; ctx.fillRect(0, 0, TW, TH); } else ctx.clearRect(0, 0, TW, TH);
     if (cano) {   // Kabinenhaube aus Rumpf in ihrer Farbe (Textur: u = x, v = Umfang, 0,5 = Rückenlinie)
       const U = x => (x - f.x0) / (f.x1 - f.x0) * TW, V = (t, sg) => (0.5 + sg * t / 2) * TH;
-      ctx.fillStyle = RAW(cano.col); ctx.beginPath();
+      ctx.fillStyle = opt.canoCol || RAW(cano.col); ctx.beginPath();
       canoStrips(f, (xa, sa, xb, sb) => { for (const sg of [1, -1]) { ctx.moveTo(U(xa), V(sa[0], sg)); ctx.lineTo(U(xb), V(sb[0], sg)); ctx.lineTo(U(xb), V(sb[1], sg)); ctx.lineTo(U(xa), V(sa[1], sg)); ctx.closePath(); } });
       ctx.fill('nonzero');
     }
-    items.forEach(it => {
+    (opt.noItems ? [] : items).forEach(it => {
       const pl = it.kind === 'fdes' ? [].concat.apply([], desGroups(it).map(g => g.param)) : (fusMap(it) || { param: [] }).param;
       pl.forEach(l => {
         let lo = Infinity, hi = -Infinity; l.rings.forEach(R => R.forEach(q => { if (q[1] < lo) lo = q[1]; if (q[1] > hi) hi = q[1]; }));
@@ -850,11 +863,16 @@
         }
       });
     });
-    gl.bindTexture(gl.TEXTURE_2D, G3.tex); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tc); gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) gl.texParameterf(gl.TEXTURE_2D, an.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+    return true;
+  }
+  // Alle Decals einer Tragflächenseite in Ansichtskoordinaten (x = Spannweite, y = −Tiefe ab Wurzelnase; mm) – für flugzeug.js
+  function wingLayers(i, side) {
+    const id = 'wing:' + i + ':' + side, out = [];
+    cfg().items.filter(it => it.surf === id).forEach(it => {
+      if (it.kind === 'wdes') { wdesLayers(it).forEach(l => out.push(l)); return; }
+      localLayers(it, false).forEach(l => out.push({ c: l.c, rule: l.rule, rings: l.rings.map(R => R.map(q => [q[0] + (+it.x || 0), q[1] + (+it.y || 0)])) }));
+    });
+    return out;
   }
   function render3d() {
     const cv = document.getElementById('cDecal3d'), f = fus(); if (!cv || !f || !isFus(cfg().surf) || !init3d()) return;
@@ -1256,6 +1274,6 @@
   }
 
   Object.assign(App, { decalSidebar });
-  window.Decals = { show, render, reset, resize: render, exportSvg, exportDxf, exportSilhouette, addMotif, addText,
+  window.Decals = { show, render, reset, resize: render, refreshFus: () => { fusCache = null; mcache.clear(); }, paintFus, wingLayers, fusGrid: () => fus(), raw: c => RAW(c), exportSvg, exportDxf, exportSilhouette, addMotif, addText,
     _test: { loadFontBuffer, cam3d: () => G3.cam, desGroups, wdesLayers, pick3d, addDesign, field, contour, offsetLayers, simplify, textLayers, baseLayers, localLayers, exportModel, svgText, dxfText, fus, fusPt, fusHit, fusMap, cfg, bbOf, allRings } };
 })();
