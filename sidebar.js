@@ -1911,7 +1911,14 @@
           () => App.sparModeOf(sp), v => { sp.cutMode = v; buildSidebar(); render(); }, modeHelp);
         // Anfahrt bezogen auf die MASCHINE (oben = oben am Block, auch kopfüber).
         // Nur „während des Schnitts" wählbar; Scharnier: immer gegenüber dem Scharnier.
-        if (sp.shape !== 'hinge' && App.sparModeOf(sp) === 'during')
+        // Feste Fälle als einwertige Auswahl (immer sichtbar, Hinweise können zugeklappt sein).
+        if (sp.shape === 'hinge')
+          selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Anfahrt'), [['fix', 'Gegenüber Scharnier (fest)']], () => 'fix', () => {},
+            'Scharnierausschnitt: Einstich immer von der dem Scharnier gegenüberliegenden Seite.');
+        else if (App.sparModeOf(sp) !== 'during')
+          selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Anfahrt'), [['fix', 'Von oben (fest)']], () => 'fix', () => {},
+            'Bei „nach dem Schnitt" und „nach Oberseitenschnitt" wird immer von oben angefahren. Wählbar bei „Während des Schnitts".');
+        else
           selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Anfahrt'),
             [['shortest', 'Kürzester Weg'], ['top', 'Von oben'], ['bottom', 'Von unten']],
             () => sp.approach || 'shortest', v => { sp.approach = v; render(); },

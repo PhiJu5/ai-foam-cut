@@ -1052,9 +1052,13 @@
   //  core (optional) = Kernkontur nach Beplankungsabzug: x-Lage (Nasenabstand) wird
   //  am ORIGINALPROFIL pts bestimmt, Höhe/Dicke/Klemmung/Anfahrt aber am Kern.
   function sparOnProfile(sp, pts, surfPts, fromLE, ycOverride, which, core) {
+    // „nach dem Schnitt"/„nach Oberseitenschnitt": immer von Maschinen-oben (wie im
+    // G-Code) — so zeigen auch die Ansichten die tatsächliche Anfahrt.
+    if (!sp._mirDone && !isPocket(sp) && sp.shape !== 'hinge' && sp.approach !== 'top' && sparModeOf(sp) !== 'during')
+      sp = Object.assign({}, sp, { approach: 'top' });
     if (pts && pts.flipY) {
       // Anfahrt oben/unten ist maschinenbezogen (Kerndesign-Einstellung): im Design-Rahmen umkehren.
-      const sp2 = Object.assign({}, sp, { approach: swTB(sp.approach) });
+      const sp2 = Object.assign({}, sp, { approach: swTB(sp.approach), _mirDone: true });
       const g = sparOnProfile(sp2, mirY(pts), mirY(surfPts), fromLE, ycOverride != null ? -ycOverride : ycOverride, which, mirY(core));
       if (!g) return g;
       const rv = a => a ? mirY(a).reverse() : a;   // Umlaufsinn erhalten

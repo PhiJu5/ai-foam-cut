@@ -10,6 +10,8 @@ Neueste Einträge oben.
 - Das **Tragflächendesign zeigt die Fläche immer ungespiegelt** (Grundriss, Profile, Aufriss). „Kopfüber schneiden“ wirkt nur noch im Kerndesign und beim Schneiden.
 - Die **Anfahrt der Holmausschnitte** (kürzester Weg / von oben / von unten) ist vom Tragflächendesign ins **Kerndesign → Holmausschnitte** gewandert: je Holm unter „Holm n · Schnitt“, nur bei „während des Schnitts“.
 - „Oben“ und „unten“ beziehen sich jetzt auf die **Lage im Block an der Maschine**, auch kopfüber.
+- Bei „nach dem Schnitt“ und „nach Oberseitenschnitt“ zeigt das Kerndesign jetzt die tatsächliche Anfahrt von oben. Bisher war die Anzeige dort falsch, der G-Code stimmte schon.
+- Die Holmausschnitte nach dem Profil werden **von vorne nach hinten** in einem Zug geschnitten, egal in welcher Reihenfolge die Holme angelegt sind.
 
 ### Holmschnitt „nach Oberseitenschnitt“: Oberseite = oberer Schnitt (2026-11-06)
 - „Oberseite“ ist jetzt immer der **an der Maschine oben liegende Schnitt**, egal wie die Fläche liegt. Kopfüber geschnitten wird zuerst die oben liegende Seite geschnitten, dann folgen die Holme, dann die untere Seite.

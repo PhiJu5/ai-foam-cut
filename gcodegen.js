@@ -95,6 +95,10 @@
     // „nur Holmausschnitte").
     const spars = (state.spars || []).filter(sp => App.sparAppliesTo(sp, segIdx) && !App.isPocket(sp)
       && (!opt.modeFilter || App.sparModeOf(sp) === opt.modeFilter));
+    // Reihenfolge von vorne nach hinten (Abstand zur Nasenleiste an der Wurzel):
+    // der Draht fährt die Holme in einem Zug von der Nase her ab, egal in welcher
+    // Reihenfolge sie angelegt wurden.
+    spars.sort((a, b) => App.sparFromLE(a, segIdx, 'root') - App.sparFromLE(b, segIdx, 'root'));
     if (!spars.length) return { body: [], foam: 0, mins: 0 };
     const ax = opt.ax, p = opt.precision != null ? opt.precision : 3, f = v => v.toFixed(p);
     const ox = (opt.origin && opt.origin.x) || 0, oy = (opt.origin && opt.origin.y) || 0;
