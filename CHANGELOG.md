@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
-## [Unveröffentlicht]
+## [2.11] — 2026-11-06
 
 ### Kopfüber schneiden nur noch im Kerndesign, Holm-Anfahrt ins Kerndesign (2026-11-06)
 - Das **Tragflächendesign zeigt die Fläche immer ungespiegelt** (Grundriss, Profile, Aufriss). „Kopfüber schneiden“ wirkt nur noch im Kerndesign und beim Schneiden.
