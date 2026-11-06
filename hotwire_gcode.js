@@ -43,7 +43,17 @@
     let TP = (opt.tipSpeed && proj.tipPath && proj.tipPath.length === (proj.left || []).length) ? proj.tipPath : null;
     const _stackN0 = (proj.stack && proj.stack.count > 1) ? proj.stack.count : 1;
     // „Von vorne": die Reihenfolge Ober-/Unterseite regelt emitFront() je Zug.
-    if (!front && opt.profileDir === 'bottom' && _stackN0 === 1 && L.length > 2) {
+    // „Holmschnitt nach Oberseitenschnitt" (opt.noseSpar): „Oberseite" = der OBEN
+    // liegende Schnitt an der Maschine, nicht die Profil-Oberseite. Kopfüber
+    // (flipY) liegt die Profil-Oberseite unten -> Reihenfolge nach Lage wählen:
+    // zuerst die Hälfte (bis zur Nase), deren Punkte im Mittel höher liegen.
+    let revPath = opt.profileDir === 'bottom';
+    if (opt.noseSpar && opt.noseSpar.length && L.length > 2) {
+      let iL = 0; for (let k = 1; k < L.length; k++) if (L[k].x < L[iL].x) iL = k;
+      const mean = (a, b) => { let sy = 0, c = 0; for (let k = a; k <= b; k++) { sy += L[k].y; c++; } return c ? sy / c : 0; };
+      revPath = mean(0, iL) < mean(iL, L.length - 1);
+    }
+    if (!front && revPath && _stackN0 === 1 && L.length > 2) {
       const nn = L.length;
       // Geschlossener Pfad (letzter = erster): Kern (0..nn-2) umkehren und wieder
       // schließen. Sonst schlichte Umkehr. Gleiche Permutation für L/R/RP, damit
@@ -697,6 +707,8 @@
       if ((opt.meltDwell || 0) > 0) em('G4 P' + opt.meltDwell + ' ; ' + T('am Nullpunkt verweilen (durchschmelzen)'));
       em(`G1 ${ax.x}${fx(bc.front.l)} ${ax.y}${fy(L[iLE].y)} ${ax.u}${fx(bc.front.r)} ${ax.v}${fy(R[iLE].y)} F${feed.toFixed(0)} ; vertikal hoch auf Nasenhöhe (Blockvorderkante)`);
       em(`G1 ${ax.x}${fx(L[iLE].x)} ${ax.y}${fy(L[iLE].y)} ${ax.u}${fx(R[iLE].x)} ${ax.v}${fy(R[iLE].y)} F${feed.toFixed(0)} ; horizontal zurück zur Nase (im Schnittspalt, Schnittvorschub)`);
+      // Holm „nach Oberseitenschnitt": Draht steht an der Nase, Oberseite fertig.
+      if (opt.noseSpar && opt.noseSpar.length) injectNoseSpar();
       // 4) Unterseite zurück bis zur EL-Verlängerung, dann hinten aus dem Block auf Null.
       emitContour(iLE + 1, last);
       if (leadThrough(L[last], R[last], last))

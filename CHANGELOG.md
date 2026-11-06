@@ -6,6 +6,10 @@ Neueste Einträge oben.
 
 ## [Unveröffentlicht]
 
+### Holmschnitt „nach Oberseitenschnitt“: Oberseite = oberer Schnitt (2026-11-06)
+- „Oberseite“ ist jetzt immer der **an der Maschine oben liegende Schnitt**, egal wie die Fläche liegt. Kopfüber geschnitten wird zuerst die oben liegende Seite geschnitten, dann folgen die Holme, dann die untere Seite.
+- Beim Blockschnitt „während Profilschnitt (umlaufend)“ wurden die Holme in diesem Modus bisher gar nicht geschnitten. Jetzt kommen sie an der Nase nach der Blockvorderkante.
+
 ### Kopfüber schneiden: alle Holmausschnitte werden mitgespiegelt (2026-11-06)
 - „Kopfüber schneiden“ im Kerndesign spiegelt jetzt die **fertige Tragfläche samt allen Ausschnitten** rein geometrisch: Kreis, Oval, Trapez (Basis Mitte/oben/unten, Drehung, Versatz), Doppel-T, Scharnier, waagrechte Holme und Gurttaschen (mit/ohne Steg, unterschiedliche Tiefen oben/unten, flacher Boden). Geprüft: gespiegelte Bahn = Original, Abweichung 0,000 mm.
 - Die Ausschnitte werden am ungespiegelten Profil aus dem Tragflächendesign berechnet und danach gespiegelt. Das Kerndesign wirkt nicht auf das Tragflächendesign zurück.
