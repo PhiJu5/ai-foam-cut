@@ -1426,13 +1426,16 @@
   function drawSpars(ctx, V, segIdx, which, pts, dy, core) {
     const cut = App.wing && App.wing.cuts && App.wing.cuts[Math.min(segIdx, App.wing.cuts.length - 1)];
     const info = { n: 0, lead: false, kerf: false };
-    (state.spars || []).forEach(sp => {
+    const multi = (state.spars || []).length > 1, tags = [];
+    (state.spars || []).forEach((sp, si) => {
       if (!sparAppliesTo(sp, segIdx)) return;
       const g = sparOnProfile(sp, pts, core || null, sparFromLE(sp, segIdx, which), sparYc(sp), which, core); if (!g) return;
       info.n++;
+      const SC = sparColOf(si);
+      if (multi) { const pl = g.poly || []; if (pl.length) { let cx = 0, cy = 0; pl.forEach(p => { cx += p.x; cy += p.y; }); tags.push({ x: V.X(cx / pl.length), y: V.Y(cy / pl.length + (dy || 0)), n: si + 1, c: SC }); } }
       const strokePoly = pl => {
         const poly = dy ? pl.map(p => ({ x: p.x, y: p.y + dy })) : pl;
-        ctx.strokeStyle = App.PAL.spar; ctx.lineWidth = 1.6; ctx.setLineDash(dashFor('spar', []));
+        ctx.strokeStyle = SC; ctx.lineWidth = 1.6; ctx.setLineDash(dashFor('spar', []));
         ctx.beginPath(); poly.forEach((p, i) => i ? ctx.lineTo(V.X(p.x), V.Y(p.y)) : ctx.moveTo(V.X(p.x), V.Y(p.y)));
         ctx.closePath(); ctx.stroke();
       };
@@ -1447,7 +1450,7 @@
           const m = pocketMergedLoop(pts, pgN, side, sp.pkFlat); if (!m) return;
           let wf = m.loop.slice(m.a, m.b + 1);
           if (dy) wf = wf.map(p => ({ x: p.x, y: p.y + dy }));
-          ctx.strokeStyle = App.PAL.spar; ctx.lineWidth = 1.6; ctx.setLineDash(dashFor('spar', []));
+          ctx.strokeStyle = SC; ctx.lineWidth = 1.6; ctx.setLineDash(dashFor('spar', []));
           ctx.beginPath(); wf.forEach((p, i) => i ? ctx.lineTo(V.X(p.x), V.Y(p.y)) : ctx.moveTo(V.X(p.x), V.Y(p.y))); ctx.stroke();
           ctx.setLineDash([]);
         });
@@ -1525,8 +1528,26 @@
         } catch (e) { /* Holm-Schnittspur überspringen, Nennkontur bleibt sichtbar */ }
       }
     });
+    drawSparTags(ctx, tags);
     return info;
   }
+  // Mehrere Holme: je Holm eigene Farbe + Nummer (Profil-, Drauf-, Seitansicht).
+  const SPAR_COLS = ['#ff9f43', '#4fc3f7', '#e85d9e', '#9ccc65', '#b39ddb', '#ffd54f', '#4db6ac', '#ef5350'];
+  function sparColOf(si) { return (state.spars || []).length > 1 ? SPAR_COLS[si % SPAR_COLS.length] : App.PAL.spar; }
+  // Nummernschilder global (alle Tragflächen/Projekte) ein-/ausschaltbar.
+  function sparTagsOn() { try { return localStorage.getItem('hw_sparTags') !== '0'; } catch (e) { return true; } }
+  function setSparTagsOn(v) { try { localStorage.setItem('hw_sparTags', v ? '1' : '0'); } catch (e) { } }
+  function drawSparTags(ctx, tags) {
+    if ((state.spars || []).length < 2 || !tags.length || !sparTagsOn()) return;
+    ctx.save(); ctx.setLineDash([]); ctx.font = 'bold 11px Segoe UI'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    tags.forEach(t => {
+      ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = t.c; ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = '#0008'; ctx.stroke();
+      ctx.fillStyle = '#10161d'; ctx.fillText(String(t.n), t.x, t.y + 0.5);
+    });
+    ctx.restore();
+  }
+  Object.assign(App, { sparColOf, drawSparTags, sparTagsOn, setSparTagsOn });
 
 
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----

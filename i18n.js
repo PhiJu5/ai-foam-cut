@@ -1149,6 +1149,8 @@
 
     // -- Holme --
     "Holmausschnitt": "Spar cut-out",
+    "Holme nummerieren": "Number spars",
+    "Zeigt bei mehreren Holmen ein Nummernschild je Holm in Profil-, Drauf- und Seitansicht. Gilt global für alle Projekte; die Farben bleiben.": "With several spars, shows a number badge per spar in the profile, top and side views. Applies globally to all projects; the colours stay.",
     "Holmausschnitte": "Spar cut-outs",
     "Holme schneiden (G-Code)": "Cut spars (G-code)",
     "Holm-Anfahrt": "Spar approach",
@@ -11191,6 +11193,20 @@
     "behalten": "keep",
     "Linke Maustaste: drehen · rechte: verschieben · Rad: zoomen · Klick: Rippe/Steg/Gurt/Steckung im Menü wählen": "Left mouse: rotate · right: pan · wheel: zoom · click: select rib/web/spar cap/joiner in the menu",
     "Alle Stege und Stützrippen in den Reiter „CAD-Bearbeitung\" laden, je Steg/Rippe eine Ebene (ersetzt dessen Inhalt nach Rückfrage)": "Load all webs and support ribs into the \"CAD editing\" tab, one layer per web/rib (replaces its content after confirmation)",
-    "Schale, Gurt, Stege, Stützrippen und Steckung in 3D, einzeln ein-/ausblendbar (eigenes Fenster)": "Skin, spar cap, webs, support ribs and joiner in 3D, each can be shown/hidden (own window)"
+    "Schale, Gurt, Stege, Stützrippen und Steckung in 3D, einzeln ein-/ausblendbar (eigenes Fenster)": "Skin, spar cap, webs, support ribs and joiner in 3D, each can be shown/hidden (own window)",
+    // ---------- Nasenleiste (Vierkant) 2026-11-06 ----------
+    "Nasenleiste (Vierkant)": "Leading-edge strip (square)",
+    "Nasenleiste einschneiden": "Cut leading-edge strip pocket",
+    "Kantenlänge Wurzel (mm)": "Side length root (mm)",
+    "Kantenlänge Rand (mm)": "Side length tip (mm)",
+    "Einlasstiefe Wurzel (mm)": "Inset depth root (mm)",
+    "Einlasstiefe Rand (mm)": "Inset depth tip (mm)",
+    "Spiel / Klebefuge (mm)": "Clearance / glue gap (mm)",
+    "Nasenleiste (Vierkant) ": "Leading-edge strip (square) ",
+    " mm · Drehung ": " mm · rotation ",
+    "! Nasenleiste: Tasche schneidet die Profilbahn nicht — Einlasstiefe oder Kantenlänge prüfen": "! Leading-edge strip: pocket does not intersect the profile path — check inset depth or side length",
+    "Wie weit die Leiste hinter die Profilnase in den Kern reicht (hinterster Punkt der Tasche). Kleinere Werte = mehr Überstand vor der Nase zum Verschleifen.": "How far the strip reaches behind the profile nose into the core (rearmost point of the pocket). Smaller values = more overhang in front of the nose for sanding.",
+    "45° = über Eck (Spitze nach vorne), 0° = Kanten parallel zur Sehne.": "45° = diagonal (corner forward), 0° = edges parallel to the chord.",
+    "Schneidet an der Nase eine quadratische Tasche in den Kern, in die eine Vierkantleiste (z. B. Balsa) eingeklebt und danach auf Profilform verschliffen wird. Die Tasche läuft im selben Zug wie der Kernschnitt; die Nasenspitze davor fällt als Verschnitt weg. Der Abbrand wird nach innen ausgeglichen (fertige Tasche = Kantenlänge + Spiel).": "Cuts a square pocket into the core at the nose, into which a square strip (e.g. balsa) is glued and then sanded to profile shape. The pocket is cut in the same pass as the core; the nose tip in front of it is waste. Kerf is compensated inward (finished pocket = side length + clearance)."
   };
 })();

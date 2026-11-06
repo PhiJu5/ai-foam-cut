@@ -1199,6 +1199,8 @@
     const add = document.createElement('button'); add.className = 'primary'; add.textContent = T('+ Holm hinzufügen');
     add.onclick = () => { const n = state.segments.length - 1; spars.push(newSpar({ segFrom: 0, segTo: n })); C.setActive(spars.length - 1); buildSidebar(); render(); };
     box.appendChild(add);
+    if (App.sparTagsOn) boolRow(box, 'Holme nummerieren', () => App.sparTagsOn(), v => { App.setSparTagsOn(v); render(); },
+      'Zeigt bei mehreren Holmen ein Nummernschild je Holm in Profil-, Drauf- und Seitansicht. Gilt global für alle Projekte; die Farben bleiben.');
   }
 
   /* Schnittkarte (Reiter „Kernschneiden"): NL/EL-Schnitt- und Blockzugaben. */
@@ -1689,6 +1691,7 @@
         + 'Blockhöhe muss beide Schalen + Kern fassen.');
     }
     side.appendChild(shc.g);
+    if (App.noseBarSidebar) App.noseBarSidebar(side);       // Nasenleiste (Vierkant-Tasche)
     if (App.kernTeileSidebar) App.kernTeileSidebar(side);   // Kern zerteilen (Stege) + Schale erhalten
 
     // --- Elliptische Fläche aus Planform Creator (pc2wing.js) ---------

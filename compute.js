@@ -689,7 +689,7 @@
       leStyle: state.cfg.leStyle, teStyle: state.cfg.teStyle
     });
     const segIdx = state.segments.indexOf(seg);
-    const res = applyStack(applySparCuts(pr, cut, segIdx));
+    const res = applyStack(App.noseBarApply ? App.noseBarApply(applySparCuts(pr, cut, segIdx), cut) : applySparCuts(pr, cut, segIdx));
     // Manueller Schnittpfad-Override dieses Segments (falls vorhanden).
     const ovr = state.pathEdit && state.pathEdit[segIdx];
     let out = startAtTop(ovr ? applyPathOverride(res, ovr) : res);

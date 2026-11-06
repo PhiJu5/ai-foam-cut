@@ -1069,8 +1069,10 @@
     let anySpar = false, anyNonProp = false;
     const sparPick = [];   // {k, poly} in Weltkoordinaten für die Klick-Auswahl
     const xr = poly => { let mn = Infinity, mx = -Infinity; poly.forEach(p => { mn = Math.min(mn, p.x); mx = Math.max(mx, p.x); }); return { min: mn, max: mx, c: (mn + mx) / 2 }; };
+    const sparTags = [];   // Nummernschilder je Holm (nach den Bändern zeichnen)
     (state.spars || []).forEach((sp, si) => {
       const active = state.activeSpar === si;
+      const SC = sparColOf(si);
       const [ra, rb] = sparRange(sp);
       for (let k = ra; k <= rb && k < leTe.length - 1; k++) {
         const rpts = st[k] && st[k].pts, tpts = st[k + 1] && st[k + 1].pts;
@@ -1086,21 +1088,23 @@
         const band = [{ x: zr, y: -a.min }, { x: zt, y: -b.min }, { x: zt, y: -b.max }, { x: zr, y: -a.max }];
         sparPick.push({ k: si, poly: band });
         poly(ctx, V, band, true);
-        ctx.fillStyle = hexA(App.PAL.spar, active ? 0.34 : 0.18); ctx.strokeStyle = App.PAL.spar;
+        ctx.fillStyle = hexA(SC, active ? 0.34 : 0.18); ctx.strokeStyle = SC;
         ctx.lineWidth = active ? 2.4 : 1.2; ctx.setLineDash(dashFor('spar', []));
         ctx.fill(); ctx.stroke();
-        ctx.strokeStyle = App.PAL.spar; ctx.setLineDash(dashFor('spar', [4, 3]));
+        ctx.strokeStyle = SC; ctx.setLineDash(dashFor('spar', [4, 3]));
         poly(ctx, V, [{ x: zr, y: -a.c }, { x: zt, y: -b.c }], false); ctx.stroke();
         ctx.setLineDash([]);
+        if (k === ra) sparTags.push({ x: V.X((zr + zt) / 2), y: V.Y(-(a.c + b.c) / 2), n: si + 1, c: SC });
       }
     });
+    drawSparTags(ctx, sparTags);
 
     // Legende oben links: nur, was gerade gezeichnet ist, mit echter Probe.
     const legP = [['#8b98a8', T('▲ Flugrichtung')]];
     legP.push(L(SEGCOL[(state.activeSeg || 0) % SEGCOL.length], T('Segmente (aktives kräftig, Segmentfarbe)'), [], 'line', 2.5));
     if (state.cfg.showBlock) legP.push(L('#5d6b7d', T('Block (Rohling)'), dashFor('block', [7, 5]), 'rect'));
     if (anyHinge) legP.push(L(App.PAL.hinge, T('Scharnierlinie'), dashFor('hinge', [5, 4]), 'line', 1.6));
-    if (anySpar) legP.push(Object.assign(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'rect'), { f: hexA(App.PAL.spar, 0.18) }));
+    if (anySpar) sparLegend(legP);
     if (pc2Leg) pc2Leg.forEach(e => legP.push(L(e[0], e[1], e[2], e[3], e[4])));
     legP.push(L('#ffffff44', T('Viertel-Sehnenlinie (t/4)'), [6, 4], 'line', 1));
     drawLegend(ctx, 14, 20, legP, { top: true });
@@ -1144,6 +1148,14 @@
     }
   }
 
+  // Mehrere Holme: Farben/Nummern kommen aus spars.js (App.sparColOf/drawSparTags).
+  function sparMulti() { return (state.spars || []).length > 1; }
+  function sparColOf(si) { return App.sparColOf(si); }
+  function drawSparTags(ctx, tags) { App.drawSparTags(ctx, tags); }
+  function sparLegend(legP) {
+    if (!sparMulti()) { legP.push(Object.assign(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'rect'), { f: hexA(App.PAL.spar, 0.18) })); return; }
+    state.spars.forEach((sp, si) => { const c = sparColOf(si); legP.push(Object.assign(L(c, T('Holmausschnitt') + ' ' + (si + 1) + (sp.name ? ' – ' + sp.name : ''), dashFor('spar', []), 'rect'), { f: hexA(c, 0.18) })); });
+  }
   // Aufriss: waagerecht = Spannweite, senkrecht = Höhe (V-Form)
   // Blockhöhe der Ansichten: im Tragflächendesigner die reine Konstruktionshöhe
   // (cfg.designBlockH je Tragfläche, null = wie Kerndesign) — wirkt auf nichts sonst.
@@ -1200,8 +1212,9 @@
     // Holme im Aufriss: senkrechte Ausdehnung (Ober-/Unterkante der Tasche) je
     // Rippe, als Band über den Segmentbereich; Mittellinie gestrichelt.
     const yExt = pl => { let mn = Infinity, mx = -Infinity; pl.forEach(p => { mn = Math.min(mn, p.y); mx = Math.max(mx, p.y); }); return { mn, mx, c: (mn + mx) / 2 }; };
-    let anySparE = false;
-    (state.spars || []).forEach(sp => {
+    let anySparE = false; const sparTagsE = [];
+    (state.spars || []).forEach((sp, si) => {
+      const SC = sparColOf(si);
       const [ra, rb] = sparRange(sp);
       for (let k = ra; k <= rb && k < G.length; k++) {
         const c = App.wing.cuts[Math.min(k, App.wing.cuts.length - 1)];
@@ -1215,13 +1228,15 @@
           anySparE = true;
           const a = yExt(pr_[q]), b = yExt(pt_[q]);
           poly(ctx, V, [{ x: z0, y: a.mx }, { x: z1, y: b.mx }, { x: z1, y: b.mn }, { x: z0, y: a.mn }], true);
-          ctx.fillStyle = hexA(App.PAL.spar, 0.18); ctx.strokeStyle = App.PAL.spar; ctx.lineWidth = 1.2; ctx.setLineDash(dashFor('spar', []));
+          ctx.fillStyle = hexA(SC, 0.18); ctx.strokeStyle = SC; ctx.lineWidth = state.activeSpar === si ? 2.2 : 1.2; ctx.setLineDash(dashFor('spar', []));
           ctx.fill(); ctx.stroke();
-          ctx.strokeStyle = App.PAL.spar; ctx.setLineDash(dashFor('spar', [4, 3]));
+          ctx.strokeStyle = SC; ctx.setLineDash(dashFor('spar', [4, 3]));
           poly(ctx, V, [{ x: z0, y: a.c }, { x: z1, y: b.c }], false); ctx.stroke(); ctx.setLineDash([]);
+          if (k === ra && !q) sparTagsE.push({ x: V.X((z0 + z1) / 2), y: V.Y((a.c + b.c) / 2), n: si + 1, c: SC });
         }
       }
     });
+    drawSparTags(ctx, sparTagsE);
     ctx.fillStyle = '#8b98a8'; ctx.font = '11px Segoe UI';
     G.forEach((g, k) => {
       // Höhenangabe = kumulierte V-Form-Höhe der Profilsehne am Außenende
@@ -1255,7 +1270,7 @@
     legE.push(L(SEGCOL[(state.activeSeg || 0) % SEGCOL.length], T('Segmente (aktives kräftig, Segmentfarbe)'), [], 'line', 2.5));
     if (state.cfg.showBlock) legE.push(L('#5d6b7d', T('Block (Rohling)'), dashFor('block', [7, 5]), 'rect'));
     legE.push(L('#ffffff88', T('Profilsehne (V-Form-Verlauf)'), [5, 4], 'line', 1.5));
-    if (anySparE) legE.push(Object.assign(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'rect'), { f: hexA(App.PAL.spar, 0.18) }));
+    if (anySparE) sparLegend(legE);
     drawLegend(ctx, 14, 20, legE, { top: true });
   }
 
@@ -1780,7 +1795,7 @@
     if (stacked) leg.push(['#8b98a8', segName + T(': Kern gestapelt (') + pr.stack.count + T('×) — nur die Schnittspur des Stapels wird gezeigt')]);
     if (oR || oT) leg.push(L(App.PAL.skeleton, T('Profilmittellinie (Skelettlinie)'), dashFor('skeleton', [2, 3]), 'line', 1));
     otherIdx.forEach(ci => leg.push(L(SEGCOL[ci % SEGCOL.length], 'Segment ' + (ci + 1) + T(' (überlagert, Segmentfarbe; außen gestrichelt)'), [], 'line', 1.2)));
-    if (spAny('n')) leg.push(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'line', 1.6));
+    if (spAny('n')) { if (sparMulti()) sparLegend(leg); else leg.push(L(App.PAL.spar, T('Holmausschnitt'), dashFor('spar', []), 'line', 1.6)); }
     if (spAny('lead')) leg.push(L(App.PAL.sparLead, T('Holm-Anfahrt'), dashFor('sparLead', [4, 3]), 'line', 1.2));
     if (state.cfg.showCore && sheetOn && !stacked && (shR || shT))
       leg.push(L(App.PAL.core, T('Kern (nach Beplankungsabzug)'), dashFor('core', [4, 3]), 'line', 1.2));
@@ -1814,6 +1829,7 @@
     leg.push(['#8b98a8', dh ? (T('Profile in Einbaulage (V-Form-Versatz ') + rise.toFixed(0) + T(' mm)'))
                             : T('Profile flach überlagert (V-Form ausgeblendet)')]);
     if (ktOn) App.kernTeileDraw(ctx, V, leg, { idx, dyR, dyT, shR, shT, kerf: cfgKerf });
+    if (App.noseBarDraw && !ktOn) App.noseBarDraw(ctx, V, leg, { idx, dyR, dyT, shR, shT, err: !!(pr && pr.noseBarErr) });
     drawLegend(ctx, 14, h - 8, leg, { kheat });
     if (state.activeTab === 'core') drawSparWarnings(ctx, w, h);
     if (state.activeTab === 'core') App.ptDrawHandles(ctx, App.profDraw, 'prof');

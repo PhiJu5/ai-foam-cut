@@ -4,6 +4,17 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [2.12] — 2026-11-06
+
+### Holmausschnitte farbig und nummeriert (2026-11-06)
+- Bei mehreren Holmen bekommt jeder Holmausschnitt in Draufsicht und Seitansicht eine eigene Farbe und ein Nummernschild (1, 2, 3 …). Die Legende listet die Holme einzeln. Gilt auch in der Profilansicht. Die Nummern lassen sich im Holm-Menü mit „Holme nummerieren“ global ein- und ausschalten.
+- Bei nur einem Holm bleibt alles wie bisher.
+
+### Kerndesign: Tasche für Vierkant-Nasenleiste (2026-11-06)
+- Neues Seitenmenü **Kerndesign → Nasenleiste (Vierkant)**: An der Nase wird eine quadratische Tasche in den Kern geschnitten. Dort wird eine Vierkantleiste eingeklebt und danach auf Profilform verschliffen.
+- Einstellbar sind Kantenlänge und Einlasstiefe je Wurzel und Rand, die Drehung (45° = über Eck) und das Spiel für die Klebefuge. Die Werte gelten je Tragfläche.
+- Die Tasche wird im selben Zug wie der Kernschnitt geschnitten. Der Abbrand wird nach innen ausgeglichen, die Nasenspitze davor ist Verschnitt. Die Leiste wird in der Profilansicht angezeigt.
+
 ## [2.11] — 2026-11-06
 
 ### Kopfüber schneiden nur noch im Kerndesign, Holm-Anfahrt ins Kerndesign (2026-11-06)
