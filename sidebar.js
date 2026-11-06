@@ -1150,9 +1150,7 @@
             numRow(sb, 'Höhenversatz zur Mitte außen (mm)', () => sp.yOffTip, v => { sp.yOffTip = v; render(); },
               { step: 1, norender: true });
         }
-        selectRow(sb, 'Anfahrt', [['shortest', 'Kürzester Weg'], ['top', 'Von oben'], ['bottom', 'Von unten']],
-          () => sp.approach, v => { sp.approach = v; render(); },
-          'Von welcher Seite der Draht in den Holm einsticht — kürzester Weg zur Oberfläche oder erzwungen.');
+        // Anfahrt (oben/unten) ist eine Schneide-Einstellung -> Kerndesign, Abschnitt Holmschnitt.
       }
       subhead(sb, 'Segmentbereich');
       selectRow(sb, 'Von Segment (Wurzel)', segOpts, () => String(Math.min(sp.segFrom, sp.segTo)),
@@ -1910,7 +1908,16 @@
       if (!state.cfg.sparOnly) (state.spars || []).forEach((sp, i) => {
         if (App.isPocket(sp)) return;
         selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Schnitt'), modeOpts,
-          () => App.sparModeOf(sp), v => { sp.cutMode = v; render(); }, modeHelp);
+          () => App.sparModeOf(sp), v => { sp.cutMode = v; buildSidebar(); render(); }, modeHelp);
+        // Anfahrt bezogen auf die MASCHINE (oben = oben am Block, auch kopfüber).
+        // Nur „während des Schnitts" wählbar; Scharnier: immer gegenüber dem Scharnier.
+        if (sp.shape !== 'hinge' && App.sparModeOf(sp) === 'during')
+          selectRow(hgc.body, T('Holm ') + (i + 1) + T(' · Anfahrt'),
+            [['shortest', 'Kürzester Weg'], ['top', 'Von oben'], ['bottom', 'Von unten']],
+            () => sp.approach || 'shortest', v => { sp.approach = v; render(); },
+            'Von welcher Seite der Draht in den Holm einsticht: kürzester Weg zur Oberfläche oder erzwungen. '
+            + '„Oben" und „unten" beziehen sich auf die Lage im Block an der Maschine, auch bei „Kopfüber schneiden". '
+            + 'Bei „nach dem Schnitt" und „nach Oberseitenschnitt" immer von oben.');
       });
       if (state.cfg.cutDir === 'front' && !state.cfg.sparOnly && (state.spars || []).some(sp => App.sparModeOf(sp) === 'afterTop'))
         hint(hgc.body, 'Schnittrichtung „von vorne": Pause und Holmtaschen folgen, sobald die Oberseite an der '

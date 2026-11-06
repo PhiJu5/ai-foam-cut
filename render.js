@@ -1938,7 +1938,11 @@
     list.appendChild(h);
   }
   function draw() {
-    drawPlan(); drawElev(); drawProfiles();
+    // Reiter „Tragflächendesign": ungespiegelte Fläche (Kopfüber gilt nur im Kerndesign).
+    const swap = state.activeTab === 'wing' && App.wingDesign && App.wingDesign !== App.wing;
+    const keep = App.wing;
+    if (swap) App.wing = App.wingDesign;
+    try { drawPlan(); drawElev(); drawProfiles(); } finally { if (swap) App.wing = keep; }
     if (App.meas2dOverlay) App.meas2dOverlay('core');   // Messwerkzeug (Kerndesign): Überlagerung neu malen
     syncProfToggles();
     updateStat();

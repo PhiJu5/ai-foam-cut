@@ -197,6 +197,15 @@
       align: state.cfg.align, globalDih: state.cfg.globalDih,
       ribFit: ribFitCfg()
     });
+    // Tragflächendesign zeigt die Fläche IMMER ungespiegelt: „Kopfüber schneiden"
+    // ist eine reine Kerndesign-Einstellung (render.draw tauscht App.wing dafür).
+    App.wingDesign = state.cfg.flipY ? Wing.build({
+      root: state.root, segments: segs,
+      twistRef: state.cfg.twistRef, points: state.cfg.points,
+      dihedralCut: state.cfg.dihedralCut, flipY: false,
+      align: state.cfg.align, globalDih: state.cfg.globalDih,
+      ribFit: ribFitCfg()
+    }) : App.wing;
     App.segZ = []; let z = 0;
     state.segments.forEach(s => { App.segZ.push({ z0: z, z1: z + s.span }); z += s.span; });
   }

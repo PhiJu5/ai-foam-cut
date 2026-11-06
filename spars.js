@@ -1053,8 +1053,8 @@
   //  am ORIGINALPROFIL pts bestimmt, Höhe/Dicke/Klemmung/Anfahrt aber am Kern.
   function sparOnProfile(sp, pts, surfPts, fromLE, ycOverride, which, core) {
     if (pts && pts.flipY) {
-      // approachAbs = Maschinenrichtung (G-Code „nach dem Schnitt"): im Design-Rahmen umkehren.
-      const sp2 = sp.approachAbs ? Object.assign({}, sp, { approach: swTB(sp.approach) }) : sp;
+      // Anfahrt oben/unten ist maschinenbezogen (Kerndesign-Einstellung): im Design-Rahmen umkehren.
+      const sp2 = Object.assign({}, sp, { approach: swTB(sp.approach) });
       const g = sparOnProfile(sp2, mirY(pts), mirY(surfPts), fromLE, ycOverride != null ? -ycOverride : ycOverride, which, mirY(core));
       if (!g) return g;
       const rv = a => a ? mirY(a).reverse() : a;   // Umlaufsinn erhalten
