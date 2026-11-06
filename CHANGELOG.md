@@ -4,6 +4,13 @@ Alle nennenswerten Änderungen an **AI Foam Cut** werden hier dokumentiert.
 Format angelehnt an [Keep a Changelog](https://keepachangelog.com/de/).
 Neueste Einträge oben.
 
+## [Unveröffentlicht]
+
+### Kopfüber schneiden: alle Holmausschnitte werden mitgespiegelt (2026-11-06)
+- „Kopfüber schneiden“ im Kerndesign spiegelt jetzt die **fertige Tragfläche samt allen Ausschnitten** rein geometrisch: Kreis, Oval, Trapez (Basis Mitte/oben/unten, Drehung, Versatz), Doppel-T, Scharnier, waagrechte Holme und Gurttaschen (mit/ohne Steg, unterschiedliche Tiefen oben/unten, flacher Boden). Geprüft: gespiegelte Bahn = Original, Abweichung 0,000 mm.
+- Die Ausschnitte werden am ungespiegelten Profil aus dem Tragflächendesign berechnet und danach gespiegelt. Das Kerndesign wirkt nicht auf das Tragflächendesign zurück.
+- Holmausschnitte „nach dem Schnitt“ werden auch kopfüber immer von der Maschinen-Oberseite angefahren.
+
 ## [2.1] — 2026-11-05
 
 ### Neuer Reiter „Flugsimulator“ (2026-11-05)

@@ -295,7 +295,9 @@
     // Damit liegt die Profilunterseite oben UND die V-Form wird mitgespiegelt
     // (aus V wird Λ). Wirkt auf Schnitt-Paneele UND Draufsicht-Stationen.
     if (cfg.flipY) {
-      const flip = arr => { for (const p of arr) p.y = -p.y; };
+      // arr.flipY markiert gespiegelte Konturen: Holme (sparOnProfile) spiegeln ihre
+      // Oben/Unten-Einstellungen dann mit (Trapez-Basis, Anfahrt, Versatz, Drehung).
+      const flip = arr => { for (const p of arr) p.y = -p.y; arr.flipY = true; };
       cuts.forEach(c => { flip(c.root.pts); flip(c.tip.pts); c.root.pl.flip = true; c.tip.pl.flip = true; });
       stations.forEach(s => { flip(s.pts); s.yRise = -s.yRise; });
     }

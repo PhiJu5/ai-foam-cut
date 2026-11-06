@@ -68,9 +68,10 @@
     const kerfHalf = { root: (ki.root != null ? ki.root : ckP.root) / 2, tip: (ki.tip != null ? ki.tip : ckP.tip) / 2 };
     pockets.forEach(sp => {
       try {
-        const sides = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
+        const F = !!(cut.root.pts && cut.root.pts.flipY), spP = pkPhys(sp, F);
+        const sides = pkSides(sp, F);
         sides.forEach(side => {
-          const res = carvePocketSide(root, tip, sp, cut, segIdx, side, kerfHalf);
+          const res = carvePocketSide(root, tip, spP, cut, segIdx, side, kerfHalf);
           if (res) { root = res.root; tip = res.tip; }
         });
       } catch (e) { /* einzelne Tasche überspringen */ }
@@ -383,8 +384,8 @@
     (state.spars || []).forEach(sp => {
       if (!isPocket(sp) || !sparAppliesTo(sp, segIdx)) return;
       const fl = sparFromLE(sp, segIdx, which);
-      const sides = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
-      sides.forEach(side => { const g = pocketGeom(pts, sp, segIdx, which, fl, side); if (!g) return; const m = pocketMergedLoop(loop, g, side, sp.pkFlat); if (m) loop = m.loop; });
+      const sides = pkSides(sp, pts && pts.flipY);
+      sides.forEach(side => { const g = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, fl, side); if (!g) return; const m = pocketMergedLoop(loop, g, side, sp.pkFlat); if (m) loop = m.loop; });
     });
     return loop;
   }
@@ -989,12 +990,29 @@
   }
   // Konstante Höhe (absolutes Y) eines waagrechten Holms — aus der Wurzelrippe
   // seines Bereichs. Null, wenn nicht „horizontal".
+  // Kopfüber schneiden (cfg.flipY): Konturen aus Wing.build tragen arr.flipY. Die
+  // Holmgeometrie wird dann REIN GEOMETRISCH gespiegelt: am ungespiegelten Profil
+  // (= Tragflächendesign) gerechnet und das Ergebnis an y=0 gespiegelt. Keine
+  // Einstellung wird umgedeutet, das Kerndesign wirkt nicht zurück.
+  const swTB = v => v === 'top' ? 'bottom' : v === 'bottom' ? 'top' : v;
+  const mirY = a => a ? a.map(p => ({ x: p.x, y: -p.y })) : a;
+  // Taschenseiten einer Gurttasche auf einer (ggf. gespiegelten) Kontur.
+  function pkSides(sp, flipped) {
+    const s = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
+    return flipped ? s.map(swTB) : s;
+  }
+  // Gurttasche auf gespiegelter Kontur: seitenbezogene Maße (Tiefe/Steg oben/unten)
+  // auf die physische Seite umhängen — Werte selbst bleiben die des Designs.
+  function pkPhys(sp, flipped) {
+    if (!flipped) return sp;
+    return Object.assign({}, sp, { pkDepthTop: sp.pkDepthBot, pkDepthBot: sp.pkDepthTop, pkWebTop: sp.pkWebBot, pkWebBot: sp.pkWebTop });
+  }
   function sparYc(sp) {
     if (!sp.horiz || !App.wing || !App.wing.cuts) return null;
     const [a] = sparRange(sp), c = App.wing.cuts[Math.min(a, App.wing.cuts.length - 1)]; if (!c) return null;
     const pts = c.root.pts, leX = Math.min.apply(null, pts.map(p => p.x));
     const s = surfaceAtX(sparCoreOf(pts, a, 'root') || pts, leX + sparFromLE(sp, a, 'root')); if (!s) return null;
-    return (s.top + s.bot) / 2 + (sp.yOff || 0);
+    return (s.top + s.bot) / 2 + (pts.flipY ? -1 : 1) * (sp.yOff || 0);
   }
   // Geometrie EINES Holms auf einer konkreten Rippe (pts in Panel-mm).
   // Rückgabe: { poly:[…], lead:[a,b], xc, yc, ok } oder null.
@@ -1034,6 +1052,14 @@
   //  core (optional) = Kernkontur nach Beplankungsabzug: x-Lage (Nasenabstand) wird
   //  am ORIGINALPROFIL pts bestimmt, Höhe/Dicke/Klemmung/Anfahrt aber am Kern.
   function sparOnProfile(sp, pts, surfPts, fromLE, ycOverride, which, core) {
+    if (pts && pts.flipY) {
+      // approachAbs = Maschinenrichtung (G-Code „nach dem Schnitt"): im Design-Rahmen umkehren.
+      const sp2 = sp.approachAbs ? Object.assign({}, sp, { approach: swTB(sp.approach) }) : sp;
+      const g = sparOnProfile(sp2, mirY(pts), mirY(surfPts), fromLE, ycOverride != null ? -ycOverride : ycOverride, which, mirY(core));
+      if (!g) return g;
+      const rv = a => a ? mirY(a).reverse() : a;   // Umlaufsinn erhalten
+      return Object.assign({}, g, { poly: rv(g.poly), poly2: rv(g.poly2), lead: mirY(g.lead), yc: g.yc != null ? -g.yc : g.yc });
+    }
     const xs = pts.map(p => p.x), leX = Math.min.apply(null, xs), teX = Math.max.apply(null, xs);
     const chord = (teX - leX) || 1;
     const dLE = fromLE != null ? fromLE : (sp.posMode === 'mm' ? (sp.pos || 0) : (sp.pos || 0) / 100 * chord);
@@ -1411,9 +1437,9 @@
         // -> nur Wand→Boden→Wand (offener Teilpfad, KEIN Mündungs-„Deckel") in
         // Holmfarbe hervorheben. So bleibt die Mündung offen wie am fertigen Teil.
         const flN = sparFromLE(sp, segIdx, which);
-        const sidesN = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
+        const sidesN = pkSides(sp, pts && pts.flipY);
         sidesN.forEach(side => {
-          const pgN = pocketGeom(pts, sp, segIdx, which, flN, side); if (!pgN) return;
+          const pgN = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flN, side); if (!pgN) return;
           const m = pocketMergedLoop(pts, pgN, side, sp.pkFlat); if (!m) return;
           let wf = m.loop.slice(m.a, m.b + 1);
           if (dy) wf = wf.map(p => ({ x: p.x, y: p.y + dy }));
@@ -1461,9 +1487,9 @@
               // Profiloberfläche gelegt (wallHitSurface) — NICHT auf den Gehrungspunkt,
               // der die Mündung aufweiten würde. Offener Pfad (keine Mündungssehne).
               const flK = sparFromLE(sp, segIdx, which);
-              const sides = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
+              const sides = pkSides(sp, pts && pts.flipY);
               sides.forEach(side => {
-                const pg = pocketGeom(pts, sp, segIdx, which, flK, side); if (!pg) return;
+                const pg = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flK, side); if (!pg) return;
                 const m = pocketMergedLoop(pts, pg, side, sp.pkFlat); if (!m) return;
                 let off = k ? offsetInward(m.loop, -k) : m.loop.map(p => ({ x: p.x, y: p.y }));
                 let seg = off.slice(m.a, m.b + 1).map(p => ({ x: p.x, y: p.y }));   // Wand→Boden→Wand

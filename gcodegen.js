@@ -144,7 +144,7 @@
     spars.forEach(sp => {
       const no = (state.spars || []).indexOf(sp) + 1;
       try {
-        const topSp = Object.assign({}, sp, { approach: 'top' });   // immer von oben anfahren
+        const topSp = Object.assign({}, sp, { approach: 'top', approachAbs: true });   // immer von oben anfahren (Maschinen-oben, auch kopfüber)
         const yco = App.sparYc(sp);
         const coreR = App.sparCoreOf(cut.root.pts, segIdx, 'root'), coreT = App.sparCoreOf(cut.tip.pts, segIdx, 'tip');
         const gr = App.sparOnProfile(topSp, cut.root.pts, coreR || cut.root.pts, App.sparFromLE(sp, segIdx, 'root'), yco, 'root', coreR);
