@@ -78,6 +78,59 @@
     }
     return top > bot ? { top, bot } : null;
   }
+  // ---------- Eingerückte / schräge Wurzelrippe ----------
+  // c.rootInL / c.rootInT (mm in Spannweitenrichtung): um so viel rücken Nase bzw. Endleiste der Wurzelrippe nach
+  // außen (ins Werkstück), beide frei; gleich = parallel eingerückt, verschieden = im Grundriss schräg (z. B. bei
+  // einem Rumpf mit Einschnürung). Ebene im Grundriss: Gerade durch die Nasenleiste bei zL und die Endleiste bei zT,
+  // z(x) = zL − (x − xL)·k, Winkel α = atan k (+ = Nase weiter außen). Was davor liegt, gehört nicht zum Werkstück:
+  // Stege, Steckung und Listen beginnen an der Wurzelrippe.
+  function rootIns(G, c) {
+    if (c.rootSkew != null) rootMigrate(G, c);
+    return [clamp(+c.rootInL || 0, 0, G.L), clamp(+c.rootInT || 0, 0, G.L)];
+  }
+  function rootPlane(G, c) {
+    if (!G) return null;
+    const [zL, zT] = rootIns(G, c);
+    if (zL < 1e-6 && zT < 1e-6) return null;
+    const xL = frame(G, zL).le, fT = frame(G, zT), xT = fT.le + fT.c;
+    if (!(xT - xL > 1e-6)) return null;
+    const k = (zL - zT) / (xT - xL), at = Math.atan(k);
+    return { a: at * 180 / Math.PI, k, xL, zL, xT, zT, cos: Math.cos(at), z: x => Math.max(0, zL - (x - xL) * k), xAt: z => (Math.abs(k) > 1e-12 ? xL + (zL - z) / k : NaN) };
+  }
+  // Altstand (2026-11-14): nur ein Winkel c.rootSkew mit festem Ende an der Wurzel → beide Einrückmaße
+  function rootMigrate(G, c) {
+    const a = clamp(+c.rootSkew || 0, -45, 45); delete c.rootSkew;
+    if (c.rootInL != null || c.rootInT != null || Math.abs(a) < 1e-6) return;
+    const f0 = frame(G, 0), k = Math.tan(a * Math.PI / 180), xP = a > 0 ? f0.le + f0.c : f0.le, pz = x => Math.max(0, (xP - x) * k);
+    const hit = X => {
+      const h = z => z - pz(X(z)); if (h(0) >= 0) return 0; if (h(G.L) < 0) return G.L;
+      let lo = 0, hi = G.L; for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (h(m) < 0) lo = m; else hi = m; }
+      return Math.round(hi * 1000) / 1000;
+    };
+    c.rootInL = hit(z => frame(G, z).le); c.rootInT = hit(z => { const f = frame(G, z); return f.le + f.c; });
+  }
+  // Wo eine Linie x = X(z) im Grundriss die Wurzelrippe trifft (z ab Wurzel); 0 ohne Schräge
+  function rootZLine(G, c, X) {
+    const P = rootPlane(G, c); if (!P) return 0;
+    const h = z => z - P.z(X(z));
+    if (h(0) >= 0) return 0;
+    if (h(G.L) < 0) return G.L;
+    let lo = 0, hi = G.L;
+    for (let i = 0; i < 50; i++) { const m = (lo + hi) / 2; if (h(m) < 0) lo = m; else hi = m; }
+    return hi;
+  }
+  // Nase und Endleiste der Wurzelrippe im Grundriss
+  function rootEnds(G, c) {
+    const P = rootPlane(G, c); if (P) return { zL: P.zL, xL: P.xL, zT: P.zT, xT: P.xT };
+    const f = frame(G, 0); return { zL: 0, xL: f.le, zT: 0, xT: f.le + f.c };
+  }
+  // Listen beginnen an der Wurzelrippe: Zeilen im abgeschnittenen Keil entfallen, erste Zeile an der Rippe
+  function rootRows(G, c, M, X) {
+    if (!rootPlane(G, c)) return M;
+    const zr = rootZLine(G, c, X); if (zr < 0.05) return M;
+    const out = M.filter(m => m.z > zr + 0.5); out.unshift({ z: zr, note: 'Wurzelrippe' });
+    return out;
+  }
   // Stöße innerhalb des Stegs: { k, z } (k = Index des Segments innen am Stoß)
   const jointsIn = (G, a, b) => G.segs.slice(0, -1).map(q => ({ k: q.k, z: q.z1 })).filter(q => q.z > a + 1e-6 && q.z < b - 1e-6);
   const lerpPts = (P, z) => {
@@ -211,8 +264,10 @@
     if (st.perJoint && !dist) fillJoints(G, st);
     const a0 = rangeOf(G, st)[0], b0 = rangeOf(G, st)[1], b = dist ? distEnd(G, c, st, a0, b0) : b0;
     const xBase = dist ? z => distX(G, c, st, z) : xFn(G, st, a0, b), auto = kind === 'ruder' ? autoShift(G, c, st, a0, b, xBase) : null, xAt = auto && auto.s ? z => xBase(z) - auto.s : xBase;
+    // Schräge Wurzelrippe: der Steg beginnt an ihr (Lage bleibt, der Keil davor entfällt)
+    const aR = Math.min(b, Math.max(a0, rootZLine(G, c, xAt)));
     // Trifft der Steg die Steckungshülse, beginnt er erst hinter ihrer letzten Berührung; seine Lage bleibt
-    const a = stkTrim(G, c, st, kind, a0, b, xAt), joints = G.segs.slice(0, -1).map(q => q.z1).filter(z => z > a + 1e-6 && z < b - 1e-6);
+    const a = stkTrim(G, c, st, kind, aR, b, xAt), joints = G.segs.slice(0, -1).map(q => q.z1).filter(z => z > a + 1e-6 && z < b - 1e-6);
     const zs = []; const N = Math.max(2, Math.ceil((b - a) / 2));
     for (let i = 0; i <= N; i++) zs.push(a + (b - a) * i / N);
     // Rudersteg je Segmentgruppe: an jeder Gruppengrenze darf der Abstand springen → zweite Stützstelle knapp dahinter
@@ -246,7 +301,7 @@
     const runs = []; let cur = null;
     sm.forEach(q => { const r = at(zOf(q), q); if (r.h != null && r.h > 0) { if (!cur) runs.push(cur = []); cur.push(r); } else cur = null; });
     const polys = runs.filter(R => R.length >= 2 && len > 1e-6).map(R => R.map(r => [r.s, r.top]).concat(R.slice().reverse().map(r => [r.s, r.bot])));
-    return { st, kind, a, b, len, path, rows, polys, at, auto, cut: b < b0 - 1e-6, stkCut: a > a0 + 1e-6 };
+    return { st, kind, a, b, len, path, rows, polys, at, xAt, auto, cut: b < b0 - 1e-6, stkCut: a > aR + 1e-6, rootCut: aR > a0 + 1e-6 };
   }
   const webOf = (st, kind) => st.web != null ? Math.max(0, +st.web || 0) : (kind === 'holm' ? 3 : 2);
   // Gurtwerte: Wurzel → Außenende der Tragfläche linear
@@ -340,10 +395,11 @@
     if (!M.has(key)) {
       if (M.size > 50) M.clear();
       const out = [];
-      if (c.stkOn) out.push(stkCalc(G, c, { z0: 0, z1: clamp(+c.stkLen || 0, 0, G.L), wall: c.stkWall, round: c.stkForm === 'round', w: c.stkW, fix: c.stkFix, d: c.stkD, v: c.stkV, cen: z => stkCenter(G, c, z) }));
+      // Hauptsteckung ab der Wurzelrippe (bei schräger Rippe dort, wo sie die Mitte der Steckung trifft)
+      if (c.stkOn) { const cen = z => stkCenter(G, c, z), z0 = rootZLine(G, c, cen); out.push(stkCalc(G, c, { z0, z1: clamp(z0 + (+c.stkLen || 0), 0, G.L), wall: c.stkWall, round: c.stkForm === 'round', w: c.stkW, fix: c.stkFix, d: c.stkD, v: c.stkV, cen })); }
       // Teilungen in Spannweitenrichtung: eigene Steckung je Trennstelle, x mm nach innen und x mm nach außen
       (c.stkSplit || []).forEach((t, i) => {
-        const zt = clamp(+t.z || 0, 0, G.L), z0 = clamp(zt - Math.max(0, +t.li || 0), 0, G.L), z1 = clamp(zt + Math.max(0, +t.la || 0), 0, G.L);
+        const zt = clamp(+t.z || 0, 0, G.L), z0 = Math.max(clamp(zt - Math.max(0, +t.li || 0), 0, G.L), Math.min(zt, rootZLine(G, c, z => capCenter(G, c, z)))), z1 = clamp(zt + Math.max(0, +t.la || 0), 0, G.L);
         const S = stkCalc(G, c, { z0, z1, wall: t.wall, round: t.form === 'round', w: t.w, fix: t.fix, d: t.d, v: 0, cen: z => capCenter(G, c, z) });
         S.split = i; S.zt = zt; out.push(S);
       });
@@ -484,6 +540,7 @@
       let best = null, bd = 12;
       for (const h of hits) { const q = Math.hypot(h[0] - mx, h[1] - my) - (h[3] || 0); if (q < bd) { bd = q; best = h[2]; } }
       if (best && best.rib != null) { if (App.StegRippen) App.StegRippen.select(best.rib); }   // Stützrippe
+      else if (best && best.root) { showRoot(); focus('root'); }   // Wurzelrippe
       else if (best && best !== sel) { sel = best; refresh(true); const nb = side.querySelector('[data-selsteg]'); if (nb) nb.scrollIntoView({ block: 'nearest' }); }
     });
     cv.addEventListener('dblclick', () => { fitNext = autoFit = true; draw(); });
@@ -491,7 +548,7 @@
 
   // Seitenleiste des Reiters (Aufbau nur bei Strukturänderung, Zahlen rechnen ohne Neuaufbau)
   // Eigene Menügruppen wie in den anderen Modulen (Standard zugeklappt): Steghöhen (allgemein), Holmgurt, Steckung, Stege, Stützrippen, Ausgabe
-  const GRP = { cap: ['Holmgurt', 'stegHcap'], stk: ['Steckung', 'stegHstk'], steg: ['Stege', 'stegHsteg'], lip: ['Dichtlippe (Ruderstege)', 'stegHlip'], rip: ['Stützrippen', 'stegHrip'], out: ['Ausgabe', 'stegHout'] };
+  const GRP = { root: ['Wurzelrippe', 'stegHroot'], cap: ['Holmgurt', 'stegHcap'], stk: ['Steckung', 'stegHstk'], steg: ['Stege', 'stegHsteg'], lip: ['Dichtlippe (Ruderstege)', 'stegHlip'], rip: ['Stützrippen', 'stegHrip'], out: ['Ausgabe', 'stegHout'] };
   function mkGrp(part) {
     const [title, key] = GRP[part], g = App.grp(title, false, 'stegh', { key });
     g.g.dataset.part = part; side.appendChild(g.g);
@@ -533,6 +590,8 @@
     numRow(box, 'Schalenüberstand Endleiste (mm)', () => ovTE(c), v => { c.shellOvTE = Math.max(0, v); upd(); }, Object.assign({}, NR, { step: 1 }));
     hint(box, 'Steht die Schale an Nase oder Endleiste über, zeigt die Liste neben jedem Maß ab Nase bzw. ab Endleiste zusätzlich das Maß plus Überstand.');
     numRow(box, 'Höhe alle … mm Steglänge', () => c.step, v => { c.step = Math.max(1, v); upd(); }, Object.assign({}, NR, { step: 10, min: 1 }));
+    // Wurzelrippe: Schrägstellung, Schnitt mit allen Teilen, Übernahme ins CAD (wurzelrippe.js)
+    if (App.StegWurzel) App.StegWurzel.sidebar(mkGrp('root'), { upd, refresh: () => refresh(true) });
     // Holmgurt: aufklappbar, fest definiert und unabhängig von den Stegen
     const det = mkGrp('cap');
     const GR = Object.assign({}, NR, { step: 0.1 }), GB = Object.assign({}, NR, { step: 1 });
@@ -755,6 +814,8 @@
     box = mkGrp('out');
     const bar = document.createElement('div'); bar.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px';
     if (App.cadImportDxfText) { const b = document.createElement('button'); b.textContent = T('In CAD übernehmen'); b.className = 'primary'; b.title = T('Alle Stege und Stützrippen in den Reiter „CAD-Bearbeitung" laden, je Steg/Rippe eine Ebene (ersetzt dessen Inhalt nach Rückfrage)'); b.onclick = toCad; bar.appendChild(b); }
+    if (App.cadImportDxfText && App.StegWurzel) { const b = document.createElement('button'); b.textContent = T('Wurzelrippe in CAD übernehmen'); b.title = T('Schnitt in der Ebene der Wurzelrippe (wahre Form) mit Schale/Lagen, Holmgurt, Stegen, Hülse, Steckung und Rippenkontur in den Reiter „CAD-Bearbeitung" laden, je Teil eine Ebene (ersetzt dessen Inhalt nach Rückfrage)'); b.onclick = () => App.StegWurzel.toCad(); bar.appendChild(b); }
+    if (App.exportViaPicker && App.StegWurzel && App.StegWurzel.stlDialog) { const b = document.createElement('button'); b.textContent = T('Wurzelrippe als STL…'); b.title = T('Wurzelrippe als Körper exportieren: Dicke und Ausnehmungen (Holmgurt, Hülse, Bohrungen) abfragen, dann STL-Vorschau und Speichern'); b.onclick = () => App.StegWurzel.stlDialog(); bar.appendChild(b); }
     const cp = document.createElement('button'); cp.textContent = T('Liste kopieren'); cp.title = T('Höhenliste als Tabelle in die Zwischenablage (z. B. für Excel)'); cp.onclick = copyList; bar.appendChild(cp);
     const pp = document.createElement('button'); pp.textContent = T('🔍 Druckvorschau…'); pp.title = T('Höhenliste drucken oder als PDF speichern'); pp.onclick = printPreview; bar.appendChild(pp);
     box.appendChild(bar);
@@ -806,7 +867,7 @@
     jointsIn(G, 0, G.L).forEach(q => { const n = T('Segmentstoß') + ' ' + (q.k + 1) + '|' + (q.k + 2), h = M.find(m => Math.abs(m.z - q.z) < 0.5); if (h) { h.z = q.z; h.note = n; } else M.push({ z: q.z, note: n }); });
     M.push({ z: G.L, note: 'außen' });
     M.sort((a, b) => a.z - b.z);
-    return M.map(m => { const f = frame(G, m.z), hb = f.c * f.hp / 100; return { note: m.note, v: [f1(m.z), f1(f.c)].concat(vN(c, f.c - hb), vT(c, hb)) }; });
+    return rootRows(G, c, M, z => { const f = frame(G, z); return f.le + f.c * (1 - f.hp / 100); }).map(m => { const f = frame(G, m.z), hb = f.c * f.hp / 100; return { note: m.note, v: [f1(m.z), f1(f.c)].concat(vN(c, f.c - hb), vT(c, hb)) }; });
   }
   // Stützstoff an der Endleiste: gleiche Stellen wie die Scharnierliste, Maße ab Endleiste (Original + Überstand)
   const TEHEAD = () => { const c = cfg(); return [T('ab Wurzel (mm)')].concat(layI(c) > 0 ? hT('Schalen berühren sich, Schleifen ab Endleiste (mm)') : [], hT('Stützstoff trifft aufeinander ab Endleiste (mm)'), hT('Stützstoff ganz weg ab Endleiste (mm)')); };
@@ -818,7 +879,7 @@
     M.push({ z: G.L, note: 'außen' });
     M.sort((a, b) => a.z - b.z);
     const col = d => d == null ? vT(c, 0).map(() => '') : vT(c, d);
-    return M.map(m => { const L = teLayers(G, c, m.z); return { note: m.note, v: [f1(m.z)].concat(layI(c) > 0 ? col(L.start) : [], col(L.meet), col(L.gone)) }; });
+    return rootRows(G, c, M, z => { const f = frame(G, z); return f.le + f.c; }).map(m => { const L = teLayers(G, c, m.z); return { note: m.note, v: [f1(m.z)].concat(layI(c) > 0 ? col(L.start) : [], col(L.meet), col(L.gone)) }; });
   }
   // Holmgurt-Liste, unabhängig von den Stegen: alle „Höhe alle … mm“ ab Wurzel + jeder Segmentstoß + außen
   const CAPHEAD = () => [T('ab Wurzel (mm)')].concat(hN('Gurt von Nase (mm)'), hN('Gurtmitte ab Nase (mm)'), hN('Gurt bis Nase (mm)'), [T('Gurtbreite (mm)'), T('Gurtdicke je Seite (mm)')]);
@@ -831,7 +892,7 @@
     // Segmentgruppen: an jeder Gruppengrenze zusätzlich der Anfangswert der nächsten Gruppe (Lage darf springen)
     if (!c.capOrtho && capLay(c, G) === 'grp') capGroups(G, c).slice(1).forEach((g, i) => M.push({ z: g.z0, e: 1e-6, note: T('Gruppe') + ' ' + (i + 2) + ' ' + T('innen') }));
     M.sort((a, b) => a.z - b.z || (a.e || 0) - (b.e || 0));
-    return M.map(m => {
+    return rootRows(G, c, M, z => capCenter(G, c, z)).map(m => {
       const zz = m.z + (m.e || 0), le = frame(G, zz).le, mid = capCenter(G, c, zz) - le, w = capAt(G, c, 'capW', m.z);
       return { note: m.note, v: [f1(m.z)].concat(vN(c, mid - w / 2), vN(c, mid), vN(c, mid + w / 2), [f1(w), f1(capAt(G, c, 'capT', m.z))]) };
     });
@@ -991,13 +1052,35 @@
       });
     }
     if (App.StegRippen) App.StegRippen.drawPlan(cx, X, Y, G, view.s, hits);
+    // Wurzelrippe: bei Schräge der Keil davor abgedunkelt (gehört nicht zum Werkstück); Klick wählt die Wurzelrippe
+    {
+      const cc = cfg(), RP = rootPlane(G, cc), E = rootEnds(G, cc), rs = secOpen() && secRoot;
+      if (RP) {
+        const J = G.segs.slice(0, -1).map(q => q.z1), le = z => frame(G, z).le, te = z => { const f = frame(G, z); return f.le + f.c; };
+        const W = [[0, -le(0)]];
+        J.filter(z => z < E.zL).forEach(z => W.push([z, -le(z)]));
+        W.push([E.zL, -E.xL], [E.zT, -E.xT]);
+        J.filter(z => z < E.zT).reverse().forEach(z => W.push([z, -te(z)]));
+        W.push([0, -te(0)]);
+        line(W, true); cx.fillStyle = 'rgba(16,20,26,.82)'; cx.fill();
+        cx.save(); line(W, true); cx.clip(); cx.strokeStyle = 'rgba(200,210,224,.22)'; cx.lineWidth = 1; cx.beginPath();
+        for (let k = -h; k < w + h; k += 7) { cx.moveTo(k, 0); cx.lineTo(k + h, h); }
+        cx.stroke(); cx.restore();
+      }
+      if (RP || rs) {
+        line([[E.zL, -E.xL], [E.zT, -E.xT]]); cx.strokeStyle = rs ? '#ff5c8a' : '#e0b97a'; cx.lineWidth = rs ? 3 : 2.5; cx.stroke();
+        const tx = T('Wurzelrippe') + (RP ? ' ' + (Math.abs(RP.a) > 0.01 ? f1(RP.a) + '°' : f1(RP.zL) + ' mm') : '');
+        cx.fillStyle = rs ? '#ff5c8a' : '#e0b97a'; cx.fillText(tx, X(Math.max(E.zL, E.zT)) + 6, Y(-(E.xL + E.xT) / 2) + 4);
+      }
+      for (let k = 0; k <= 20; k++) hits.push([X(E.zL + (E.zT - E.zL) * k / 20), Y(-(E.xL + (E.xT - E.xL) * k / 20)), { root: true }, 2]);
+    }
     // Segmentstöße (durch Draufsicht und Stege)
     const yBottom = yc + gap;
     cx.setLineDash([5, 4]); cx.strokeStyle = 'rgba(200,210,224,.35)'; cx.lineWidth = 1;
     G.segs.slice(0, -1).forEach(q => { line([[q.z1, -xmin + gap * 0.2], [q.z1, yBottom]]); cx.stroke(); });
     cx.setLineDash([]);
     // Stelle des Schnitts aus dem Fenster „Schnitte in Spannweite“
-    if (secOpen()) {
+    if (secOpen() && !secRoot) {
       const zs = secAll ? [0].concat(G.segs.map(q => q.z1)) : [clamp(secZ, 0, G.L)];
       cx.strokeStyle = '#ff5c8a'; cx.lineWidth = 2;
       zs.forEach(z => { const f = frame(G, z); line([[z, -f.le + gap * 0.12], [z, -(f.le + f.c) - gap * 0.12]]); cx.stroke(); });
@@ -1034,7 +1117,7 @@
   }
 
   // ---------- Schnitte in Spannweitenrichtung: Profil an der Stelle z mit den Stegen ----------
-  let secPane = null, scv = null, sTop = null, sv = { s: 1, ox: 0, oy: 0 }, sFit = true, sDrag = null, secZ = 0, secAll = false, secDelta = 0;
+  let secPane = null, scv = null, sTop = null, sv = { s: 1, ox: 0, oy: 0 }, sFit = true, sDrag = null, secZ = 0, secAll = false, secDelta = 0, secRoot = false;
   const secOpen = () => isOpen() && bottom === 'sec';
   function buildSec() {
     secPane = document.createElement('div'); secPane.style.cssText = 'flex:1;display:none;flex-direction:column;min-width:0;min-height:0';
@@ -1057,18 +1140,27 @@
     const lab = t => { const l = document.createElement('span'); l.textContent = T(t); return l; };
     const num = document.createElement('input'); num.type = 'text'; num.inputMode = 'decimal'; num.style.width = '70px'; num.value = f1(secZ);
     const rg = document.createElement('input'); rg.type = 'range'; rg.min = 0; rg.max = G.L; rg.step = 1; rg.value = secZ; rg.style.cssText = 'flex:1;min-width:120px';
-    rg.oninput = () => { secZ = +rg.value; num.value = f1(secZ); draw(); drawSec(); };
-    num.onchange = () => { const v = parseFloat(num.value.replace(',', '.')); if (isNaN(v)) return; secZ = clamp(v, 0, G.L); num.value = f1(secZ); rg.value = secZ; draw(); drawSec(); };
+    const leaveRoot = () => { if (secRoot) { secRoot = false; sFit = true; if (rl) rl.remove(); } };
+    rg.oninput = () => { leaveRoot(); secZ = +rg.value; num.value = f1(secZ); draw(); drawSec(); };
+    num.onchange = () => { const v = parseFloat(num.value.replace(',', '.')); if (isNaN(v)) return; leaveRoot(); secZ = clamp(v, 0, G.L); num.value = f1(secZ); rg.value = secZ; draw(); drawSec(); };
     const js = document.createElement('select');
     const add = (v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; js.appendChild(o); };
     add('', T('Stelle wählen…')); add('0', T('Wurzel'));
+    if (App.StegWurzel) add('root', T('Wurzelrippe (wahre Form, für CAD)'));
     G.segs.slice(0, -1).forEach(q => add(q.z1, T('Segmentstoß') + ' ' + (q.k + 1) + '|' + (q.k + 2)));
     add(G.L, T('Außenende'));
-    js.onchange = () => { if (js.value === '') return; secZ = +js.value; js.value = ''; secAll = false; secBar(); draw(); drawSec(); };
+    js.onchange = () => {
+      if (js.value === '') return;
+      if (js.value === 'root') { js.value = ''; showRoot(); return; }
+      secZ = +js.value; js.value = ''; secAll = false; if (secRoot) { secRoot = false; sFit = true; } secBar(); draw(); drawSec();
+    };
     const all = document.createElement('label'); all.style.cssText = 'display:flex;gap:4px;align-items:center';
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = secAll; cb.onchange = () => { secAll = cb.checked; sFit = true; draw(); drawSec(); };
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = secAll; cb.onchange = () => { leaveRoot(); secAll = cb.checked; sFit = true; draw(); drawSec(); };
     all.append(cb, lab('alle Segmentstöße untereinander'));
+    const rl = secRoot ? lab('Ansicht: Wurzelrippe') : null;
+    if (rl) rl.style.cssText = 'color:#ff5c8a;font-weight:600';
     sTop.append(lab('mm ab Wurzel'), num, rg, js, all);
+    if (rl) sTop.append(rl);
     // Ruderausschlag und Dichtlippe
     const c = cfg(), brk = document.createElement('div'); brk.style.cssText = 'flex-basis:100%;height:0'; sTop.appendChild(brk);
     const dn = document.createElement('input'); dn.type = 'text'; dn.inputMode = 'decimal'; dn.style.width = '50px'; dn.value = secDelta;
@@ -1156,6 +1248,19 @@
     const g = scv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.fillStyle = '#10141a'; g.fillRect(0, 0, w, h);
     const G = geo(); if (!G) return;
+    // Wurzelrippe als wahre Form in ihrer (ggf. schrägen) Ebene, wie sie ins CAD geht
+    if (secRoot && App.StegWurzel) {
+      const R = App.StegWurzel.data(G, cfg());
+      if (R) {
+        if (sFit) {
+          const m = 40, xr = Math.max(1, R.ulen), hh = Math.max(1, R.ymax - R.ymin), sc = Math.max(1e-4, Math.min((w - 2 * m) / xr, (h - 2 * m - 60) / hh));
+          sv.s = sc; sv.ox = (w - xr * sc) / 2; sv.oy = (h - 60) / 2 + (R.ymax + R.ymin) / 2 * sc; sFit = false;
+        }
+        g.font = '12px sans-serif';
+        App.StegWurzel.draw(g, u => sv.ox + u * sv.s, v => sv.oy - v * sv.s, R, sv.s);
+        return;
+      }
+    }
     const D = allStege(G, cfg());
     const zs = secAll ? [0].concat(G.segs.map(q => q.z1)) : [secZ];
     // Profil je Stelle in Gesamt-x, auf die Nase bezogen, damit die Schnitte untereinander fluchten
@@ -1345,7 +1450,13 @@
   // Schnitt an die Stelle z (z. B. gewählte Stützrippe)
   function showSecAt(z) {
     if (!isOpen()) return;
-    const G = geo(); secZ = G ? clamp(z, 0, G.L) : z; secAll = false;
+    const G = geo(); secZ = G ? clamp(z, 0, G.L) : z; secAll = false; if (secRoot) { secRoot = false; sFit = true; }
+    if (bottom !== 'sec') setBottom('sec'); else { secBar(); draw(); drawSec(); }
+  }
+  // Schnitt in der Ebene der Wurzelrippe zeigen
+  function showRoot() {
+    if (!isOpen()) return;
+    secRoot = true; secAll = false; sFit = true;
     if (bottom !== 'sec') setBottom('sec'); else { secBar(); draw(); drawSec(); }
   }
   // Teil im Menü wählen (Klick in der 3D-Ansicht): Steg, Gurt, Steckung
@@ -1373,6 +1484,6 @@
   }
 
   App.stegHSidebar = stegHSidebar;
-  App.StegApi = { stkAll, showSecAt, focus, getSel: () => sel, capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp };
-  window.StegHoehen = { show, refresh, _test: { stkAll, stkData, autoShift, ruderAt, distX, distFits, fillCapJoints, capAt, capCenter, webOf, setBottom, fillJoints, geo, section, stegData, allStege, dxfText, cfg } };
+  App.StegApi = { stkAll, showSecAt, showRoot, focus, getSel: () => sel, capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, layS, layI, webOf, allStege, stkData, ruderAt, secOne, profOf, rootPlane, rootZLine, rootEnds, COL, f1, fl1, clamp };
+  window.StegHoehen = { show, refresh, _test: { stkAll, stkData, autoShift, ruderAt, distX, distFits, fillCapJoints, capAt, capCenter, webOf, setBottom, fillJoints, geo, section, stegData, allStege, dxfText, cfg, rootPlane, rootZLine, rootEnds, capRows, hingeRows, teRows, showRoot } };
 })();

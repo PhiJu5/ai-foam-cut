@@ -2340,13 +2340,18 @@
       let yCursor = 0;   // obere Kante des nächsten Rasterblocks (wächst nach unten)
 
       if (sel.profiles || sel.sheeting || sel.spars) {
-        const withSheet = sel.sheeting;   // Kernlinie auch ohne Umriss ladbar
+        const withSheet = sel.sheeting;   // Außenkontur (Bezug) auch ohne Rippen ladbar
         const withSpars = sel.spars;
         const baked = list.map((st, idx) => {
           const o = App.ribOutline(st), sh = App.ribSheet(st, idx);
           const xs = o.pts.map(p => p.x), ys = o.pts.map(p => p.y);
           const minx = Math.min.apply(null, xs), maxx = Math.max.apply(null, xs), miny = Math.min.apply(null, ys), maxy = Math.max.apply(null, ys);
-          const core = (withSheet && (sh.top || sh.bot)) ? App.ribInset(o.pts, sh.top, sh.bot, false, sh.dbox) : null;
+          // Rippe = IMMER die innere Kontur (bei Beplankung Profil minus Beplankung), mit dem
+          // Nasenabschnitt aus dem Kerndesign — wie STL und Fräse (App.ribPart). Die Außenkontur
+          // inkl. Beplankung kommt nur als Bezug auf einen eigenen Layer.
+          const part = App.ribPart(st, o, idx);
+          const ribN = part.body;
+          const refN = (withSheet && part.sheeted) ? part.outer : null;
           // Holmtaschen dieser Rippe (im Koordinatensystem der Rippe, wie im Rippendesigner).
           const spars = [];
           if (withSpars) (state.spars || []).forEach(sp => {
@@ -2357,9 +2362,9 @@
           });
           // Teilstücke wie im Rippendesigner (Halbrippen, an Stegen gestutzt)
           const pieces = App.ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
-            const outer = App.applyHalfSpec(o.pts, spec); if (!outer) return null;
-            const c = core ? App.applyHalfSpec(core, spec) : null;
-            return { outer, core: c, spars: spars.map(sp => App.applyHalfSpec(sp, spec)).filter(Boolean) };
+            const rib = App.applyHalfSpec(ribN, spec); if (!rib) return null;
+            const ref = refN ? App.applyHalfSpec(refN, spec) : null;
+            return { rib, ref, spars: spars.map(sp => App.applyHalfSpec(sp, spec)).filter(Boolean) };
           }).filter(Boolean);
           return { pieces, w: maxx - minx, h: maxy - miny, minx, miny };
         });
@@ -2369,8 +2374,8 @@
           const ox = (i % cols) * cellW - r.minx, oy = yCursor - Math.floor(i / cols) * cellH - r.miny;
           const tr = p => ({ x: p.x + ox, y: p.y + oy });
           r.pieces.forEach(pc => {
-            if (sel.profiles) put('Rippen', pc.outer.map(tr));
-            if (pc.core) put('Beplankung', pc.core.map(tr));
+            if (sel.profiles) put('Rippen', pc.rib.map(tr));
+            if (pc.ref) put('Außenkontur', pc.ref.map(tr));
             pc.spars.forEach(sp => put('Holme', sp.map(tr)));
           });
         });
@@ -2587,8 +2592,9 @@
       const rs = cadRibImportCfg();
       const gr = App.grp('Rippendesign', false, 'cad', { key: 'cadRib' });
       App.hint(gr.body, 'Inhalte ankreuzen, dann „Auswahl laden". Rippen und Nasenschablonen werden jeweils im Raster aufgereiht.');
-      App.boolRow(gr.body, 'Rippenprofile (Umriss)', () => rs.profiles, v => { rs.profiles = v; });
-      App.boolRow(gr.body, 'Beplankung (Kernlinie)', () => rs.sheeting, v => { rs.sheeting = v; });
+      App.boolRow(gr.body, 'Rippen (bei Beplankung innere Kontur)', () => rs.profiles, v => { rs.profiles = v; });
+      App.boolRow(gr.body, 'Außenkontur mit Beplankung (Bezug)', () => rs.sheeting, v => { rs.sheeting = v; },
+        'Die Rippen selbst sind bei Beplankung immer die innere Kontur (Profil minus Beplankung). Dieses Häkchen lädt zusätzlich die Außenkontur inkl. Beplankung als Bezug auf den Layer „Außenkontur".');
       App.boolRow(gr.body, 'Holme (Taschen)', () => rs.spars, v => { rs.spars = v; });
       App.boolRow(gr.body, 'Nasenschablonen', () => rs.templates, v => { rs.templates = v; });
       const brl = document.createElement('button'); brl.className = 'primary'; brl.textContent = T('Auswahl laden');

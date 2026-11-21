@@ -659,6 +659,7 @@
         <button data-view="core">Kerndesign</button>
         <button data-view="neg">Negativschalendesign</button>
         <button data-view="form">Formenbau</button>
+        <button data-view="vbf">Verbinderform</button>
         <button data-view="stegh">Steghöhen</button>
         <button data-view="servo">Flächenservos</button>
         <button data-view="lam">Laminierplan</button>
@@ -1100,6 +1101,22 @@
             <button id="formSide">➡ Seitenansicht</button>
             <button id="formFront">⬅ Vorderansicht</button>
             <span class="hint" style="align-self:center">Ziehen = drehen · Shift+Ziehen = schieben · Rad = Zoom · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="vbfView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Verbinderform — Pressform für den Tragflächenverbinder (STL / 3MF)</span>
+          <div class="simlegend" id="vbfInfo" style="left:10px;right:auto;top:10px;max-width:470px;z-index:3">Keine Form.</div>
+          <canvas id="cVbf" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="vbfExport" title="Alle Teile in Druckposition als STL bzw. 3MF speichern (mit Vorschau)">💾 STL / 3MF exportieren</button>
+            <button id="vbfIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="vbfTop">⬇ Draufsicht</button>
+            <button id="vbfSide">➡ Seitenansicht</button>
+            <button id="vbfFront">⬅ Vorderansicht</button>
+            <span class="hint" style="align-self:center">Ziehen = drehen · rechte Maustaste / Shift = schieben · Rad = Zoom · Doppelklick = zurück</span>
           </div>
         </div>
       </div>
@@ -1786,7 +1803,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261112xsp6"></script>
+<script src="i18n.js?v=20261121vbf3"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261022tr2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
@@ -1811,40 +1828,42 @@
 <script src="occt_wasm.js?v=20261018asm"></script>
 <script src="model3d.js?v=20261031ecken2"></script>
 <script src="model3d_gcode.js?v=20261025wn"></script>
-<script src="core.js?v=20261112neil2"></script>
-<script src="cad.js?v=20261112dbox"></script>
+<script src="core.js?v=20261121negov"></script>
+<script src="cad.js?v=20261114nrib2"></script>
 <script src="cadpdf.js?v=20261023pv2"></script>
 <script src="gcode.js?v=20261112neil"></script>
-<script src="spars.js?v=20261112xsp6"></script>
-<script src="ribs.js?v=20261112dbox"></script>
+<script src="spars.js?v=20261114xhk"></script>
+<script src="ribs.js?v=20261114nrib2"></script>
 <script src="dxfshapes.js?v=20261112neil2"></script>
 <script src="wingimport.js?v=20261010xflm"></script>
 <script src="filesys.js?v=20261112neil"></script>
 <script src="stlpreview.js?v=20261027mf3"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
 <script src="gmfc.js?v=20261101rumpf1"></script>
-<script src="render.js?v=20261112neil"></script>
+<script src="render.js?v=20261121negov"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261112xsp6"></script>
+<script src="sidebar.js?v=20261121negov"></script>
 <script src="pathpreview.js?v=20261107a"></script>
 <script src="gcodegen.js?v=20261112xsp6"></script>
 <script src="cutpanel.js?v=20261107tbl"></script>
-<script src="stege.js?v=20261029nh"></script>
+<script src="stege.js?v=20261121nloop"></script>
 <script src="kernteile.js?v=20261025wn"></script>
 <script src="negholme.js?v=20261112neil2"></script>
-<script src="nasenleiste.js?v=20261112nab"></script>
+<script src="nasenleiste.js?v=20261114nrib2"></script>
 <script src="neglatte.js?v=20261107a"></script>
 <script src="neg3d.js?v=20261105n3d1"></script>
-<script src="stegh.js?v=20261108spl1"></script>
+<script src="stegh.js?v=20261119wrip4"></script>
 <script src="bibliothek.js?v=20261107a"></script>
 <script src="bauanleitung.js?v=20261107c"></script>
 <script src="laminat.js?v=20261107a"></script>
 <script src="drehachse.js?v=20261107hms"></script>
-<script src="stuetzrippen.js?v=20261108spl1"></script>
-<script src="servos.js?v=20261108spl1"></script>
+<script src="stuetzrippen.js?v=20261119wrip6"></script>
+<script src="wurzelrippe.js?v=20261119wrip6"></script>
+<script src="servos.js?v=20261119trim"></script>
 <script src="pc2wing.js?v=20261010tol"></script>
 <script src="stepexport.js?v=20261010prof"></script>
 <script src="formenbau.js?v=20261027vm2"></script>
+<script src="verbinder.js?v=20261121vbf3"></script>
 <script src="stlbody.js?v=20261101rumpf1"></script>
 <script src="rumpfpro.js?v=20261101rumpf1"></script>
 <script src="rproSpanten.js?v=20261101rumpf1"></script>
@@ -1856,7 +1875,7 @@
 <script src="meshedit.js?v=20261101rumpf1"></script>
 <script src="meshsection.js?v=20261101rumpf1"></script>
 <script src="cockpit.js?v=20261101rumpf1"></script>
-<script src="fraese.js?v=20261101rst1"></script>
+<script src="fraese.js?v=20261114nrib2"></script>
 <script src="schrift_fonts.js?v=20261004gerade2"></script>
 <script src="schrift.js?v=20261004gerade2"></script>
 <script src="ausschnitt.js?v=20261101rumpf1"></script>
@@ -1874,15 +1893,15 @@
 <script src="foilpolar.js?v=20261101b"></script>
 <script src="kfm.js?v=20261008align"></script>
 <script src="foildb.js?v=20261101a"></script>
-<script src="compute.js?v=20261112dbox"></script>
-<script src="wings.js?v=20261112dbox"></script>
+<script src="compute.js?v=20261114nrib2"></script>
+<script src="wings.js?v=20261114nrib2"></script>
 <script src="overview_bg.js?v=20261004gerade2"></script>
 <script src="overview.js?v=20261023mf"></script>
 <script src="ptedit.js?v=20261011dat"></script>
 <script src="profedit.js?v=20261110name"></script>
 <script src="tabmenu.js?v=20261019tm1"></script>
-<script src="undo.js?v=20261107rot"></script>
-<script src="app.js?v=20261107rot"></script>
+<script src="undo.js?v=20261119vbf1"></script>
+<script src="app.js?v=20261119vbf1"></script>
 </body>
 </html>
 

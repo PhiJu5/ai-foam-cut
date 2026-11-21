@@ -317,6 +317,11 @@
       // Randvorschnitte mit Freifahren (s. o.) | 'direct' = Block vorne/hinten genau auf
       // dem konstanten Überstand negShellEdge, EIN durchgehender Zug ohne Vorschnitte.
       negCutPath: 'precut',
+      // Schnittverlängerung (precut): 'wing' = negOvF/negOvR für die Wurzel des 1. Segments, alle
+      // Rippen proportional | 'seg' = je Segment an der Innenrippe (seg.negOvF/negOvR) | 'auto' =
+      // negOvAutoF/R mm über den Blockschnitt an der kleinsten Rippe, Rest proportional —
+      // je Segment (negOvAutoScope 'seg') oder über die ganze Tragfläche ('wing'). Siehe negOvAt (render.js).
+      negOvMode: 'wing', negOvAutoScope: 'seg', negOvAutoF: 5, negOvAutoR: 5,
       // Kern in Stege zerlegen (stege.js, nur mit negCore): Stege im selben Schnitt
       // wie die Schalen, um negStegeGap auseinandergerückt; je Steg {end (% Sehne),
       // sleeve (Glasschlauch), capTop/capBot (Holmgurt)} in negStegeList.

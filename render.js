@@ -1584,8 +1584,10 @@
     ctx.lineWidth = 1.8;
     // Taschen (Gurt ohne Steg) in die gezeichnete Kontur einrechnen: das Profil über
     // der Tasche wird getrimmt und durch Wand→Boden→Wand ersetzt = fertiges Werkstück.
-    const dispRoot = profileWithPockets(rootPts, idx, 'root');
-    const dispTip = profileWithPockets(tipPts, idx, 'tip');
+    // Mit Beplankung liegen die Taschen im KERN (unter der Beplankung): das Außenprofil
+    // bleibt dann ganz, die Taschen stecken in der Kernlinie (siehe unten).
+    const dispRoot = sheetOn ? rootPts : profileWithPockets(rootPts, idx, 'root');
+    const dispTip = sheetOn ? tipPts : profileWithPockets(tipPts, idx, 'tip');
     ctx.strokeStyle = COL_PROF; ctx.setLineDash(dashFor('profInner', []));
     if (oR) { poly(ctx, V, shift(dispRoot, dyR), true); ctx.stroke(); }
     ctx.strokeStyle = COL_TIP; ctx.setLineDash(dashFor('profOuter', [6, 4]));
@@ -1647,8 +1649,8 @@
     // Kernkontur (nach Beplankungsabzug)
     if (state.cfg.showCore && sheetOn && !stacked) {
       ctx.strokeStyle = App.PAL.core; ctx.lineWidth = 1.2; ctx.setLineDash(dashFor('core', [4, 3]));
-      if (shR) { poly(ctx, V, shift(pr.rootCore, dyR), true); ctx.stroke(); }
-      if (shT) { poly(ctx, V, shift(pr.tipCore, dyT), true); ctx.stroke(); }
+      if (shR) { poly(ctx, V, shift(profileWithPockets(rootPts, idx, 'root', pr.rootCore), dyR), true); ctx.stroke(); }
+      if (shT) { poly(ctx, V, shift(profileWithPockets(tipPts, idx, 'tip', pr.tipCore), dyT), true); ctx.stroke(); }
       ctx.setLineDash([]);
     }
     // Schnittspur inkl. kerf (vollständiger Drahtweg inkl. Verlängerungen).
@@ -2252,7 +2254,7 @@
         // erzeugt an der Nasen-Schlaufe einen Haken (Fehler an der Nasen-
         // verlängerung). WIE IM KERNDESIGN: beide Besuche werden nach dem Versatz
         // auf GENAU EINEN Punkt (Miter der beiden Kern-Oberflächenkanten) gezogen.
-        noseApex.push({ apexUp, apexLo,
+        noseApex.push({ apexUp, apexLo, front: [apexUp + 2, apexUp + 3],   // front = N2/N3 (Stirnseite an xBL)
           prev: C[iLEc > 0 ? iLEc - 1 : 0], nose: nose,
           next: C[iLEc < C.length - 1 ? iLEc + 1 : C.length - 1] });
       });
@@ -2313,6 +2315,7 @@
     path.push({ x: xBR, y: yBot });                   // horizontal (Blockunterkante) — letzter Schnitt
     return {
       path, noseApex, supNose, coreRange, stegRanges, cy: blockCy, ownCy, geom, xL, xT, xBL, xBR, yBot, yTop, s2, yLE, yTE, xTE, teSlope,
+      frontIdx: 2,   // Bahnpunkt (xBL, yLE+s2): Ende der Blockvorderkante oben (Station für die Nasen-Schlaufe)
       block: rect(xBL, yBot, xBR, yTop)
     };
   }
@@ -2336,6 +2339,24 @@
    * kerf-Versatz auseinandergezogen) auf EINEN Miterpunkt ziehen — analog zur
    * Nasen-X-Schlaufe im Kerndesign. Mutiert rp/tp in-place; Punktzahl bleibt
    * erhalten -> Türme synchron. */
+  /* Stirnseite der Kern-Nasen-Schlaufe (N2/N3, Nennlage xBL) nach dem Abbrand-
+   * Versatz auf die Station der Blockvorderkante ziehen. Der Versatz schiebt die
+   * Blockvorderkante um ½ Abbrand nach VORNE (Abfall liegt davor), die Schlaufe
+   * aber um ½ Abbrand nach HINTEN (ihr Inneres ist der Abfall) — die Drahtlinien
+   * lägen sonst einen ganzen Abbrand auseinander und die Schlaufe würde die
+   * Vorderkante nur gerade berühren. Ohne Schalen („Nur Stege schneiden") wird
+   * an xBL gespiegelt (= ½ Abbrand vor der Nennkante). Nur verlängern, nie kürzen;
+   * Punktzahl bleibt -> Türme synchron. */
+  function negNoseLoopToFront(P, sh, ap) {
+    if (!P || !sh || !ap || sh.xBL == null) return;
+    const idx = ap.front || [ap.apexUp + 2, ap.apexUp + 3];
+    const F = sh.frontIdx != null ? P[sh.frontIdx] : null;
+    idx.forEach(i => {
+      if (!P[i]) return;
+      const x = F ? F.x : 2 * sh.xBL - P[i].x;
+      if (x < P[i].x) P[i] = Object.assign({}, P[i], { x });
+    });
+  }
   function negSnapNoseApex(rp, tp, root, tip, kg) {
     const gAt = (g, i) => Array.isArray(g) ? (g[i] || 0) : g;
     (root.noseApex || []).forEach((ap, k) => {
@@ -2346,6 +2367,8 @@
       if (rp[ap.apexLo]) rp[ap.apexLo] = { x: sR.x, y: sR.y, k: rp[ap.apexLo].k };
       if (tp[tap.apexUp]) tp[tap.apexUp] = { x: sT.x, y: sT.y, k: tp[tap.apexUp].k };
       if (tp[tap.apexLo]) tp[tap.apexLo] = { x: sT.x, y: sT.y, k: tp[tap.apexLo].k };
+      negNoseLoopToFront(rp, root, ap);
+      negNoseLoopToFront(tp, tip, tap);
     });
     // Stützstoff-Nasenecken: den kerf-Haken am Übergang Fläche→Horizontale glätten.
     // Der ~90°-Eckpunkt (corner) und der Blockvorderkanten-Punkt (horiz) werden auf
@@ -2580,18 +2603,74 @@
   }
   // Referenz-Sehne für die proportionalen Blocküberstände = Wurzel des 1. Segments.
   function negRefChord() { return (App.wing && App.wing.cuts[0] && App.wing.cuts[0].root.chord) || 1; }
-  /* Geom je Rippe: Blocküberstände (ovF/ovR) sind für die Wurzel des 1. Segments
-   * vorgegeben und skalieren PROPORTIONAL zur Profillänge. Dadurch sind Wurzel-
+  /* Schnittverlängerung vorne/hinten (Schneideweg „precut") — cfg.negOvMode je Tragfläche:
+   *   'wing' (Standard, bisher): negOvF/negOvR gelten für die Wurzel des 1. Segments,
+   *          ALLE Rippen der Tragfläche proportional zur Sehne.
+   *   'seg'  : Vorgabe je Segment an seiner Innenrippe (seg.negOvF/negOvR), die
+   *          Außenrippe proportional zur Sehne dieses Segments.
+   *   'auto' : x mm (negOvAutoF/negOvAutoR) über den Blockschnitt (= Schalenrand-
+   *          Vorschnitt negShellEdge, bei 0 die Profilnase/Endleiste) an der KLEINSTEN
+   *          Rippe, die übrigen proportional — je Segment (negOvAutoScope 'seg') oder
+   *          über die ganze Tragfläche ('wing'). Kleinste statt „Außen"-Rippe, damit
+   *          auch bei nach außen wachsender Sehne keine Rippe unter dem Blockschnitt bleibt.
+   * Proportional bleibt es in jedem Fall INNERHALB eines Segments -> konstante Draht-
+   * geschwindigkeit, die Sehnenverhältnis-Abbrandkompensation bleibt exakt. */
+  function negOvMode() { const m = state.cfg.negOvMode; return m === 'seg' || m === 'auto' ? m : 'wing'; }
+  function negOvCuts() {
+    const cuts = (App.wing && App.wing.cuts) || [];
+    return cuts.slice(0, Math.max(1, Math.min(cuts.length, state.segments.length || cuts.length)));
+  }
+  const negOvNum = v => v != null && v !== '' && isFinite(+v);
+  // Vorgabe je Segment (Innenrippe); ohne eigenen Wert = bisheriger Wert der ganzen Tragfläche.
+  function negOvSegVals(k) {
+    const cuts = negOvCuts(), cut = cuts[Math.max(0, Math.min(k, cuts.length - 1))];
+    const sg = state.segments[k] || {}, s = cut ? (cut.root.chord || 0) / negRefChord() : 1;
+    return {
+      f: negOvNum(sg.negOvF) ? Math.max(0, +sg.negOvF) : Math.max(0, +state.cfg.negOvF || 0) * s,
+      r: negOvNum(sg.negOvR) ? Math.max(0, +sg.negOvR) : Math.max(0, +state.cfg.negOvR || 0) * s
+    };
+  }
+  // Wirksame Schnittverlängerung {f, r} (mm ab Nase/Endleiste) einer Rippe mit Sehne `chord`
+  // in Segment `idx`. geom.ovF/ovR = Vorgabe der ganzen Tragfläche (Modus 'wing').
+  function negOvAt(geom, idx, chord) {
+    const c = state.cfg, cuts = negOvCuts(), m = negOvMode();
+    const k = Math.max(0, Math.min(idx != null ? idx : App.activeIdx(), cuts.length - 1)), cut = cuts[k];
+    chord = +chord || 0;
+    if (m === 'auto' && cut) {
+      const se = Math.max(0, +c.negShellEdge || 0);
+      const xF = negOvNum(c.negOvAutoF) ? Math.max(0, +c.negOvAutoF) : 5, xR = negOvNum(c.negOvAutoR) ? Math.max(0, +c.negOvAutoR) : 5;
+      let ref = Infinity;
+      if (c.negOvAutoScope === 'wing') cuts.forEach(ct => { ref = Math.min(ref, ct.root.chord || Infinity, ct.tip.chord || Infinity); });
+      else ref = Math.min(cut.root.chord || Infinity, cut.tip.chord || Infinity);
+      const s = isFinite(ref) && ref > 0 ? chord / ref : 1;
+      return { f: (se + xF) * s, r: (se + xR) * s };
+    }
+    if (m === 'seg' && cut) {
+      const v = negOvSegVals(k), s = cut.root.chord ? chord / cut.root.chord : 1;
+      return { f: v.f * s, r: v.r * s };
+    }
+    const s = chord / negRefChord();
+    return { f: (+geom.ovF || 0) * s, r: (+geom.ovR || 0) * s };
+  }
+  // Wirksame Werte innen/außen eines Segments (Seitenleiste/Legende).
+  function negOvSeg(k) {
+    const cuts = negOvCuts(), cut = cuts[Math.max(0, Math.min(k, cuts.length - 1))];
+    if (!cut) return null;
+    const g = { ovF: state.cfg.negOvF, ovR: state.cfg.negOvR };
+    return { root: negOvAt(g, k, cut.root.chord), tip: negOvAt(g, k, cut.tip.chord) };
+  }
+  /* Geom je Rippe: Blocküberstände (ovF/ovR) aus negOvAt — proportional zur Profillänge
+   * (je nach Modus über die ganze Tragfläche oder je Segment). Dadurch sind Wurzel-
    * und Randquerschnitt geometrisch ähnlich -> die Draht-Geschwindigkeit bleibt
    * über die Spannweite konstant und die einfache (Sehnenverhältnis-)kerf-
    * Kompensation ist exakt. */
   function negRibGeom(geom, blockCy, cores, chord, supOffsets, stege, at) {
-    const s = (chord || 0) / negRefChord();
+    const ov = negOvAt(geom, at && at.idx, chord);
     // Schneideweg „ein Zug": Block vorne/hinten = KONSTANTER Schalenüberstand je Rippe.
     const se = negDirectPath() ? Math.max(0, state.cfg.negShellEdge || 0) : null;
     const base = {
       blockCy, cores: cores || [], supOffsets: supOffsets || [], noseExt: state.cfg.negNoseExt, teStyle: state.cfg.negTeStyle || 'horizontal', stege: stege || null, stegeOnly: !!state.cfg.negStegeOnly,
-      ovF: se != null ? se : (geom.ovF || 0) * s, ovR: se != null ? se : (geom.ovR || 0) * s,
+      ovF: se != null ? se : ov.f, ovR: se != null ? se : ov.r,
       edgeF: state.cfg.negShellEdge || 0, edgeR: state.cfg.negShellEdge || 0
     };
     // Ausrichtung an gerader Latte (neglatte.js): Schalenrand je Rippe auf der Latte,
@@ -3108,8 +3187,16 @@
     else if (latte) leg.push(['#ffb454', T('Ausrichtung an gerader Latte: Schalenrand innen vorne ') + root.geom.edgeF.toFixed(1)
       + T(' / hinten ') + root.geom.edgeR.toFixed(1) + T(' · außen vorne ') + tip.geom.edgeF.toFixed(1) + T(' / hinten ') + tip.geom.edgeR.toFixed(1)
       + T(' mm · Schnittverlängerung ') + (root.geom.ovF - root.geom.edgeF).toFixed(1) + T(' mm darüber hinaus')]);
-    else leg.push(['#ffb454', T('Überstand Wurzel vorne ') + Math.round(root.xL - root.xBL) + T(' / hinten ') + Math.round(root.xBR - root.xT)
-      + T(' mm · proportional zur Sehne (Vorgabe ') + Math.round(geom.ovF) + '/' + Math.round(geom.ovR) + T(' für 1. Seg.)')]);
+    else {
+      const f1 = v => String(Math.round(v * 10) / 10), om = negOvMode();
+      const how = om === 'auto'
+        ? T(' mm · automatisch ') + f1(state.cfg.negOvAutoF != null ? state.cfg.negOvAutoF : 5) + '/' + f1(state.cfg.negOvAutoR != null ? state.cfg.negOvAutoR : 5)
+          + T(' mm über den Blockschnitt an der kleinsten Rippe ') + (state.cfg.negOvAutoScope === 'wing' ? T('der Tragfläche') : T('des Segments')) + T(', sonst proportional')
+        : om === 'seg' ? T(' mm · Vorgabe je Segment, außen proportional zur Sehne')
+        : T(' mm · proportional zur Sehne (Vorgabe ') + Math.round(geom.ovF) + '/' + Math.round(geom.ovR) + T(' für 1. Seg.)');
+      leg.push(['#ffb454', T('Schnittverlängerung innen vorne ') + f1(root.xL - root.xBL) + T(' / hinten ') + f1(root.xBR - root.xT)
+        + T(' · außen vorne ') + f1(tip.xL - tip.xBL) + T(' / hinten ') + f1(tip.xBR - tip.xT) + how]);
+    }
     if (geom.split > 0.01) leg.push(['#57d38c', T('Ober-/Unterseite ') + Math.round(geom.split) + T(' mm auseinandergezogen')]);
     if (Math.abs(vRise) > 0.05) leg.push(['#8b98a8', T('V-Form berücksichtigt: Außenprofil ') + vRise.toFixed(1) + T(' mm höher als Wurzel')]);
     if ((se > 0 || latte) && !direct) {
@@ -3204,7 +3291,7 @@
   Object.assign(App, { applyNegSplit, setupNegSplit, setupNegElevPick });
   Object.assign(App, { exportSweepCmpDxf, fitCanvas, grid, hexA, kerfBand, kerfColor, kerfColorbar, kerfLeg, kerfTrueSet, makeDraggable, makeSplitDraggable });
   Object.assign(App, { makeView, nav, negBaseRibPts, negBlockCy, negChordMidY, negCoreContour, negDeloopSync, negKerf, negMatBlock });
-  Object.assign(App, { negDirectPath, negEdgeCuts, negNoseMiter, negParallelOffset, negRefChord, negRibGeom, negRibPts, negShell, negShellOffset, negSnapNoseApex });
+  Object.assign(App, { negDirectPath, negEdgeCuts, negNoseMiter, negOvMode, negOvSeg, negOvSegVals, negParallelOffset, negRefChord, negRibGeom, negRibPts, negShell, negShellOffset, negSnapNoseApex });
   Object.assign(App, { negSpeedGaps, negSupportOffsets, niceStep, openSweepCmp, pointInPoly, poly, polyKerf, profNavKey });
   Object.assign(App, { rect, render, renderMaterial, renderNeg, renderProfEdit, renderSweepCmp });
   Object.assign(App, { renderSeg3D, renderSeg3DWin, seg3dOpen, seg3dClose, seg3dIsOpen, seg3dWire, wingSeg3DList, seg3dSnapAxis, seg3dGizmoHit, seg3dPickModel, seg3dCam: () => seg3d });

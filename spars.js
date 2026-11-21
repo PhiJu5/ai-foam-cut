@@ -81,12 +81,13 @@
     const ckP = App.cutKerf(cut.root.chord, cut.tip.chord);
     const ki = pr.kerfInfo || {};
     const kerfHalf = { root: (ki.root != null ? ki.root : ckP.root) / 2, tip: (ki.tip != null ? ki.tip : ckP.tip) / 2 };
+    const pkCores = pockets.length ? { root: pr.rootCore || sparCoreOf(cut.root.pts, segIdx, 'root'), tip: pr.tipCore || sparCoreOf(cut.tip.pts, segIdx, 'tip') } : null;
     pockets.forEach(sp => {
       try {
         const F = !!(cut.root.pts && cut.root.pts.flipY), spP = pkPhys(sp, F);
         const sides = pkSides(sp, F);
         sides.forEach(side => {
-          const res = carvePocketSide(root, tip, spP, cut, segIdx, side, kerfHalf);
+          const res = carvePocketSide(root, tip, spP, cut, segIdx, side, kerfHalf, pkCores);
           if (res) { root = res.root; tip = res.tip; }
         });
       } catch (e) { /* einzelne Tasche überspringen */ }
@@ -196,14 +197,18 @@
                                 : (sp.pkDepthTop != null ? sp.pkDepthTop : sp.pkDepth);
     return d != null ? d : 8;
   }
-  function pocketGeom(pts, sp, segIdx, which, fromLE, side) {
+  // core (optional) = Kernkontur nach Beplankungsabzug: Lage und Breite bleiben am
+  // Profil pts, die Tiefe zählt aber ab der Kern-Oberfläche (dort sitzt der Gurt unter
+  // der Beplankung; der Schnitt versetzt ohnehin die Kernbahn) -> Dicken-Grenzen am Kern.
+  function pocketGeom(pts, sp, segIdx, which, fromLE, side, core) {
     const xs = pts.map(p => p.x), leX = Math.min.apply(null, xs), teX = Math.max.apply(null, xs), chord = (teX - leX) || 1;
     const fl = fromLE != null ? fromLE : sparFromLE(sp, segIdx, which);
     const dLE = fl != null ? fl : (sp.pos || 0) / 100 * chord;   // Tasche: immer proportional
     const xc = leX + dLE;
     const surf = surfaceAtX(pts, xc); if (!surf) return null;
-    const thick = surf.top - surf.bot;
-    const u = sp.sizeMode === 'mm' ? 1 : thick / 100;
+    const u = sp.sizeMode === 'mm' ? 1 : (surf.top - surf.bot) / 100;
+    const tp = core && core.length > 2 ? core : pts, sC = surfaceAtX(tp, xc);
+    const thick = sC ? sC.top - sC.bot : surf.top - surf.bot;
     const sz = sparSize(sp, which);
     const halfW = Math.max(0.1, (sz.w || 0) * u) / 2;
     // Tiefe senkrecht zur Kontur; auf ~85 % der lokalen Profildicke begrenzt, damit
@@ -213,7 +218,7 @@
     // vorne durch die Gegenseite stoßen: Rückmeldung Neil, Gurt nahe Nasenleiste).
     let thickMin = thick;
     for (let k = 0; k <= 8; k++) {
-      const sx = surfaceAtX(pts, xc - halfW + 2 * halfW * k / 8);
+      const sx = surfaceAtX(tp, xc - halfW + 2 * halfW * k / 8);
       thickMin = Math.min(thickMin, sx ? sx.top - sx.bot : 0);
     }
     const depth = Math.max(0.1, Math.min(pocketDepth(sp, side), Math.max(0.1, thickMin) * 0.85));
@@ -407,13 +412,16 @@
   // Profilkontur mit ALLEN zutreffenden Taschen verschmelzen (fertiges Werkstück).
   // pocketGeom aus der ORIGINAL-Kontur (korrekte Tiefe/Dicke), Einrechnen fortlaufend
   // in die (getrimmte) Schleife. Ohne Taschen unverändert.
-  function profileWithPockets(pts, segIdx, which) {
-    let loop = pts;
+  // core (Beplankung): die Taschen sitzen im Kern -> in die KERNkontur einrechnen
+  // (Tiefe ab Kern-Oberfläche, wie der Schnitt); Lage/Breite weiter am Profil.
+  function profileWithPockets(pts, segIdx, which, core) {
+    const cs = core && core.length > 2 ? core : null;
+    let loop = cs || pts;
     (state.spars || []).forEach(sp => {
       if (!isPocket(sp) || !sparAppliesTo(sp, segIdx)) return;
       const fl = sparFromLE(sp, segIdx, which);
       const sides = pkSides(sp, pts && pts.flipY);
-      sides.forEach(side => { const g = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, fl, side); if (!g) return; const m = pocketMergedLoop(loop, g, side, sp.pkFlat); if (m) loop = m.loop; });
+      sides.forEach(side => { const g = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, fl, side, cs); if (!g) return; const m = pocketMergedLoop(loop, g, side, sp.pkFlat); if (m) loop = m.loop; });
     });
     return loop;
   }
@@ -435,10 +443,12 @@
   // Oberflächenstück über der Tasche wird durch Wand→Boden→Wand ersetzt. Wurzel
   // und Rand werden am GLEICHEN Index mit gleich vielen Punkten gespleißt -> die
   // Türme bleiben synchron. Rückgabe { root, tip } oder null (Seite überspringen).
-  function carvePocketSide(root, tip, sp, cut, segIdx, side, kerfHalf) {
+  // cores = { root, tip } Kernkonturen bei Beplankung (Tiefen-Grenze am Kern; die
+  // Tiefe selbst zählt ohnehin ab der Kernbahn, die hier versetzt wird).
+  function carvePocketSide(root, tip, sp, cut, segIdx, side, kerfHalf, cores) {
     const M = 18;
-    const gR = pocketGeom(cut.root.pts, sp, segIdx, 'root', null, side);
-    const gT = pocketGeom(cut.tip.pts, sp, segIdx, 'tip', null, side);
+    const gR = pocketGeom(cut.root.pts, sp, segIdx, 'root', null, side, cores && cores.root);
+    const gT = pocketGeom(cut.tip.pts, sp, segIdx, 'tip', null, side, cores && cores.tip);
     if (!gR || !gT) return null;
     const top = side === 'top';
     // Wand-Abbrand je Rippe (halber Kerf der Profilbahn): Mündungen und Bodengrenzen
@@ -522,32 +532,51 @@
   // Profilseite bis zum vorderen Bein, schräg hinein bis zur Spitze (Mitte minus
   // halber Steg), schräg wieder hinaus und auf dem Profil weiter. Kein Dreieck mit
   // Basis -> der Keil fällt heraus. Abbrand: Beine um k in den Keil versetzt.
+  // Drahtbahn EINES X-Spalt-Keils als offene Beinkette Basisecke → Spitze(n) →
+  // Basisecke (ohne Basis-Kante). N0 = Nennkeil (hingeNotchPoly), k = halber
+  // Abbrand, pts = Profil (für die Profilmitte). Auch für die Abbrand-Vorschau.
+  function xLegChain(N0, k, pts) {
+    const n = N0.length;
+    // Basis-Kante = Kante mit dem größten Abstand zur Profilmitte -> weglassen.
+    // Am NENN-Keil bestimmen: am versetzten Keil kippt die Wahl, sobald der Draht
+    // breiter als der Keil ist (der Versatz klappt dann um, siehe unten).
+    const farY = (a, b) => { const s0 = surfaceAtX(pts, (a.x + b.x) / 2); const mid = s0 ? (s0.top + s0.bot) / 2 : 0; return Math.abs((a.y + b.y) / 2 - mid); };
+    let bi = 0, bd = -1;
+    for (let i = 0; i < n; i++) { const d = farY(N0[i], N0[(i + 1) % n]); if (d > bd) { bd = d; bi = i; } }
+    const P = k ? offsetInward(N0.map(p => ({ x: p.x, y: p.y })), k) : N0.map(p => ({ x: p.x, y: p.y }));
+    const chain = []; for (let j = 1; j <= n; j++) chain.push(P[(bi + j) % n]);   // Basisecke → … → Basisecke
+    if (!k) return chain;
+    // Spitze: der Parallel-Versatz schiebt sie bei spitzen Winkeln um k/sin(α)
+    // weg (15° -> ~3,9·k) — der runde Draht schneidet die Spitze aber nur um k
+    // aus. Daher Drahtspitze = Nennspitze um k Richtung Öffnung (sonst bleibt in
+    // der Mitte viel zu viel stehen, die Kerben werden zu flach).
+    const by = (N0[bi].y + N0[(bi + 1) % n].y) / 2;   // Basis-Höhe
+    // chain[m] = P[(bi+1+m)%n]; m = 0 und n-1 sind die Basisecken (bleiben Offset).
+    for (let m = 1; m < n - 1; m++) {
+      const q = N0[(bi + 1 + m) % n], s = by > q.y ? 1 : -1;
+      chain[m] = { x: q.x, y: q.y + s * k };
+    }
+    // Draht breiter als der Keil (k > Inkreisradius, typisch: schmale Außenrippe
+    // mit Abbrand-Verhältnis): der Versatz klappt um, die Basisecken tauschen die
+    // Seiten. Die Beine kreuzten sich dann und die Strahlen in carveHingeV liefen
+    // quer durchs Profil (Außenbahn verdreht). Stattdessen fährt der Draht auf der
+    // Keil-Mittellinie gerade hinein und zurück — schmaler als der Draht geht nicht.
+    const b0 = N0[(bi + 1) % n], b1 = N0[bi], o0 = chain[0], o1 = chain[n - 1];
+    if ((b1.x - b0.x) * (o1.x - o0.x) + (b1.y - b0.y) * (o1.y - o0.y) <= 0) {
+      let ax = 0, ay = 0; for (let m = 1; m < n - 1; m++) { ax += N0[(bi + 1 + m) % n].x; ay += N0[(bi + 1 + m) % n].y; }
+      ax /= (n - 2); ay /= (n - 2);   // Nennspitze (Mitte der kurzen Seite)
+      const vx = (b0.x + b1.x) / 2 - ax, vy = (b0.y + b1.y) / 2 - ay;   // Spitze -> Basismitte
+      chain[0] = { x: chain[1].x + vx, y: chain[1].y + vy };
+      chain[n - 1] = { x: chain[n - 2].x + vx, y: chain[n - 2].y + vy };
+    }
+    return chain;
+  }
   function carveHingeV(root, tip, sp, cut, segIdx, kerfHalf) {
     const M = 12;
     const legs = (which, pts, k) => {
       const g = sparOnProfile(sp, pts, pts, sparFromLE(sp, segIdx, which), null, which, null);
       if (!g || !g.poly || g.poly.length < 3) return null;
-      const P = k ? offsetInward(g.poly.map(p => ({ x: p.x, y: p.y })), k) : g.poly.map(p => ({ x: p.x, y: p.y }));
-      // Basis-Kante (am weitesten von der Spitze) weglassen -> offene Beinkette.
-      // Basis-Kante = Kante mit dem größten Abstand zur Profilmitte -> weglassen.
-      const n = P.length;
-      const farY = (a, b) => { const s0 = surfaceAtX(pts, (a.x + b.x) / 2); const mid = s0 ? (s0.top + s0.bot) / 2 : 0; return Math.abs((a.y + b.y) / 2 - mid); };
-      let bi = 0, bd = -1;
-      for (let i = 0; i < n; i++) { const d = farY(P[i], P[(i + 1) % n]); if (d > bd) { bd = d; bi = i; } }
-      const chain = []; for (let j = 1; j <= n; j++) chain.push(P[(bi + j) % n]);   // Basisecke → … → Basisecke
-      // Spitze: der Parallel-Versatz schiebt sie bei spitzen Winkeln um k/sin(α)
-      // weg (15° -> ~3,9·k) — der runde Draht schneidet die Spitze aber nur um k
-      // aus. Daher Drahtspitze = Nennspitze um k Richtung Öffnung (sonst bleibt in
-      // der Mitte viel zu viel stehen, die Kerben werden zu flach).
-      if (k) {
-        const N0 = g.poly, by = (N0[bi].y + N0[(bi + 1) % n].y) / 2;   // Basis-Höhe
-        // chain[m] = P[(bi+1+m)%n]; m = 0 und n-1 sind die Basisecken (bleiben Offset).
-        for (let m = 1; m < n - 1; m++) {
-          const q = N0[(bi + 1 + m) % n], s = by > q.y ? 1 : -1;
-          chain[m] = { x: q.x, y: q.y + s * k };
-        }
-      }
-      return chain;
+      return xLegChain(g.poly, k, pts);
     };
     const rayHit = (path, from, to) => {   // Strahl from->to (verlängert) mit der Bahn; nächster Treffer jenseits from
       const dx = to.x - from.x, dy = to.y - from.y; let best = null;
@@ -1177,18 +1206,22 @@
     const chord = (teX - leX) || 1;
     const dLE = fromLE != null ? fromLE : (sp.posMode === 'mm' ? (sp.pos || 0) : (sp.pos || 0) / 100 * chord);
     const xc0 = leX + dLE; let xc = xc0;
-    // Ab hier Kern statt Originalprofil (Taschen bleiben am Profil: dort wird die
-    // Oberfläche selbst ersetzt, Tiefe ist ab Oberfläche gemessen).
-    if (core && core.length > 2 && !isPocket(sp)) { pts = core; if (!surfPts) surfPts = core; }
+    // Ab hier Kern statt Originalprofil (Taschen: Lage/Breite am Profil, Umriss und
+    // Tiefe aber ab der Kern-Oberfläche — siehe unten).
+    const pkCore = core && core.length > 2 ? core : null;
+    if (pkCore && !isPocket(sp)) { pts = core; if (!surfPts) surfPts = core; }
     const surf = surfaceAtX(pts, xc); if (!surf) return null;
     // Tasche (Gurt ohne Steg): Vorschau-Umriss(e). Der eigentliche Schnitt wird in
-    // applySparCuts in die Profilbahn eingerechnet (kein Anfahr-Schlitz).
+    // applySparCuts in die Profilbahn eingerechnet (kein Anfahr-Schlitz). Bei Beplankung
+    // liegt die Tasche im KERN: die Schnittbahn ist die Kernbahn, ihr Boden liegt um die
+    // Tiefe unter der Kern-Oberfläche — die Vorschau muss dasselbe zeigen (vorher ab
+    // Außenprofil gemessen -> Tasche wirkte um die Beplankung zu flach, Rückmeldung Neil).
     if (isPocket(sp)) {
       const sides = (sp.pkSide === 'top' || sp.pkSide === 'bottom') ? [sp.pkSide] : ['top', 'bottom'];
-      const g1 = pocketGeom(pts, sp, null, which, fromLE, sides[0]); if (!g1) return null;
-      const g2 = sides.length > 1 ? pocketGeom(pts, sp, null, which, fromLE, sides[1]) : null;
-      const p1 = pocketOutline(pts, g1, sides[0], sp.pkFlat);
-      const p2 = g2 ? pocketOutline(pts, g2, sides[1], sp.pkFlat) : null;
+      const g1 = pocketGeom(pts, sp, null, which, fromLE, sides[0], pkCore); if (!g1) return null;
+      const g2 = sides.length > 1 ? pocketGeom(pts, sp, null, which, fromLE, sides[1], pkCore) : null;
+      const p1 = pocketOutline(pkCore || pts, g1, sides[0], sp.pkFlat);
+      const p2 = g2 ? pocketOutline(pkCore || pts, g2, sides[1], sp.pkFlat) : null;
       if (!p1) return null;
       return { poly: p1, poly2: p2, lead: null, xc: g1.xc, yc: (surf.top + surf.bot) / 2 };
     }
@@ -1648,11 +1681,12 @@
         // Tasche ist in die (getrimmte) Profilkontur eingerechnet (fertiges Werkstück)
         // -> nur Wand→Boden→Wand (offener Teilpfad, KEIN Mündungs-„Deckel") in
         // Holmfarbe hervorheben. So bleibt die Mündung offen wie am fertigen Teil.
+        // Bei Beplankung in die Kernkontur (Tiefe ab Kern-Oberfläche, wie der Schnitt).
         const flN = sparFromLE(sp, segIdx, which);
-        const sidesN = pkSides(sp, pts && pts.flipY);
+        const sidesN = pkSides(sp, pts && pts.flipY), pkC = core && core.length > 2 ? core : null;
         sidesN.forEach(side => {
-          const pgN = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flN, side); if (!pgN) return;
-          const m = pocketMergedLoop(pts, pgN, side, sp.pkFlat); if (!m) return;
+          const pgN = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flN, side, pkC); if (!pgN) return;
+          const m = pocketMergedLoop(pkC || pts, pgN, side, sp.pkFlat); if (!m) return;
           let wf = m.loop.slice(m.a, m.b + 1);
           if (dy) wf = wf.map(p => ({ x: p.x, y: p.y + dy }));
           ctx.strokeStyle = SC; ctx.lineWidth = 1.6; ctx.setLineDash(dashFor('spar', []));
@@ -1699,16 +1733,16 @@
               // Profiloberfläche gelegt (wallHitSurface) — NICHT auf den Gehrungspunkt,
               // der die Mündung aufweiten würde. Offener Pfad (keine Mündungssehne).
               const flK = sparFromLE(sp, segIdx, which);
-              const sides = pkSides(sp, pts && pts.flipY);
+              const sides = pkSides(sp, pts && pts.flipY), pkC = core && core.length > 2 ? core : null, base = pkC || pts;
               sides.forEach(side => {
-                const pg = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flK, side); if (!pg) return;
-                const m = pocketMergedLoop(pts, pg, side, sp.pkFlat); if (!m) return;
+                const pg = pocketGeom(pts, pkPhys(sp, pts && pts.flipY), segIdx, which, flK, side, pkC); if (!pg) return;
+                const m = pocketMergedLoop(base, pg, side, sp.pkFlat); if (!m) return;
                 let off = k ? offsetInward(m.loop, -k) : m.loop.map(p => ({ x: p.x, y: p.y }));
                 let seg = off.slice(m.a, m.b + 1).map(p => ({ x: p.x, y: p.y }));   // Wand→Boden→Wand
                 if (k && seg.length >= 3) {
                   const top = side === 'top';
-                  const s0 = wallHitSurface(seg[1], seg[0], pts, top); if (s0) seg[0] = s0;
-                  const sN = wallHitSurface(seg[seg.length - 2], seg[seg.length - 1], pts, top); if (sN) seg[seg.length - 1] = sN;
+                  const s0 = wallHitSurface(seg[1], seg[0], base, top); if (s0) seg[0] = s0;
+                  const sN = wallHitSurface(seg[seg.length - 2], seg[seg.length - 1], base, top); if (sN) seg[seg.length - 1] = sN;
                 }
                 if (dy) seg = seg.map(p => ({ x: p.x, y: p.y + dy }));
                 if (seg.length < 2) return;
@@ -1722,10 +1756,8 @@
               if (g.poly.xLobes) {
                 // X-Spalt: nur die Beine je Keil (keine Basis) — so läuft die Drahtbahn.
                 g.poly.xLobes.forEach(L => {
-                  let P = k ? offsetInward(L.map(p => ({ x: p.x, y: p.y })), k) : L.map(p => ({ x: p.x, y: p.y }));
-                  const n = P.length, far = (a, b) => { const s0 = surfaceAtX(pts, (a.x + b.x) / 2); return Math.abs((a.y + b.y) / 2 - (s0 ? (s0.top + s0.bot) / 2 : 0)); };
-                  let bi = 0, bd = -1; for (let i = 0; i < n; i++) { const d = far(P[i], P[(i + 1) % n]); if (d > bd) { bd = d; bi = i; } }
-                  const ch = []; for (let j = 1; j <= n; j++) { const q = P[(bi + j) % n]; ch.push({ x: q.x, y: q.y + (dy || 0) }); }
+                  // Wie der Schnitt (carveHingeV): auch bei Draht breiter als der Keil.
+                  const ch = xLegChain(L, k, pts).map(q => ({ x: q.x, y: q.y + (dy || 0) }));
                   if (App.kerfBand) App.kerfBand(ctx, V, [ch], { k: 2 * k });
                   ctx.beginPath(); ch.forEach((p, i) => i ? ctx.lineTo(V.X(p.x), V.Y(p.y)) : ctx.moveTo(V.X(p.x), V.Y(p.y))); ctx.stroke();
                 });

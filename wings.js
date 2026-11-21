@@ -26,7 +26,7 @@
     // Kerndesign
     'leStyle', 'leAngle', 'leGap', 'eightW', 'eightH', 'eightCross', 'teStyle',
     'extOverBlockLE', 'extOverBlockClearLE', 'extOverBlockTE', 'extOverBlockClearTE', 'kerfDatum', 'shellCut', 'shellTop', 'shellBot', 'shellPreF', 'shellPreR',
-    'coreStegeOn', 'noseBarOn', 'noseBarA', 'noseBarATip', 'noseBarDepth', 'noseBarDepthTip', 'noseBarRot', 'noseBarGap', 'noseBarShape',
+    'coreStegeOn', 'noseBarOn', 'noseBarA', 'noseBarATip', 'noseBarDepth', 'noseBarDepthTip', 'noseBarRot', 'noseBarGap', 'noseBarShape', 'noseBarSpan', 'noseBarGroups',
     'flipY', 'stackCount', 'stackGap', 'stackOffset', 'stackBaseOn', 'stackBase', 'stackMirror',
     'sparCut', 'sparKerfMode', 'sparKerfBasis', 'sparCutMode', 'sparOnly',
     'sweepRot', 'sweepRotMode', 'sweepRotRef', 'sweepRotAngle',

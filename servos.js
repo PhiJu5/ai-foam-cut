@@ -68,12 +68,17 @@
   // Anlenkung als Viergelenk in der Profilebene: Welle – Hebelloch – Gestänge (feste Länge) – Hornloch – Scharnier.
   // Normal: Horn auf der Seite des Servohebels. Überkreuz: Horn auf der Gegenseite, das Gestänge kreuzt die Profilmitte.
   // Ausschlag + = Ruder nach unten (wie der Regler in den Schnitten).
-  // Servoweg je Richtung: Das Servo kommt nie über ±Servoweg hinaus. Knüppelsignal = Trimmung + Knüppel × Weg,
-  // getrimmt stößt eine Seite also früher an die Grenze und die Gegenseite erreicht ihr Ende nicht mehr.
+  // Servoweg je Richtung: Das Servo nutzt immer seinen ganzen Weg ±Servoweg (in Summe 2 × Servoweg), auch getrimmt,
+  // und kommt nie darüber hinaus. Die Trimmung verschiebt nur die Knüppelmitte: von dort geht es zu einer Seite
+  // weniger weit (Servoweg − Trimmung), zur anderen weiter (Servoweg + Trimmung), ±100 % Knüppel = Wegende.
   function srvRange(sv) {
     const mx = clamp(sv.lkMax != null ? +sv.lkMax : 45, 1, 90), tr = clamp(sv.trimP != null ? mx * sv.trimP / 100 : +sv.trim || 0, -mx, mx);   // sv.trim = Altstand in Grad
-    return { mx, tr, neg: Math.min(mx, mx - tr), pos: Math.min(mx, mx + tr) };
+    return { mx, tr, neg: mx, pos: mx };
   }
+  // Knüppel in % → Servowinkel: 0 % = Trimmung, je Seite linear bis zum Wegende
+  const srvStick = (rg, pct) => { const p = clamp(+pct || 0, -100, 100) / 100; return clamp(rg.tr + p * (p >= 0 ? rg.pos - rg.tr : rg.neg + rg.tr), -rg.neg, rg.pos); };
+  // Knüppelstellung, in der das Servo auf 0° steht (Ruder neutral)
+  const srvStickZero = rg => -100 * rg.tr / (rg.tr > 0 ? rg.neg + rg.tr : rg.pos - rg.tr);
   // Hebel in der Servomitte (Mitte des getrimmten Wegs); null ohne Trimmung
   function trimArm(sv, R) {
     if (!R.arm) return null;
@@ -249,7 +254,7 @@
         const setPos = v => { posPct[i] = v; dn.value = v; dr.value = v; drawCard(card); };
         dr.oninput = () => setPos(+dr.value);
         dn.onchange = () => { const v = parseFloat(dn.value.replace(',', '.')); if (!isNaN(v)) setPos(clamp(v, -100, 100)); };
-        nb.onclick = () => { const rg = srvRange(srvList(cfg())[i]); setPos(Math.round(-rg.tr / rg.mx * 1000) / 10); };
+        nb.onclick = () => { const rg = srvRange(srvList(cfg())[i]); setPos(Math.round(srvStickZero(rg) * 10) / 10); };
         bar.append(lb, dn, dr, nb);
         if (App.cadImportDxfText) { const cb = document.createElement('button'); cb.textContent = T('In CAD übernehmen'); cb.title = T('Schnitt mit Kinematik in Ruder-Neutrallage in die CAD-Bearbeitung laden, je Bauteil eine Ebene (ersetzt deren Inhalt nach Rückfrage)'); cb.style.padding = '2px 7px'; cb.onclick = () => cutToCad(i);
           const el = document.createElement('label'); el.style.cssText = 'display:flex;gap:4px;align-items:center;white-space:nowrap'; el.title = T('Endlagen mit Hebel, Gestänge, Horn und Ruder gestrichelt mit übernehmen');
@@ -292,7 +297,7 @@
     const V = card.view, X = u => V.ox + u * V.s, Y = v => V.oy - v * V.s;
     g.font = '12px sans-serif';
     // Der Regler stellt das Servo, das Ruder folgt über die Kinematik
-    const K = R.lk, rg = srvRange(sv), pct = posPct[card.i] || 0, dS = clamp(rg.tr + pct / 100 * rg.mx, -rg.neg, rg.pos),   /* wie am Sender: Knüppelmitte = Trimmung, Servo begrenzt */ st = K ? lkRudder(K, dS) : { d: dS, ph: 0 };
+    const K = R.lk, rg = srvRange(sv), pct = posPct[card.i] || 0, dS = srvStick(rg, pct),   /* wie am Sender: Knüppelmitte = Trimmung, ±100 % = Wegende */ st = K ? lkRudder(K, dS) : { d: dS, ph: 0 };
     card.head.textContent += ' · ' + T('Servo') + ' ' + f1(st.d) + '°' + (K ? ' · ' + T('Ruder') + ' ' + f1(st.ph) + '°' : '');
     secOne(g, G, allStege(G, c), q, X, Y, V.s, st.ph);
     // Servo, Hebel, Anlenkung
@@ -456,5 +461,5 @@
     if (isOpen()) refresh(true);
   }
   App.servoSidebar = servoSidebar;
-  window.Servos = { show, refresh, _test: { cutDxf, srvCalc, lkRudder, SERVOS, srvList, cards: () => cards } };
+  window.Servos = { show, refresh, _test: { cutDxf, srvCalc, lkRudder, srvRange, srvStick, srvStickZero, SERVOS, srvList, cards: () => cards } };
 })();

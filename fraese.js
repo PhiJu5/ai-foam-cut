@@ -427,7 +427,7 @@
     const n = addJobsFromLoops(loops, 'CAD');
     afterGeom(n + T(' Konturen aus dem CAD-Reiter übernommen.'));
   }
-  // Rippen aus dem Rippendesigner: Umriss je Rippe (Außenkontur) und optional
+  // Rippen aus dem Rippendesigner: Umriss je Rippe (bei Beplankung innere Kontur) und optional
   // die Holmausschnitte (Innenkontur), im Raster nebeneinander gelegt.
   function importFromRibs(withSpars) {
     if (!App.ribStations || !App.ribOutline) { alert(T('Rippendesigner nicht verfügbar.')); return; }
@@ -447,9 +447,12 @@
           App.sparPolys(g).forEach(pl => spars.push(pl));
         } catch (e) {}
       });
+      // Rippe = IMMER die innere Kontur (bei Beplankung Profil minus Beplankung), mit dem
+      // Nasenabschnitt aus dem Kerndesign — wie STL und CAD (App.ribPart).
+      const outerN = App.ribPart ? App.ribPart(st, o, idx).body : o.pts;
       // Teilstücke wie im Rippendesigner (Halbrippen, an Stegen gestutzt)
       const pieces = App.ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
-        const outer = App.applyHalfSpec(o.pts, spec); if (!outer) return null;
+        const outer = App.applyHalfSpec(outerN, spec); if (!outer) return null;
         return { outer, spars: spars.map(sp => App.applyHalfSpec(sp, spec)).filter(Boolean) };
       }).filter(Boolean);
       return { pieces, w: maxx - minx, h: maxy - miny, minx, miny };

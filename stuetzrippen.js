@@ -46,7 +46,9 @@
       if (r.ends) { if (n === 1) out.push(0); else for (let k = 0; k < n; k++) out.push(G.L * k / (n - 1)); }
       else for (let k = 1; k <= n; k++) out.push(G.L * k / (n + 1));
     }
-    return out.map(z => Math.round(z * 10) / 10).sort((a, b) => a - b).filter((z, i, a) => !i || z - a[i - 1] > 0.05);
+    // Eingerückte/schräge Wurzelrippe: Rippen ganz davor (auch die an der Wurzel) entfallen, dort sitzt die Wurzelrippe
+    const RP = A().rootPlane && A().rootPlane(G, A().cfg()), zMin = RP ? Math.min(RP.zL, RP.zT) : -1;
+    return out.map(z => Math.round(z * 10) / 10).sort((a, b) => a - b).filter((z, i, a) => (!i || z - a[i - 1] > 0.05) && !(RP && z < zMin + 0.05));
   }
   // Verteilung neu anwenden; Einstellungen je Rippe bleiben nach der Reihenfolge erhalten
   function regen(G, r) {
@@ -60,6 +62,7 @@
   // Innenkontur an x: Schale (bzw. Gurt-Innenfläche im Gurtbereich) + Spiel
   function innerAt(G, c, r, x, z) {
     const S = A(), sec = S.section(G, x, z); if (!sec) return null;
+    const P = S.rootPlane && S.rootPlane(G, c); if (P && z < P.z(x) - 1e-6) return null;   // vor der schrägen Wurzelrippe: kein Werkstück
     let ins = S.shellOf(c);
     const bw = S.capAt(G, c, 'capW', z), ct = S.capAt(G, c, 'capT', z);
     if (ct > 0 && bw > 0 && Math.abs(x - S.capCenter(G, c, z)) <= bw / 2) ins = Math.max(ins, S.capFace(c) + ct);
@@ -158,6 +161,7 @@
     numRow(det, 'Spiel zur Schale/zum Gurt (mm)', () => r.gap || 0, v => { r.gap = Math.max(0, v); H.upd(); }, Object.assign({}, NR, { step: 0.1 }));
     numRow(det, 'Spiel zum Steg (mm)', () => r.webGap || 0, v => { r.webGap = Math.max(0, v); H.upd(); }, Object.assign({}, NR, { step: 0.1 }));
     hint(det, 'Rippen stehen parallel zur Wurzelrippe; Kontur = Profil innen (Schale, im Gurtbereich Gurt-Innenfläche) abzüglich Spiel.');
+    if (S.rootPlane && S.rootPlane(G, c)) hint(det, 'Wurzelrippe eingerückt: Die Stützrippen bleiben in Flugrichtung. Rippen ganz vor der Wurzelrippe (auch die an der Wurzel) entfallen, Rippen im Bereich der Schräge werden an der Wurzelrippe abgeschnitten.');
     // Verteilung
     selectRow(det, 'Verteilung', [['span', 'gleichmäßig über die Spannweite'], ['seg', 'gleichmäßig je Segment'], ['manual', 'frei (Lage je Rippe)']], () => r.mode || 'span', v => { r.mode = v; again(); });
     if (r.mode === 'seg') {
@@ -322,39 +326,65 @@
   }
 
   // ---------- 3D-Ansicht ----------
-  const VIS = { outer: true, sup: true, inner: true, cap: true, holm: true, ruder: true, rip: true, stk: true, huel: true };
-  const COL = { outer: [120, 220, 170], sup: [185, 169, 138], inner: [214, 240, 228], cap: [255, 60, 220], holm: [90, 169, 255], ruder: [255, 169, 77], rip: [224, 185, 122], stk: [255, 240, 106], huel: [200, 190, 120] };
+  const VIS = { outer: true, sup: true, inner: true, cap: true, holm: true, ruder: true, rip: true, wrip: true, jig: true, stk: true, huel: true };
+  const COL = { outer: [120, 220, 170], sup: [185, 169, 138], inner: [214, 240, 228], cap: [255, 60, 220], holm: [90, 169, 255], ruder: [255, 169, 77], rip: [224, 185, 122], wrip: [236, 160, 80], jig: [160, 150, 255], stk: [255, 240, 106], huel: [200, 190, 120] };
   const ALPHA = { outer: 0.28, sup: 0.35, inner: 0.35, huel: 0.55 };
   function buildScene() {
     const S = A(), G = S.geo(), faces = []; if (!G) return { faces };
     const c = S.cfg(), add = (p, k, extra) => faces.push(Object.assign({ p, col: COL[k], a: ALPHA[k] || 1 }, extra || {}));
-    const P3 = (p, z) => [p[0], p[1], z];
+    const P3 = (p, z) => [p[0], p[1], p.length > 2 ? p[2] : z];   // Punkte mit eigener Spannweite (an der schrägen Wurzelrippe) behalten sie
     const loft = (rings, zs, k, closed, ex) => {
       for (let j = 1; j < rings.length; j++) {
         const a = rings[j - 1], b = rings[j], n = a.length;
         for (let i = 0; i < (closed ? n : n - 1); i++) { const i2 = (i + 1) % n; add([P3(a[i], zs[j - 1]), P3(a[i2], zs[j - 1]), P3(b[i2], zs[j]), P3(b[i], zs[j])], k, ex); }
       }
     };
+    // Eingerückte/schräge Wurzelrippe: davor kein Werkstück. Stationen erst ab der Rippe; im Bereich der Schräge
+    // je Station nur der Teil hinter der Rippe und zusätzliche Stationen, damit die Schnittkante der Rippe folgt.
+    const RP = S.rootPlane ? S.rootPlane(G, c) : null, RW = App.StegWurzel ? App.StegWurzel.data(G, c) : null;
+    const skew = !!RP && Math.abs(RP.k) > 1e-12;
+    const clipX = (z, x0, x1) => {
+      if (!skew) return [x0, x1];
+      let a = x0, b = x1; const xt = RP.xAt(z);   // dort trifft die Station die Rippe
+      if (RP.k > 0) a = Math.max(a, xt); else b = Math.min(b, xt);
+      if (b - a < 1e-2) { if (RP.k > 0) { b = x1; a = x1 - 1e-2; } else { a = x0; b = x0 + 1e-2; } }
+      return [a, b];
+    };
     // Stationen: Segmentstöße + Teilungen
-    const zs = [];
+    let zs = [];
     G.segs.forEach((q, i) => { for (let k = i ? 1 : 0; k <= 4; k++) zs.push(q.z0 + (q.z1 - q.z0) * k / 4); });
+    if (RP) {
+      const z0 = Math.min(RP.zL, RP.zT), z1 = Math.min(G.L, Math.max(RP.zL, RP.zT));
+      zs = zs.filter(z => z > z0 + 1e-6);
+      for (let k = 0; k <= 12; k++) zs.push(z0 + (z1 - z0) * k / 12);
+      zs.sort((a, b) => a - b); zs = zs.filter((z, i) => !i || z - zs[i - 1] > 1e-6);
+    }
     // Schale: Fläche je Lage in ihrem Abstand von der Kontur
-    const NS = 48, ring = (z, off) => {
-      const f = S.frame(G, z), up = [], dn = []; let last = null;
+    const NS = 48, ringUD = (z, off) => {
+      const f = S.frame(G, z), [x0, x1] = clipX(z, f.le, f.le + f.c), up = [], dn = []; let last = null;
       for (let i = 0; i <= NS; i++) {
-        const x = f.le + f.c * (1e-4 + (1 - 2e-4) * (1 - Math.cos(Math.PI * i / NS)) / 2), s = S.section(G, x, z) || last; if (!s) continue; last = s;
+        const x = x0 + (x1 - x0) * (1e-4 + (1 - 2e-4) * (1 - Math.cos(Math.PI * i / NS)) / 2), s = S.section(G, x, z) || last; if (!s) continue; last = s;
         let t = s.top - off, b = s.bot + off; if (t < b) t = b = (s.top + s.bot) / 2;
         up.push([x, t]); dn.push([x, b]);
       }
-      return up.reverse().concat(dn.slice(1, -1));
+      return { up, dn };
     };
+    const ring = (z, off) => { const R = ringUD(z, off); return R.up.reverse().concat(R.dn.slice(1, -1)); };
     const shells = c.layOn ? [['outer', 0], ['sup', S.layA(c)], ['inner', S.layA(c) + Math.max(0, +c.layS || 0)]] : [['outer', 0]];
     const shT = S.shellOf(c);
     shells.forEach(([k, off], j) => {
       if (!VIS[k]) return;
+      const inOff = j + 1 < shells.length ? shells[j + 1][1] : shT;
+      if (RP) {
+        // oben und unten getrennt, damit über der Schnittkante an der Rippe keine Fläche entsteht
+        const R = zs.map(z => ringUD(z, off)); loft(R.map(q => q.up), zs, k, false); loft(R.map(q => q.dn), zs, k, false);
+        add(ring(G.L, off).map(p => P3(p, G.L)), k, { holes: [ring(G.L, inOff).map(p => P3(p, G.L))], cap: 1 });
+        // Stirnfläche in der Ebene der Wurzelrippe
+        if (RW) { const o = RW.loopOff(off), h = RW.loopOff(inOff), Z = p => [p[0], p[1], RW.tr.zAt(p[0])]; if (o) add(o.map(Z), k, { holes: h ? [h.map(Z)] : [], cap: 1 }); }
+        return;
+      }
       const R = zs.map(z => ring(z, off)); loft(R, zs, k, true);
       // Stirnflächen Wurzel/außen als Ring bis zur nächsten Lage
-      const inOff = j + 1 < shells.length ? shells[j + 1][1] : shT;
       [0, G.L].forEach((z, e) => { const o = e ? R[R.length - 1] : R[0]; add(o.map(p => P3(p, z)), k, { holes: [ring(z, inOff).map(p => P3(p, z))], cap: 1 }); });
     });
     // Holmgurt oben/unten
@@ -362,9 +392,11 @@
       const go = S.capFace(c), gz = zs, top = [], bot = [];
       gz.forEach(z => {
         const ct = S.capAt(G, c, 'capT', z), bw = S.capAt(G, c, 'capW', z), cm = S.capCenter(G, c, z), T1 = [], T2 = [], B1 = [], B2 = [];
+        const [x0, x1] = clipX(z, cm - bw / 2, cm + bw / 2), gone = skew && (RP.k > 0 ? RP.xAt(z) > cm + bw / 2 : RP.xAt(z) < cm - bw / 2);
         for (let i = 0; i <= 8; i++) {
-          const x = cm - bw / 2 + bw * i / 8, s = S.section(G, x, z) || { top: 0, bot: 0 };
-          T1.push([x, s.top - go]); T2.push([x, s.top - go - ct]); B1.push([x, s.bot + go]); B2.push([x, s.bot + go + ct]);
+          // ganz vor der Rippe: auf die Rippe gelegt (eigene Spannweite), sonst an der Station
+          const x = x0 + (x1 - x0) * i / 8, zz = gone ? RP.z(x) : z, s = S.section(G, x, zz) || { top: 0, bot: 0 }, P = (y) => (gone ? [x, y, zz] : [x, y]);
+          T1.push(P(s.top - go)); T2.push(P(s.top - go - ct)); B1.push(P(s.bot + go)); B2.push(P(s.bot + go + ct));
         }
         top.push(T1.concat(T2.reverse())); bot.push(B1.concat(B2.reverse()));
       });
@@ -407,6 +439,15 @@
         });
       });
     }
+    // Wurzelrippe (Kontur mit Ausschnitt für die Hülse) in ihrer (ggf. schrägen) Ebene
+    if (VIS.wrip && RW && RW.ribLoops.length) {
+      const Z = p => [p[0], p[1], RW.tr.zAt(p[0])];
+      add(RW.ribLoops[0].map(Z), 'wrip', { holes: RW.ribLoops.slice(1).map(L => L.map(Z)), cap: 1, edge: 1, pick: { t: 'root' } });
+    }
+    // Stege, Hülse und Steckung enden mit gerader Stirnfläche: deren Ecken vor der schrägen Wurzelrippe auf die Rippe legen
+    if (RP) faces.forEach(f => { const P = q => { const zr = RP.z(q[0]); if (q[2] < zr) q[2] = zr; }; f.p.forEach(P); if (f.holes) f.holes.forEach(H => H.forEach(P)); });
+    // Bohrschablone außen an der schrägen Wurzelrippe (nach dem Abschneiden, sie liegt ja davor)
+    if (VIS.jig && skew && App.StegWurzel && App.StegWurzel.jig3d) App.StegWurzel.jig3d(G, c).forEach(t => add(t, 'jig', { pick: { t: 'root' } }));
     return { faces };
   }
 
@@ -424,6 +465,7 @@
   function choose(pk) {
     if (!pk) return;
     if (pk.t === 'rib') select(pk.i);
+    else if (pk.t === 'root') { if (A().showRoot) A().showRoot(); if (A().focus) A().focus('root'); }
     else if (A().focus) A().focus(pk.t, pk.st);
   }
   const CAM0 = { yaw: -0.7, pitch: 0.45, zoom: 1, px: 0, py: 0 }, cam = Object.assign({}, CAM0);
@@ -473,6 +515,8 @@
     if (c.holm.length) items.push(['holm', 'Holmstege']);
     if (c.ruder.length) items.push(['ruder', 'Ruderstege']);
     if (r.on) items.push(['rip', 'Stützrippen']);
+    if (App.StegWurzel) items.push(['wrip', 'Wurzelrippe']);
+    { const P = A().rootPlane && A().rootPlane(A().geo(), c); if (App.StegWurzel && P && Math.abs(P.k) > 1e-9) items.push(['jig', 'Bohrschablone']); }
     if (c.stkOn || (c.stkSplit || []).length) items.push(['stk', 'Steckung'], ['huel', 'Hülse']);
     box.innerHTML = '';
     items.forEach(([k, lab]) => {
@@ -527,5 +571,7 @@
     refresh3d();
   }
 
-  App.StegRippen = { sidebar, drawPlan, drawSec, select, open3d, refresh3d, toCad, cadLayers, _test: { allRibs, ribGeom, genZ, buildScene } };
+  // Verteilung neu anwenden (z. B. nach Ändern der Wurzelrippe)
+  function regenNow() { const S = A(), G = S.geo(); if (!G) return; const r = rcfg(S.cfg()); if (r.on) regen(G, r); }
+  App.StegRippen = { sidebar, drawPlan, drawSec, select, open3d, refresh3d, toCad, cadLayers, regenNow, _test: { allRibs, ribGeom, genZ, buildScene } };
 })();

@@ -146,7 +146,7 @@
     const apexLo = path.length;
     for (let k = 0; k < N; k++) { const b = S[k].bot; ranges[k].bot = [path.length, path.length + n - 1]; for (let i = 0; i < n; i++) path.push(b[i]); }   // Unterseiten vorne→hinten (Lücken unten schon offen)
     path.push({ x: xBR, y: last.bot[n - 1].y + m * (xBR - last.bot[n - 1].x) });  // hinten raus (Höhe EL-Unterkante)
-    return { apexUp, apexLo, prev: S[0].top[1] || nose, nose, next: S[0].bot[1] || nose, ranges };
+    return { apexUp, apexLo, front: [apexUp + 2, apexUp + 3], prev: S[0].top[1] || nose, nose, next: S[0].bot[1] || nose, ranges };
   }
   /* Draufsicht der Tragfläche (alle Segmente) mit den Steg-Grenzen in
    * ORIGINALLAGE (so, wie die Stücke zusammengesetzt werden) — oben im

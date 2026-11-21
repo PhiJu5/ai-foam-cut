@@ -68,7 +68,7 @@
     });
   }
   // Gruppen, die standardmäßig OFFEN starten (weiterhin zuklappbar).
-  const GRP_OPEN_DEFAULT = new Set(['rpssMain', 'rpssCuts', 'rpssSel', 'rpssJoints', 'Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
+  const GRP_OPEN_DEFAULT = new Set(['vbfMain', 'rpssMain', 'rpssCuts', 'rpssSel', 'rpssJoints', 'Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
   /* opts.alwaysOpen = true -> Gruppe ist dauerhaft offen und NICHT klappbar
    * (kein Pfeil, kein Klick). Sonst: gemerkter Zustand, Standard zugeklappt
    * (außer in GRP_OPEN_DEFAULT). */
@@ -781,8 +781,8 @@
   }
 
   // Neuer (globaler) Holm. segFrom/segTo = Segmentbereich (0-basiert).
-  // flightPar = Lage über den Bereich auf KONSTANTEM X halten (parallel zur
-  // Flugrichtung, ignoriert Rückpfeilung). horiz = Höhe auf KONSTANTEM Y halten
+  // flightPar = Lage über den Bereich auf KONSTANTEM X halten (90° zur
+  // Flugrichtung, ignoriert Rückpfeilung; Außenlage entfällt). horiz = Höhe auf KONSTANTEM Y halten
   // (waagrecht, ignoriert V-Form) — für gerade Tragflächensteckung.
   function newSpar(extra) {
     return Object.assign({ shape: 'circle', sizeMode: 'pct', w: 60, h: 60, taper: 0.6, yOff: 0,
@@ -1035,11 +1035,11 @@
         if (pkS !== 'bottom')
           numRow(sb, 'Tiefe oben (mm, senkrecht zur Kontur)', () => pocketDepth(sp, 'top'), v => { sp.pkDepthTop = v; render(); },
             { step: 0.5, min: 0.1, norender: true,
-              hint: 'Tiefe der OBEREN Tasche als echter Parallel-Offset der Profilkontur nach innen.' });
+              hint: 'Tiefe der OBEREN Tasche als echter Parallel-Offset der Profilkontur nach innen. Bei Beplankung zählt sie ab der Kernoberfläche (unter der Beplankung).' });
         if (pkS !== 'top')
           numRow(sb, 'Tiefe unten (mm, senkrecht zur Kontur)', () => pocketDepth(sp, 'bottom'), v => { sp.pkDepthBot = v; render(); },
             { step: 0.5, min: 0.1, norender: true,
-              hint: 'Tiefe der UNTEREN Tasche als echter Parallel-Offset der Profilkontur nach innen.' });
+              hint: 'Tiefe der UNTEREN Tasche als echter Parallel-Offset der Profilkontur nach innen. Bei Beplankung zählt sie ab der Kernoberfläche (unter der Beplankung).' });
         boolRow(sb, 'Gerade waagrechte Innenkante (flacher Gurtboden)', () => sp.pkFlat, v => { sp.pkFlat = v; render(); },
           'Der Taschenboden (innere Gurtkante) läuft GERADE waagrecht statt der Profilwölbung zu folgen — '
           + 'für flache Gurte/Steckungen mit ebenem Auflager. Die Tiefe wird an der Holmmitte gemessen; '
@@ -1242,7 +1242,8 @@
         // Tasche: Wurzel-/Außenlage wie bei Loch-Holmen (mm oder %). Nicht
         // proportional -> abschnittsweise Neuabtastung der Profilbahn (Warnung).
         sparPosFields(sb, 'root', sp, T('Wurzel Seg ') + (ra + 1));
-        sparPosFields(sb, 'tip', sp, T('Außen Seg ') + (rb + 1));
+        // 90° zur Flugrichtung: konstantes X ab Wurzel -> Außenlage entfällt.
+        if (!sp.flightPar) sparPosFields(sb, 'tip', sp, T('Außen Seg ') + (rb + 1));
         const sk = App.pocketSkewInfo(sp);
         if (sk) warn(sb, T('Lage nicht proportional (Wurzel ') + sk.rootPct.toFixed(1) + T(' %, Außen ') + sk.tipPct.toFixed(1)
           + T(' % der Sehne): der Draht steht im Taschenbereich schräg, die Profilbahn wird dort abschnittsweise neu abgetastet. '
@@ -1258,13 +1259,15 @@
             hint: 'Abstand des Holms VOR der Scharnierlinie (Richtung Nasenleiste). 0 = auf der Scharnierlinie.' });
       } else {
         sparPosFields(sb, 'root', sp, T('Wurzel Seg ') + (ra + 1));
-        sparPosFields(sb, 'tip', sp, T('Außen Seg ') + (rb + 1));
+        // 90° zur Flugrichtung: konstantes X ab Wurzel -> Außenlage entfällt.
+        if (!sp.flightPar) sparPosFields(sb, 'tip', sp, T('Außen Seg ') + (rb + 1));
       }
       }
       subhead(sb, 'Gerade Steckung');
-      boolRow(sb, 'Parallel zur Flugrichtung', () => sp.flightPar, v => { sp.flightPar = v; render(); },
+      boolRow(sb, '90° zur Flugrichtung', () => sp.flightPar, v => { sp.flightPar = v; buildSidebar(); render(); },
         'Hält die Lage über den Segmentbereich auf KONSTANTEM X (ignoriert Rückpfeilung) — '
-        + 'der Holm bleibt in Flugrichtung gerade.');
+        + 'der Holm steht im Grundriss rechtwinklig (90°) zur Flugrichtung. Die Lage kommt allein von der '
+        + 'Wurzelrippe, die Außenlage entfällt.');
       if (!isPocket)
       boolRow(sb, 'Horizontal (waagrecht)', () => sp.horiz, v => { sp.horiz = v; render(); },
         'Hält die Höhe über den Segmentbereich auf KONSTANTEM Y (ignoriert V-Form) — '
@@ -1472,6 +1475,92 @@
         render();
       }, { min: 0, step: 1, norender: true, enter: true,
         hint: 'Höhe (Dicke) des Werkstoff-Blocks. Der G-Code-Nullpunkt (Y) liegt an der Blockunterkante.' });
+  }
+  /* Schnittverlängerung vorne/hinten der Negativschale (Schneideweg „precut"),
+   * cfg.negOvMode je Tragfläche: 'wing' = ein Wert für die Wurzel des 1. Segments,
+   * alles proportional (bisher) | 'seg' = Wert je Segment an seiner Innenrippe
+   * (seg.negOvF/negOvR) | 'auto' = x mm (negOvAutoF/R) über den Blockschnitt an der
+   * kleinsten Rippe, Rest proportional — je Segment oder ganze Tragfläche
+   * (negOvAutoScope). Rechnung: negOvAt in render.js. Ergebniszeilen live (negOvLive). */
+  let negOvLive = null;
+  function negOvRows(body) {
+    const c = state.cfg, mode = App.negOvMode ? App.negOvMode() : 'wing';
+    const k = App.activeIdx(), sg = state.segments[k] || {};
+    const r1 = v => Math.round((+v || 0) * 10) / 10;
+    const segL = s => T('Segment ') + (k + 1) + T(s);
+    const outs = [];
+    const live = () => {
+      const e = App.negOvSeg && App.negOvSeg(k);
+      if (!e) return;
+      const t = [e.root, e.tip].map(v => r1(v.f) + ' / ' + r1(v.r));
+      outs.forEach((o, i) => { o.value = t[i]; });
+    };
+    const rn = () => { live(); render(); };
+    selectRow(body, 'Schnittverlängerung',
+      [['wing', 'Ein Wert für die ganze Tragfläche (proportional)'],
+       ['seg', 'Je Segment einstellbar'],
+       ['auto', 'Automatisch über den Blockschnitt']],
+      () => mode,
+      v => {
+        if (v === 'seg' && App.negOvSeg) state.segments.forEach((s, i) => {   // Startwert = bisher wirksamer Wert der Innenrippe
+          const e = App.negOvSeg(i); if (!e) return;
+          if (!(s.negOvF != null && isFinite(+s.negOvF))) s.negOvF = r1(e.root.f);
+          if (!(s.negOvR != null && isFinite(+s.negOvR))) s.negOvR = r1(e.root.r);
+        });
+        c.negOvMode = v; buildSidebar();
+      },
+      'Wie die Schnittverlängerung vor der Nase und hinter der Endleiste bestimmt wird. '
+      + '„Ein Wert für die ganze Tragfläche": Vorgabe für die Wurzel des 1. Segments, alle Rippen der Tragfläche '
+      + 'proportional zur Sehne — außen bei kleiner Sehne oft knapp. „Je Segment": eigener Wert an der Innenrippe '
+      + 'jedes Segments, die Außenrippe proportional. „Automatisch": die kleinste Rippe (meist das Außenprofil) steht '
+      + 'um den eingestellten Betrag über den Blockschnitt (Schalenrand-Vorschnitt) hinaus, die übrigen Rippen '
+      + 'proportional — je Segment oder über die ganze Tragfläche gerechnet. Innerhalb eines Segments bleibt es immer '
+      + 'proportional: konstante Draht-Geschwindigkeit, die Abbrand-Kompensation nach Sehnenverhältnis bleibt exakt.');
+    if (mode === 'wing') {
+      numRow(body, 'Schnittverlängerung vorne / Nase (mm)', () => c.negOvF,
+        v => { c.negOvF = v; rn(); }, { min: 0, norender: true,
+        hint: 'Schnittverlängerung vor der Profilnase (LE) — vorgegeben für die Wurzel des 1. Segments. '
+          + 'Alle anderen Rippen der Tragfläche skalieren proportional zur Profillänge (konstante Draht-Geschwindigkeit).' });
+      numRow(body, 'Schnittverlängerung hinten / Endleiste (mm)', () => c.negOvR,
+        v => { c.negOvR = v; rn(); }, { min: 0, norender: true,
+        hint: 'Schnittverlängerung hinter der Endleiste (TE) — vorgegeben für die Wurzel des 1. Segments, '
+          + 'alle anderen Rippen proportional zur Profillänge. So bleibt die Draht-Geschwindigkeit konstant und die '
+          + 'einfache Abbrand-Kompensation (Sehnenverhältnis) ist exakt.' });
+    } else if (mode === 'seg') {
+      const sv = () => App.negOvSegVals ? App.negOvSegVals(k) : { f: 0, r: 0 };
+      numRow(body, segL(': Schnittverl. vorne innen (mm)'), () => r1(sv().f),
+        v => { sg.negOvF = Math.max(0, v); rn(); }, { min: 0, norender: true,
+        hint: 'Schnittverlängerung vor der Nase an der Innenrippe des gewählten Segments (Auswahl oben unter „Segment"). '
+          + 'Die Außenrippe dieses Segments skaliert proportional zur Sehne.' });
+      numRow(body, segL(': Schnittverl. hinten innen (mm)'), () => r1(sv().r),
+        v => { sg.negOvR = Math.max(0, v); rn(); }, { min: 0, norender: true,
+        hint: 'Schnittverlängerung hinter der Endleiste an der Innenrippe des gewählten Segments. '
+          + 'Die Außenrippe dieses Segments skaliert proportional zur Sehne.' });
+    } else {
+      selectRow(body, 'Automatik rechnet',
+        [['seg', 'Je Segment (kleinste Rippe des Segments)'], ['wing', 'Über die ganze Tragfläche (kleinste Rippe)']],
+        () => c.negOvAutoScope === 'wing' ? 'wing' : 'seg',
+        v => { c.negOvAutoScope = v; live(); },
+        '„Je Segment": in jedem Segment steht seine kleinere Rippe (meist außen) genau um den Betrag über den '
+        + 'Blockschnitt, die Innenrippe proportional — jedes Segment so kurz wie möglich. „Über die ganze Tragfläche": '
+        + 'die kleinste Rippe der ganzen Tragfläche (Randbogen) bekommt den Betrag, alle anderen Rippen proportional '
+        + 'zur Sehne — wie bisher eine durchgehende Kette.');
+      numRow(body, 'Über Blockschnitt vorne (mm)', () => c.negOvAutoF != null ? c.negOvAutoF : 5,
+        v => { c.negOvAutoF = Math.max(0, v); rn(); }, { min: 0, norender: true,
+        hint: 'So weit läuft die Schnittverlängerung vor der Nase an der kleinsten Rippe über den Blockschnitt hinaus '
+          + '(= Schalenrand-Vorschnitt „Überstand Schalenrand konstant"; steht der auf 0, ab der Profilnase). '
+          + 'Die übrigen Rippen skalieren proportional zur Sehne.' });
+      numRow(body, 'Über Blockschnitt hinten (mm)', () => c.negOvAutoR != null ? c.negOvAutoR : 5,
+        v => { c.negOvAutoR = Math.max(0, v); rn(); }, { min: 0, norender: true,
+        hint: 'So weit läuft die Schnittverlängerung hinter der Endleiste an der kleinsten Rippe über den Blockschnitt hinaus '
+          + '(= Schalenrand-Vorschnitt; steht der auf 0, ab der Endleiste). Die übrigen Rippen skalieren proportional zur Sehne.' });
+    }
+    outs.push(numRow(body, segL(': wirksam innen vorne / hinten (mm)'), () => '', null,
+      { readonly: true, roTitle: 'automatisch berechnet' }));
+    outs.push(numRow(body, segL(': wirksam außen vorne / hinten (mm)'), () => '', null,
+      { readonly: true, roTitle: 'automatisch berechnet' }));
+    live();
+    negOvLive = live;
   }
   // Umschalter „für alle Segmente / je Segment" + Feld (bei „alle").
   function mfHeightModeRows(body, neg) {
@@ -2215,19 +2304,9 @@
       + '„Ein Zug": KEINE Schnittverlängerung und keine Vertikalschnitte zu Beginn — der Block endet genau auf dem '
       + 'konstanten Schalenüberstand. Start hinten oben, oben nach vorne, runter auf Nasenhöhe, waagrecht (Überstand) '
       + 'auf die Nase, Profil, … alles in einem durchgehenden Schnitt.');
-    if (!negDirect && !negLatte) {
-      numRow(ng.body, 'Schnittverlängerung vorne / Nase (mm)', () => state.cfg.negOvF,
-        v => { state.cfg.negOvF = v; render(); }, { min: 0, norender: true,
-        hint: 'Schnittverlängerung vor der Profilnase (LE) — vorgegeben für die Wurzel. '
-          + 'Rand/andere Rippen skalieren proportional zur Profillänge (konstante Draht-Geschwindigkeit).' });
-      numRow(ng.body, 'Schnittverlängerung hinten / Endleiste (mm)', () => state.cfg.negOvR,
-        v => { state.cfg.negOvR = v; render(); }, { min: 0, norender: true,
-        hint: 'Schnittverlängerung hinter der Endleiste (TE) — vorgegeben für die Wurzel, '
-          + 'Rand proportional zur Profillänge. So bleibt die Draht-Geschwindigkeit konstant und die '
-          + 'einfache Abbrand-Kompensation (Sehnenverhältnis) ist exakt.' });
-    }
+    if (!negDirect && !negLatte) negOvRows(ng.body);
     if (!negLatte) numRow(ng.body, 'Überstand Schalenrand konstant (mm)', () => state.cfg.negShellEdge,
-      v => { state.cfg.negShellEdge = v; render(); }, { min: 0, norender: true,
+      v => { state.cfg.negShellEdge = v; if (negOvLive) negOvLive(); render(); }, { min: 0, norender: true,
       hint: negDirect
         ? 'KONSTANTER Überstand der Schalen vor der Nase und hinter der Endleiste (Wurzel und Rand gleich). '
           + 'Im Schneideweg „ein Zug" liegen Blockvorder- und -hinterkante genau hier — der Umriss schneidet die '
@@ -2324,6 +2403,7 @@
 
     // --- Reiter „Formenbau" (form, optionales Feature) ------------------
     if (App.formSidebar) App.formSidebar(side);
+    if (App.vbfSidebar) App.vbfSidebar(side);   // Reiter „Verbinderform“ (vbf, optionales Feature)
 
     // --- Reiter „Rumpf" (rpro) und „Rumpf Spanten" (rprob), optionale Features ---
     if (App.rproSidebar) App.rproSidebar(side);

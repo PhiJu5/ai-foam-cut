@@ -58,7 +58,33 @@
     if (r.rootSkew == null) r.rootSkew = 0;
     if (r.rootShift == null) r.rootShift = 0;   // Wurzelrippe parallel nach außen eingerückt (mm, Spannweite)
     if (r.useStege == null) r.useStege = false; // Rippen an den Stegen aus dem Reiter Steghöhen stutzen
+    if (r.noseBar == null) r.noseBar = true;    // Nasenabschnitt aus dem Kerndesign übernehmen (falls dort an)
     return r;
+  }
+  // Nasenabschnitt aus dem Kerndesign (nasenleiste.js: Vierkant-Tasche bzw. gerader
+  // Abschnitt) für eine Rippe; null = aus bzw. Segment ohne Gruppe. Kantenlänge/Tiefe
+  // nach Lage in Tragfläche/Segmentgruppe wie beim Kernschnitt (schräge Wurzelrippe:
+  // Lage der Parallelverschiebung). Bezug = Außenprofil o.pts.
+  function ribNoseBar(st, o) {
+    if (!App.noseBarRib || ribCfg().noseBar === false || !o || !o.pts) return null;
+    return App.noseBarRib(o.pts, st.seg, o.skew ? (o.skew.span ? o.skew.shift / o.skew.span : 0) : st.t);
+  }
+  // Rippenkontur (Außen- oder Kernkontur) mit dem Nasenabschnitt; ohne Treffer unverändert
+  // (nb.miss zählt dann für den Hinweis in der Vorschau).
+  function ribNoseClip(nb, poly) {
+    if (!nb || !poly) return poly;
+    const r = nb.clip(poly);
+    if (!r) { nb.miss = true; return poly; }
+    return r;
+  }
+  // Das eigentliche Rippenteil einer Station (STL, CAD, Fräse): bei Beplankung IMMER die
+  // innere Kontur (Profil minus Beplankung, Kernende nach rc.coreTe), mit Nasenabschnitt.
+  // outer = Außenkontur (mit Nasenabschnitt) nur als Bezug, sheeted = Beplankung da.
+  function ribPart(st, o, idx) {
+    const rc = ribCfg(), sh = ribSheet(st, idx), sheeted = !!(sh && (sh.top || sh.bot));
+    const inner = sheeted ? (ribInset(o.pts, sh.top, sh.bot, rc.coreTe === 'sharp', sh.dbox) || o.pts) : o.pts;
+    const nb = ribNoseBar(st, o);
+    return { body: ribNoseClip(nb, inner), outer: ribNoseClip(nb, o.pts), sheeted, sh };
   }
   // Setzt die Handpositionen aus den aktuell berechneten Stationen (beim ersten
   // Wechsel in den Modus „von Hand"), damit man von einer sinnvollen Verteilung
@@ -652,8 +678,7 @@
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
       // Beplankte Rippe: der Rippenkörper ist die INNERE Kontur (Profil minus Beplankung).
-      const shK = ribSheet(st, list.indexOf(st));
-      const body = (shK && (shK.top || shK.bot)) ? (ribInset(o.pts, shK.top, shK.bot, rc.coreTe === 'sharp', shK.dbox) || o.pts) : o.pts;
+      const body = ribPart(st, o, list.indexOf(st)).body;   // innere Kontur + Nasenabschnitt
       ribHalfSpecs(o.pts, o.chord, st, o).forEach(spec => {
         const outer = applyHalfSpec(body, spec); if (!outer || outer.length < 3) return;
         const holes = sparFull.map(sp => applyHalfSpec(sp, spec)).filter(h => h && h.length >= 3);
@@ -1008,6 +1033,17 @@
     }
     side.appendChild(gh.g);
 
+    // --- Nasenabschnitt aus dem Kerndesign (nur wenn dort eingeschaltet) ----
+    if (App.noseBarRib && App.noseBarOn && App.noseBarOn()) {
+      const gn = App.grp('Nasenabschnitt', true, 'rib');
+      App.boolRow(gn.body, 'Nasenabschnitt aus Kerndesign übernehmen', () => rc.noseBar !== false,
+        v => { rc.noseBar = v; renderRib(); },
+        'Schneidet die im Kerndesign eingestellte Vierkant-Tasche bzw. den geraden Nasenabschnitt '
+        + 'auch in die Rippen (Kantenlänge/Tiefe je Rippe nach ihrer Lage in der Tragfläche bzw. Segmentgruppe, gleiche Drehung). '
+        + 'Fertigmaß ohne Drahtabbrand: Tasche = Kantenlänge + Spiel. Gilt für Vorschau, STL, CAD und Fräse.');
+      side.appendChild(gn.g);
+    }
+
     // --- Nasenschablone (Schleifhilfe) -----------------------------------
     const tp = rc.tpl;
     const gt = App.grp('Nasenschablone (Schleifhilfe)', true, 'rib');
@@ -1171,6 +1207,7 @@
     if (!App.wing || !App.wing.cuts || !App.wing.cuts.length) { if (info) info.textContent = 'Keine Tragfläche.'; return; }
     const rc = ribCfg();
     const { list, total } = ribStations();
+    let noseN = 0; const noseMiss = [];
     const ribs = list.map((st, idx) => {
       const o = ribOutline(st), sh = ribSheet(st, idx);
       const xs = o.pts.map(p => p.x), ys = o.pts.map(p => p.y);
@@ -1179,7 +1216,12 @@
       const cyv = (miny + maxy) / 2;
       const norm = p => ({ x: p.x - minx, y: p.y - cyv });
       // Volle Kontur/Kern/Holme, danach in Halbrippen-Stücke geschnitten.
-      const coreFull = (rc.showCore && (sh.top || sh.bot)) ? ribInset(o.pts, sh.top, sh.bot, rc.coreTe === 'sharp', sh.dbox) : null;
+      // Nasenabschnitt aus dem Kerndesign: Außen- und Kernkontur getrimmt (wie STL/CAD/Fräse).
+      const nb = ribNoseBar(st, o);
+      if (nb) noseN++;
+      const outerFull = ribNoseClip(nb, o.pts);
+      const coreFull = (rc.showCore && (sh.top || sh.bot)) ? ribNoseClip(nb, ribInset(o.pts, sh.top, sh.bot, rc.coreTe === 'sharp', sh.dbox)) : null;
+      if (nb && nb.miss) noseMiss.push(idx + 1);
       const sparFull = [];
       if (rc.showSpars) (state.spars || []).forEach((sp, j) => {
         if (rc.sparHide[j] || !sparAppliesTo(sp, st.seg)) return;
@@ -1188,17 +1230,19 @@
         sparPolys(g).forEach(pl => sparFull.push(pl));
       });
       const pieces = ribHalfSpecs(o.pts, o.chord, st, o).map(spec => {
-        const outer = applyHalfSpec(o.pts, spec); if (!outer) return null;
+        const outer = applyHalfSpec(outerFull, spec); if (!outer) return null;
         const core = coreFull ? applyHalfSpec(coreFull, spec) : null;
         const spars = sparFull.map(sp => applyHalfSpec(sp, spec)).filter(Boolean);
         return { outer: outer.map(norm), core: core ? core.map(norm) : null, spars: spars.map(s => s.map(norm)) };
       }).filter(Boolean);
+      // Nennlage der Vierkantleiste (nur wenn die Nase in einem Rippenstück liegt).
+      const bar = nb && nb.bar && rc.half.mode !== 'rear' ? nb.bar.map(norm) : null;
       let tpl = null;
       if (rc.tpl.show) {
         const t2 = ribTemplate2D(o.pts);
         if (t2.ok) tpl = { ring: t2.ring.map(norm), nums: numberRects(idx + 1, t2.region).map(rc2 => rc2.map(norm)) };
       }
-      return { pieces, tpl, chord: o.chord, z: o.skew ? o.skew.shift : st.z, skew: o.skew ? o.skew.angle : 0, w: maxx - minx, h: maxy - miny };
+      return { pieces, tpl, bar, chord: o.chord, z: o.skew ? o.skew.shift : st.z, skew: o.skew ? o.skew.angle : 0, w: maxx - minx, h: maxy - miny };
     });
     const cols = Math.max(1, Math.ceil(Math.sqrt(ribs.length)));
     const cellW = Math.max.apply(null, ribs.map(r => r.w)) + 25;
@@ -1231,6 +1275,10 @@
           App.poly(ctx, V, spp.map(tr), true); ctx.fillStyle = App.hexA(App.PAL.spar, 0.16); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
         });
       });
+      if (r.bar) {   // Vierkant-Nasenleiste (Nennlage, wie im Kerndesign)
+        ctx.lineWidth = 1.2; ctx.strokeStyle = '#c8a165'; ctx.fillStyle = 'rgba(200,161,101,0.18)'; ctx.setLineDash([]);
+        App.poly(ctx, V, r.bar.map(tr), true); ctx.fill(); ctx.stroke();
+      }
       if (r.tpl) {
         ctx.lineWidth = 1.2; ctx.strokeStyle = '#57d38c'; ctx.setLineDash([3, 3]);
         App.poly(ctx, V, r.tpl.ring.map(tr), true); ctx.stroke(); ctx.setLineDash([]);
@@ -1245,6 +1293,9 @@
     });
     if (info) info.innerHTML = '<b>' + ribs.length + '</b>' + T(' Rippen · Spannweite ')
       + total.toFixed(0) + T(' mm · Beplankung: ') + '<b>' + ribModeLabel(rc.sheetMode) + '</b>'
+      + (noseN ? T(' · Nasenabschnitt aus Kerndesign') : '')
+      + (noseMiss.length ? '<div style="color:#ff5a3c;margin-top:4px">' + T('! Nasenabschnitt trifft die Kontur nicht bei Rippe ') + noseMiss.map(n => 'R' + n).join(', ')
+        + T(' — Tiefe/Kantenlänge im Kerndesign prüfen') + '</div>' : '')
       + '<div class="hint" style="margin-top:5px">' + T('Ziehen = verschieben · Rad = Zoom · Doppelklick = zurück. ')
       + T('Durchgezogen = Außenkontur, gestrichelt = Kern nach Beplankungsabzug, orange = Holmausschnitte. ')
       + T('Grundriss oben zeigt die Lage der Rippen & Holme.') + '</div>';
@@ -1275,5 +1326,5 @@
   Object.assign(App, { ribBodyTrisAll, ribCfg, ribCollectBodies, ribCollectTemplates, ribCutX, ribHalfSpecs, ribInset, ribLeTeArr });
   Object.assign(App, { ribInset, ribLeTeAt, ribModeLabel, ribOutline, ribProcessOutline, ribReseedManual, ribSeedManual, ribSheet, ribStations });
   Object.assign(App, { ribStlPreviewClose, ribStlPreviewOpen, ribTemplate2D, ribTemplateSTL, ribTemplateTris, setupStlPreviewNav, stlFacet, stlView });
-  Object.assign(App, { templateTris, triangulate, ribRootShift, ribRootSkew, ribSparFL, ribRootPlanEnds, ribStegBands });
+  Object.assign(App, { templateTris, triangulate, ribRootShift, ribRootSkew, ribSparFL, ribRootPlanEnds, ribStegBands, ribNoseBar, ribNoseClip, ribPart });
 })();

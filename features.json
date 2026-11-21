@@ -83,7 +83,8 @@
       "description": "Reiter „Steghöhen“: Holm- und Ruderstege aus dem Tragflächendesign festlegen, Höhenliste je Steg (alle x mm und an jedem Segmentstoß), Draufsicht, Vorderansicht und Schnitte, Übernahme in die CAD-Bearbeitung.",
       "files": [
         "stegh.js",
-        "stuetzrippen.js"
+        "stuetzrippen.js",
+        "wurzelrippe.js"
       ],
       "tabs": [
         "stegh"
@@ -185,6 +186,21 @@
       "demo": true,
       "views": [
         "formView"
+      ]
+    },
+    {
+      "id": "verbinder",
+      "name": "Verbinderform (Pressform für Tragflächenverbinder)",
+      "description": "Reiter „Verbinderform“ (Menü Tragflächen): Pressform für einen Tragflächenverbinder (Steckung) aus UD-Kohle als STL/3MF — Querschnitt Vierkant oder rund, Länge je Seite, V-Knick mit Innenradius, alles frei einstellbar oder einmalig aus Formenbau / Steghöhen / Tragfläche übernommen; zweiteilig für den 3D-Druck (Unterteil mit Seitenwänden, Stempel mit Zunge) oder dreiteilig (Grundplatte, Seitenleisten, Stempel), Wandstärken, Spiel, Führungshöhe, Entformungsschräge, Überlaufnut, Verschraubung mit Mutterfalle, Roving-Bedarf.",
+      "files": [
+        "verbinder.js"
+      ],
+      "tabs": [
+        "vbf"
+      ],
+      "default": true,
+      "views": [
+        "vbfView"
       ]
     },
     {
