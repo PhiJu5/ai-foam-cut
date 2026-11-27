@@ -65,6 +65,9 @@
    *            je als eigener Zug von der Nase zur Endleiste (hotwire_gcode.js). */
   function cutFront() { return state.cfg.cutDir === 'front'; }
   function blockOrigin(cut, seg) {
+    // Kern vorne/hinten geteilt (kernteilung.js): Nullpunkt am Rohblock des gewählten Teils.
+    const so = App.coreSplitOrigin ? App.coreSplitOrigin(cut, seg) : null;
+    if (so) return so;
     // Block liegt waagrecht: Unterkante bezogen auf die Block-Mitte (je nach
     // Ausrichtmodus gemeinsame Querschnittsmitte oder Bezugsmerkmal auf 0).
     const cy = blockCenterY(cut);
@@ -140,7 +143,10 @@
     const px = (a, b, z) => sweepProj2(rot, zR, zT, a, 0, b, 0, z).x;   // wie HotWire.proj (+ Drehung)
     return {
       front: { l: px(frontR, frontT, 0), r: px(frontR, frontT, mw) },
-      rear:  { l: px(rearR,  rearT,  0), r: px(rearR,  rearT,  mw) }
+      rear:  { l: px(rearR,  rearT,  0), r: px(rearR,  rearT,  mw) },
+      // Dieselben Kanten an den Rippen (Cut-Koordinaten, ungedreht) — für Vergleiche
+      // mit rootPath (opt.leadFace.in im G-Code-Schreiber).
+      ribs: { frontR, frontT, rearR, rearT }
     };
   }
   /* Trapezkompensierte Horizontal-Schalenschnitte (Ober-/Unterschale).
@@ -189,6 +195,18 @@
       preR: Math.max(0, state.cfg.shellPreR != null ? +state.cfg.shellPreR : 5)
     };
   }
+  /* Wurzel- und Randebene eines GEDREHTEN Werkstücks für die Simulation (sim3d.js
+   * cutT): je Punkt x/z + Normale nx/nz in Maschinenkoordinaten. Ohne Drehung
+   * liegen die Ebenen quer zum Draht (z = zR/zT); gedreht stehen sie um den
+   * Drehwinkel schräg — nur dort trifft der Draht die echte Wurzel-/Randrippe.
+   * mx = Profil-X -> Maschinen-X, sx = dessen Vorzeichen (−1: o.x − x). */
+  function rotCutPlanes(rot, zR, zT, mx, sx) {
+    const a = rot.angleRad, c = Math.cos(a), s = Math.sin(a), dz = rot.dz || 0;
+    return [zR, zT].map(zc => {
+      const q = SweepRot.rotXZ(rot.pivot.x, zc, a, rot.pivot.x, rot.pivot.z);
+      return { x: mx(q.x), z: q.z + dz, nx: -s, nz: sx * c };
+    });
+  }
   /* Szene für die 3D-Simulation: Turmabstand, Achsnamen und je Segment der
    * Styroporblock (Lage wie in „Draht & Türme": auf das Profil zentriert)
    * samt der beiden Schnittebenen (Wurzel- und Randseite des Kerns). */
@@ -221,16 +239,24 @@
       // Rückkante = kleines +X (= blockX), Nase = großes +X. Schnittrichtung „von
       // vorne" (o.sx = +1): Nase = kleines +X, Rückkante = großes +X (noseNear).
       const mx = x => machX(o, x);
+      // Kern vorne/hinten geteilt (kernteilung.js): Rohblock des gewählten Teils.
+      const sb = App.coreSplitBox ? App.coreSplitBox(cut, s, i) : null;
+      const bRR = sb ? sb.rR : teR + e.teR, bFR = sb ? sb.fR : leR - e.leR;
+      const bRT = sb ? sb.rT : teT + e.teT, bFT = sb ? sb.fT : leT - e.leT;
       const blk = {
         seg: i,
-        x0: mx(teR + e.teR), x1: mx(leR - e.leR),
+        x0: mx(bRR), x1: mx(bFR),
         y0: yBot, y1: yTop,
-        x0t: mx(teT + e.teT), x1t: mx(leT - e.leT),
+        x0t: mx(bRT), x1t: mx(bFT),
         y0t: yBot, y1t: yTop,
         z0: cutZ0, z1: cutZ1,
         cutZ0, cutZ1
       };
       if (o.sx > 0) blk.noseNear = true;
+      // Geteilter Kern: Schnittfläche in der Simulation am Rohblock des Teils enden
+      // lassen — ein an der Fuge geteilter Holm wird an einer Rippe jenseits der Fuge
+      // umfahren, dort fährt der Draht nur durch Luft.
+      if (sb) blk.clipCut = true;
       // Werkstück-Drehung (Pfeilung): Block als starrer Körper um die Hochachse
       // drehen — SELBER Winkel/Pivot wie der Schnitt (pr.sweepRot), damit der
       // gedrehte Block die (bereits gedrehte) Schnittfläche umschließt. Die 8
@@ -238,8 +264,8 @@
       // Maschinenkoordinaten gespiegelt (o.x − x). Reihenfolge = drawBlock().
       const rot = state.cfg.sweepRot && window.SweepRot ? App.projectCut(cut, s).sweepRot : null;
       if (rot) {
-        const cRearR = teR + e.teR, cFrontR = leR - e.leR;
-        const cRearT = teT + e.teT, cFrontT = leT - e.leT;
+        const cRearR = bRR, cFrontR = bFR;
+        const cRearT = bRT, cFrontT = bFT;
         const specs = [
           [cRearR, yBot, cutZ0], [cFrontR, yBot, cutZ0], [cRearR, yTop, cutZ0], [cFrontR, yTop, cutZ0],
           [cRearT, yBot, cutZ1], [cFrontT, yBot, cutZ1], [cRearT, yTop, cutZ1], [cFrontT, yTop, cutZ1]
@@ -252,8 +278,10 @@
             return { x: mx(p.x), y: cy, z: p.z + dz };
           })
         };
-        // Schnittflächen-Ebenen (Sim-Vorschau) mit verschieben, damit die
-        // überstrichene Fläche im gedrehten Block liegt.
+        // Schnittflächen-Ebenen der Sim-Vorschau: schräg wie die gedrehten Rippen
+        // (cutPl), damit die überstrichene Fläche im gedrehten Block liegt.
+        // cutZ0/cutZ1 nur noch als Rückfall (verschoben um dz).
+        blk.cutPl = rotCutPlanes(rot, cutZ0, cutZ1, mx, o.sx < 0 ? -1 : 1);
         blk.cutZ0 += dz; blk.cutZ1 += dz;
       }
       return blk;
@@ -393,11 +421,16 @@
     // Y-Bezug ist die WERKSTOFF-Unterkante (Reiter „Werkstoff": Höhe), nicht die
     // Unterkante des Negativblocks — der Formblock sitzt mittig im Werkstoff.
     const mat = App.negMatBlock(root, idx);
-    const ox = root.xBR + (state.cfg.blockX || 0);
+    // Werkstück drehen (Pfeilung) im Negativdesign (negsweeprot.js, eigene
+    // Einstellungen cfg.negSweepRot…, unabhängig vom Kerndesign): Winkel/Pivot/
+    // z-Verschiebung der Drehung; der Nullpunkt liegt dann an der hintersten
+    // GEDREHTEN Blockecke (wie blockRearX im Kerndesign).
+    const sweepRot = App.negSweepRotFor ? App.negSweepRotFor({ rPts, tPts, root, tip, rp, tp, zRoot, zTip, mw, mirror, bz }) : null;
+    const ox = (sweepRot ? sweepRot.rearX : root.xBR) + (state.cfg.blockX || 0);
     const oy = mat.yBot - (state.cfg.blockY || 0);
     const core = state.cfg.negCore ? { sheeting } : null;
     const sparGeoms = App.negSparGeoms ? App.negSparGeoms(sparCtx) : [];
-    return { cut, geom, root, tip, rp, tp, core, mw, zRoot, zTip, ox, oy, idx, mat, stege: stegeOn ? stR : null, sparGeoms };
+    return { cut, geom, root, tip, rp, tp, core, mw, zRoot, zTip, ox, oy, idx, mat, stege: stegeOn ? stR : null, sparGeoms, sweepRot, rPts, tPts };
   }
   /* 3D-Szene der Negativschale für die Simulation (ein waagrechter Block über der
    * Segment-Spannweite, Wurzel-/Randebene wie im G-Code). */
@@ -419,15 +452,37 @@
       se,
       rearIn:   P.ox - (P.root.xT + P.root.geom.edgeR), rearOut:  P.ox - (P.tip.xT + P.tip.geom.edgeR)   // Endleiste (hinten)
     } : null;
+    const blk = {
+      seg: 0,
+      x0: P.ox - P.root.xBR, x1: P.ox - P.root.xBL, y0, y1,
+      x0t: P.ox - P.tip.xBR, x1t: P.ox - P.tip.xBL, y0t: y0, y1t: y1,
+      z0: P.zRoot, z1: P.zTip, cutZ0: P.zRoot, cutZ1: P.zTip, edge, noBlockCut: !direct
+    };
+    // Werkstück-Drehung (negsweeprot.js): Block als starrer Körper um die Hochachse
+    // drehen — derselbe Winkel/Pivot wie die Turmbahnen (P.sweepRot). 8 Ecken in
+    // Cut-Koordinaten (x,z) drehen, dann wie der G-Code auf Maschinen-X (ox − x).
+    // Reihenfolge wie buildScene/drawBlock (hinten/vorne, unten/oben, Wurzel/Rand).
+    const rot = P.sweepRot;
+    if (rot) {
+      const specs = [
+        [P.root.xBR, y0, P.zRoot], [P.root.xBL, y0, P.zRoot], [P.root.xBR, y1, P.zRoot], [P.root.xBL, y1, P.zRoot],
+        [P.tip.xBR, y0, P.zTip], [P.tip.xBL, y0, P.zTip], [P.tip.xBR, y1, P.zTip], [P.tip.xBL, y1, P.zTip]
+      ];
+      const dz = rot.dz || 0;
+      blk.rot = {
+        angleDeg: rot.angleDeg,
+        corners: specs.map(([cx, cy, cz]) => {
+          const p = SweepRot.rotXZ(cx, cz, rot.angleRad, rot.pivot.x, rot.pivot.z);
+          return { x: P.ox - p.x, y: cy, z: p.z + dz };
+        })
+      };
+      blk.cutPl = rotCutPlanes(rot, P.zRoot, P.zTip, x => P.ox - x, -1);   // schräge Rippenebenen (sim3d.js)
+      blk.cutZ0 += dz; blk.cutZ1 += dz;
+    }
     return {
       machineWidth: P.mw,
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
-      blocks: [{
-        seg: 0,
-        x0: P.ox - P.root.xBR, x1: P.ox - P.root.xBL, y0, y1,
-        x0t: P.ox - P.tip.xBR, x1t: P.ox - P.tip.xBL, y0t: y0, y1t: y1,
-        z0: P.zRoot, z1: P.zTip, cutZ0: P.zRoot, cutZ1: P.zTip, edge, noBlockCut: !direct
-      }],
+      blocks: [blk],
       defaultSeg: 0,
       limits: App.machineLimits()
     };

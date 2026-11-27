@@ -65,7 +65,7 @@
       else if (name === 'cad' && App.renderCad) App.renderCad();
       else if (name === 'model' && window.Model3D) Model3D.show();
       else if (name === 'meshed' && window.MeshEdit) MeshEdit.show();
-      else if (name === 'form' && window.Formenbau) Formenbau.show(); else if (name === 'vbf' && window.Verbinder) Verbinder.show();
+      else if (name === 'form' && window.Formenbau) Formenbau.show(); else if (name === 'vbf' && window.Verbinder) Verbinder.show(); else if (name === 'ballast' && window.Ballastbox) Ballastbox.show(); else if (name === 'srvr' && window.Servorahmen) Servorahmen.show();
       else if (name === 'rpro' && window.RumpfPro) RumpfPro.show();
       else if (name === 'rprob' && window.RproSpanten) RproSpanten.show(); else if (name === 'rpss' && window.RproSchnitte) RproSchnitte.show(); else if (name === 'rprof' && window.RproForm) RproForm.show(); else if (name === 'cockpit' && window.Cockpit) Cockpit.show();
       else if (name === 'fraese' && window.Fraese) Fraese.show();
@@ -81,7 +81,7 @@
     else if (name === 'lam' && window.Laminat) Laminat.show();
     else if (name === 'rot' && window.Drehachse) Drehachse.show();
     else if (name === 'flz' && window.Flugzeug) Flugzeug.show();
-    else if (name === 'fsim' && window.Flugsim) Flugsim.show();
+    else if (name === 'fsim' && window.Flugsim) Flugsim.show(); else if (name === 'tfst' && window.Staender) Staender.show();
     else if (name === 'servo' && window.Servos) Servos.show();
       else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
@@ -105,7 +105,7 @@
     else if (name === 'cad' && App.renderCad) App.renderCad();
     else if (name === 'model' && window.Model3D) Model3D.show();
     else if (name === 'meshed' && window.MeshEdit) MeshEdit.show();
-    else if (name === 'form' && window.Formenbau) Formenbau.show(); else if (name === 'vbf' && window.Verbinder) Verbinder.show();
+    else if (name === 'form' && window.Formenbau) Formenbau.show(); else if (name === 'vbf' && window.Verbinder) Verbinder.show(); else if (name === 'ballast' && window.Ballastbox) Ballastbox.show(); else if (name === 'srvr' && window.Servorahmen) Servorahmen.show();
     else if (name === 'rpro' && window.RumpfPro) RumpfPro.show();
     else if (name === 'rprob' && window.RproSpanten) RproSpanten.show(); else if (name === 'rpss' && window.RproSchnitte) RproSchnitte.show(); else if (name === 'rprof' && window.RproForm) RproForm.show(); else if (name === 'cockpit' && window.Cockpit) Cockpit.show();
     else if (name === 'fraese' && window.Fraese) Fraese.show();
@@ -121,7 +121,7 @@
     else if (name === 'lam' && window.Laminat) Laminat.show();
     else if (name === 'rot' && window.Drehachse) Drehachse.show();
     else if (name === 'flz' && window.Flugzeug) Flugzeug.show();
-    else if (name === 'fsim' && window.Flugsim) Flugsim.show();
+    else if (name === 'fsim' && window.Flugsim) Flugsim.show(); else if (name === 'tfst' && window.Staender) Staender.show();
     else if (name === 'servo' && window.Servos) Servos.show();
     else if (name === 'foildb' && window.FoilDB) FoilDB.show();
     else if (name === 'popt' && window.Profiloptimierung) window.Profiloptimierung.show();
@@ -417,7 +417,7 @@
       sel.onchange = () => { state.cfg.ribShow = sel.value; document.querySelectorAll('select[data-show]').forEach(s => s.value = sel.value); render(); };
     });
     window.addEventListener('resize', render);
-    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.MeshEdit && state.activeTab === 'meshed') MeshEdit.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Verbinder && state.activeTab === 'vbf') Verbinder.resize(); if (window.RumpfPro && state.activeTab === 'rpro') RumpfPro.resize(); if (window.RproSpanten && state.activeTab === 'rprob') RproSpanten.show(); if (window.RproSchnitte && state.activeTab === 'rpss') RproSchnitte.show(); if (window.RproForm && state.activeTab === 'rprof') RproForm.resize(); if (window.Cockpit && state.activeTab === 'cockpit') Cockpit.resize(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); if (window.Ausschnitt && state.activeTab === 'ausschnitt') Ausschnitt.resize(); if (window.Decals && state.activeTab === 'decal') Decals.resize(); if (window.Aero && state.activeTab === 'aero') Aero.resize(); });
+    window.addEventListener('resize', () => { if (window.Model3D && state.activeTab === 'model') Model3D.resize(); if (window.MeshEdit && state.activeTab === 'meshed') MeshEdit.resize(); if (window.Formenbau && state.activeTab === 'form') Formenbau.resize(); if (window.Verbinder && state.activeTab === 'vbf') Verbinder.resize(); if (window.Ballastbox && state.activeTab === 'ballast') Ballastbox.resize(); if (window.Servorahmen && state.activeTab === 'srvr') Servorahmen.resize(); if (window.Staender && state.activeTab === 'tfst') Staender.resize(); if (window.RumpfPro && state.activeTab === 'rpro') RumpfPro.resize(); if (window.RproSpanten && state.activeTab === 'rprob') RproSpanten.show(); if (window.RproSchnitte && state.activeTab === 'rpss') RproSchnitte.show(); if (window.RproForm && state.activeTab === 'rprof') RproForm.resize(); if (window.Cockpit && state.activeTab === 'cockpit') Cockpit.resize(); if (window.Fraese && state.activeTab === 'fraese') Fraese.resize(); if (window.Schrift && state.activeTab === 'schrift') Schrift.resize(); if (window.Ausschnitt && state.activeTab === 'ausschnitt') Ausschnitt.resize(); if (window.Decals && state.activeTab === 'decal') Decals.resize(); if (window.Aero && state.activeTab === 'aero') Aero.resize(); });
   }
 
   // Beim Start: gespeicherte Maschinen-/Werkstoff-Einstellungen laden.

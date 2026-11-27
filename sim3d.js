@@ -241,6 +241,23 @@
     const mw = S.scene.machineWidth;
     return { x: p.lx + (p.rx - p.lx) * tz, y: p.ly + (p.ry - p.ly) * tz, z: tz * mw };
   }
+  /* Draht-Parameter t an der Wurzel- (k = 0) bzw. Randebene (k = 1) eines Blocks.
+     Standard: Ebene quer zum Draht bei z = cutZ0/cutZ1. Bei Werkstück-Drehung
+     (Pfeilung) stehen beide Ebenen schräg (b.cutPl: Punkt x/z + Normale nx/nz in
+     Maschinenkoordinaten) — der Draht trifft sie genau in der Wurzel-/Randrippe.
+     Mit den geraden Ebenen läge die Schnittfläche verzerrt neben dem Block. */
+  function cutT(p, b, k) {
+    const mw = S.scene.machineWidth;
+    const pl = b.cutPl && b.cutPl[k];
+    if (pl) {
+      const den = pl.nx * (p.rx - p.lx) + pl.nz * mw;
+      if (Math.abs(den) > 1e-9) return (pl.nx * (pl.x - p.lx) + pl.nz * pl.z) / den;
+    }
+    const cz = k ? (b.cutZ1 != null ? b.cutZ1 : (b.z1 != null ? b.z1 : mw))
+                 : (b.cutZ0 != null ? b.cutZ0 : (b.z0 != null ? b.z0 : 0));
+    return cz / mw;
+  }
+  function cutPt(p, b, k) { return wirePt(p, cutT(p, b, k)); }
 
   // ---------- Szene rahmen ----------------------------------------------
   /* Bounding-Box + Kamera-Zentrum/Radius für ein beliebiges Move-/Szenenpaar. */
@@ -252,6 +269,7 @@
     (scene ? scene.blocks : []).forEach(b => {
       add(b.x0, b.y0); add(b.x1, b.y1);
       if (b.x0t != null) { add(b.x0t, b.y0t); add(b.x1t, b.y1t); }
+      if (b.rot && b.rot.corners) b.rot.corners.forEach(v => add(v.x, v.y));   // gedrehter Block (Pfeilung)
     });
     (scene && scene.extraBounds ? scene.extraBounds : []).forEach(b => { add(b.x0, b.y0); add(b.x1, b.y1); });   // z. B. Drehtisch (drehachse.js)
     if (x0 > x1) { x0 = -50; x1 = 250; y0 = -50; y1 = 100; }
@@ -602,18 +620,78 @@
     ctx.restore();
   }
 
+  /* Kern vorne/hinten geteilt (b.clipCut, ungedrehter Block): überstrichene Fläche
+     und Schnittkanten nur im Rohblock des Teils (+ CLIP_M Rand für die Blockschnitte
+     im Spalt an der Blockkante). Jenseits fährt der Draht nur durch Luft (an der Fuge
+     geteilter Holm an der Rippe, wo er ganz im anderen Teil liegt). k = 0 Wurzel-,
+     1 Randebene; die Blockgrenzen laufen dazwischen linear. */
+  const CLIP_M = 2;
+  const clipOn = b => !!(b && b.clipCut && !b.rot && !b.cutPl && b.x0t != null);
+  function blockLim(b, k) {
+    const xa = b.x0 + (b.x0t - b.x0) * k, xb = b.x1 + (b.x1t - b.x1) * k;
+    const ya = b.y0 + (b.y0t - b.y0) * k, yb = b.y1 + (b.y1t - b.y1) * k;
+    return { xlo: Math.min(xa, xb) - CLIP_M, xhi: Math.max(xa, xb) + CLIP_M, ylo: Math.min(ya, yb) - CLIP_M, yhi: Math.max(ya, yb) + CLIP_M };
+  }
+  const CLIP_F = [q => q.x - blockLim(q.b, q.k).xlo, q => blockLim(q.b, q.k).xhi - q.x,
+    q => q.y - blockLim(q.b, q.k).ylo, q => blockLim(q.b, q.k).yhi - q.y];
+  const lerpQ = (A, B, t) => ({ x: A.x + (B.x - A.x) * t, y: A.y + (B.y - A.y) * t, z: A.z + (B.z - A.z) * t, k: A.k + (B.k - A.k) * t, b: A.b });
+  // Polygon (Ecken mit x, y, z, k) an den Blockgrenzen beschneiden (Sutherland–Hodgman;
+  // Abstand je Ecke zur Grenze IHRER Ebene -> auf den Kanten exakt).
+  function clipPoly(P) {
+    for (const f of CLIP_F) {
+      const out = [];
+      for (let i = 0; i < P.length; i++) {
+        const A = P[i], B = P[(i + 1) % P.length], fa = f(A), fb = f(B);
+        if (fa >= 0) out.push(A);
+        if ((fa >= 0) !== (fb >= 0)) out.push(lerpQ(A, B, fa / (fa - fb)));
+      }
+      P = out;
+      if (P.length < 3) return [];
+    }
+    return P;
+  }
+  // Strecke A→C in einer Ebene auf den Block beschneiden -> [A', C'] oder null.
+  function clipLine(A, C) {
+    let t0 = 0, t1 = 1;
+    for (const f of CLIP_F) {
+      const fa = f(A), fc = f(C);
+      if (fa < 0 && fc < 0) return null;
+      if (fa < 0) t0 = Math.max(t0, fa / (fa - fc));
+      else if (fc < 0) t1 = Math.min(t1, fa / (fa - fc));
+    }
+    return t1 - t0 > 1e-9 ? { a: lerpQ(A, C, t0), c: lerpQ(A, C, t1), cutA: t0 > 0, cutC: t1 < 1 } : null;
+  }
+  const cutPtK = (p, b, k) => Object.assign(cutPt(p, b, k), { k, b });
+  // Kante einer Ebene k zeichnen (mit Beschneiden am Block): pen-Logik des Aufrufers.
+  function edgeTo(ctx, A, C, b, k, st) {
+    if (!clipOn(b)) {
+      const a = scr(cutPt(A, b, k)), c = scr(cutPt(C, b, k));
+      if (a.d < NEAR || c.d < NEAR) { st.pen = false; return; }
+      if (!st.pen) { ctx.moveTo(a.x, a.y); st.pen = true; }
+      ctx.lineTo(c.x, c.y); return;
+    }
+    const s = clipLine(cutPtK(A, b, k), cutPtK(C, b, k));
+    if (!s) { st.pen = false; return; }
+    const a = scr(s.a), c = scr(s.c);
+    if (a.d < NEAR || c.d < NEAR) { st.pen = false; return; }
+    if (!st.pen || s.cutA) ctx.moveTo(a.x, a.y);
+    ctx.lineTo(c.x, c.y); st.pen = !s.cutC;
+  }
+
   /* Bereits geschnittene Fläche: das Band, das der Draht zwischen Wurzel- und
      Randebene überstrichen hat. Quads nach Tiefe sortiert (Maleralgorithmus). */
   function drawSurface(upto, u, b) {
-    const t0 = b.cutZ0 / S.scene.machineWidth, t1 = b.cutZ1 / S.scene.machineWidth;
-    const quads = [];
+    const quads = [], clip = clipOn(b);
     for (let i = 0; i <= upto && i < S.moves.length; i++) {
       const m = S.moves[i];
       if (m.rapid || m.seg !== b.seg) continue;
       const a = m.from, c = i === upto ? lerpMove(m, u) : m.to;
-      const p = [wirePt(a, t0), wirePt(c, t0), wirePt(c, t1), wirePt(a, t1)].map(scr);
+      let P = [cutPtK(a, b, 0), cutPtK(c, b, 0), cutPtK(c, b, 1), cutPtK(a, b, 1)];
+      if (clip) { P = clipPoly(P); if (!P.length) continue; }
+      const p = P.map(scr);
       if (p.some(q => q.d < NEAR)) continue;
-      quads.push({ p, d: (p[0].d + p[1].d + p[2].d + p[3].d) / 4 });
+      let d = 0; p.forEach(q => { d += q.d; });
+      quads.push({ p, d: d / p.length });
     }
     quads.sort((A, B) => B.d - A.d);
     ctx.save();
@@ -625,17 +703,13 @@
     }
     // Schnittkanten in Wurzel- und Randebene betonen
     ctx.strokeStyle = '#4aa3ff'; ctx.lineWidth = 1.6;
-    [t0, t1].forEach(tz => {
+    [0, 1].forEach(k => {
       ctx.beginPath();
-      let pen = false;
+      const st = { pen: false };
       for (let i = 0; i <= upto && i < S.moves.length; i++) {
         const m = S.moves[i];
-        if (m.seg !== b.seg) { pen = false; continue; }
-        const A = scr(wirePt(m.from, tz)), C = scr(wirePt(i === upto ? lerpMove(m, u) : m.to, tz));
-        if (A.d < NEAR || C.d < NEAR) { pen = false; continue; }
-        if (m.rapid) { pen = false; continue; }
-        if (!pen) { ctx.moveTo(A.x, A.y); pen = true; }
-        ctx.lineTo(C.x, C.y);
+        if (m.seg !== b.seg || m.rapid) { st.pen = false; continue; }
+        edgeTo(ctx, m.from, i === upto ? lerpMove(m, u) : m.to, b, k, st);
       }
       ctx.stroke();
     });
@@ -647,21 +721,15 @@
      Block dauerhaft an — unabhängig vom Wiedergabestand (anders als
      drawSurface, das nur das bis zur aktuellen Position Überstrichene füllt). */
   function drawProfile() {
-    const mw = S.scene.machineWidth;
     ctx.save();
     ctx.strokeStyle = S.colors.profile; ctx.lineWidth = 1.5; ctx.setLineDash([]);
     for (const b of (S.scene.blocks || [])) {
-      const cz0 = b.cutZ0 != null ? b.cutZ0 : (b.z0 != null ? b.z0 : 0);
-      const cz1 = b.cutZ1 != null ? b.cutZ1 : (b.z1 != null ? b.z1 : mw);
-      [cz0 / mw, cz1 / mw].forEach(tz => {
+      [0, 1].forEach(k => {
         ctx.beginPath();
-        let pen = false;
+        const st = { pen: false };
         for (const m of S.moves) {
-          if (m.seg !== b.seg || m.rapid) { pen = false; continue; }
-          const A = scr(wirePt(m.from, tz)), C = scr(wirePt(m.to, tz));
-          if (A.d < NEAR || C.d < NEAR) { pen = false; continue; }
-          if (!pen) { ctx.moveTo(A.x, A.y); pen = true; }
-          ctx.lineTo(C.x, C.y);
+          if (m.seg !== b.seg || m.rapid) { st.pen = false; continue; }
+          edgeTo(ctx, m.from, m.to, b, k, st);
         }
         ctx.stroke();
       });
@@ -990,11 +1058,9 @@
             cb(m.from.rx, m.from.ry, mw); cb(m.to.rx, m.to.ry, mw);
           }
           for (const b of (S.scene.blocks || [])) {
-            const cz0 = b.cutZ0 != null ? b.cutZ0 : (b.z0 != null ? b.z0 : 0);
-            const cz1 = b.cutZ1 != null ? b.cutZ1 : (b.z1 != null ? b.z1 : mw);
-            for (const tz of [cz0 / mw, cz1 / mw]) for (const m of S.moves) {
+            for (const k of [0, 1]) for (const m of S.moves) {
               if (m.seg !== b.seg || m.rapid) continue;
-              const q = wirePt(m.to, tz); cb(q.x, q.y, q.z);
+              const q = cutPt(m.to, b, k); cb(q.x, q.y, q.z);
             }
             if (b.rot && b.rot.corners && b.rot.corners.length === 8) b.rot.corners.forEach(v => cb(v.x, v.y, v.z));
             else {

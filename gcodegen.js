@@ -24,8 +24,15 @@
   }
   function genOne(cut, segIdx) {
     const seg = state.segments[segIdx];
-    const pr = App.projectCut(cut, seg);
+    let pr = App.projectCut(cut, seg);
+    // Kern vorne/hinten geteilt (kernteilung.js): Bahn des gewählten Teils, die Trennfuge
+    // ersetzt den Blockschnitt dieser Seite. Nicht teilbar -> Programm nur aus Kommentaren.
+    const SPL = App.coreSplitFor ? App.coreSplitFor(cut, seg, segIdx, pr) : null;
+    if (SPL && SPL.err) return SPL.errProgram();
+    if (SPL) pr = SPL.pr;
     const origin = blockOrigin(cut, seg);
+    const bbox = blockCutGeom(cut, seg, pr);
+    const cutFrontOn = !!(App.cutFront && App.cutFront());
     const blockMidFrac = (state.cfg.machineWidth / 2 - pr.zRoot) / ((pr.zTip - pr.zRoot) || 1);
     const opt = {
       ax: { x: state.cfg.axX, y: state.cfg.axY, u: state.cfg.axU, v: state.cfg.axV },
@@ -38,17 +45,23 @@
       cutMode: state.cfg.cutOrder,
       profileDir: state.cfg.profileDir,
       // Schnittrichtung „von vorne" (Nase zum Nullpunkt, zwei Züge Nase → Endleiste).
-      cutDir: App.cutFront && App.cutFront() ? 'front' : 'rear',
+      cutDir: cutFrontOn ? 'front' : 'rear',
       // Nur eine Profilseite schneiden ('top'/'bottom'; sonst beide).
       cutSides: state.cfg.cutSides || 'both',
       blockCut: state.cfg.cutOrder !== 'none' ? blockCutGeom(cut, seg, pr) : null,
       // Blocklage auch ohne Blockschnitt: „von vorne" entscheidet damit, ob Ein-/
       // Ausläufe in Luft (Außen-Vorschub) oder durch Verschnitt (Schnittvorschub) laufen.
-      blockBox: blockCutGeom(cut, seg, pr),
+      blockBox: bbox,
+      // Von hinten: hinteres Blockende als Werkstoffgrenze. Ist die EL-Verlängerung
+      // kürzer als die Blockzugabe, liegt ihre Spitze im Block — die waagrechten Ein-/
+      // Ausfahrten (auch an Stapel-Übergängen) laufen dann bis zum Blockende mit
+      // Schnittvorschub statt mit „Geschwindigkeit außerhalb Block" durch den Schaum.
+      leadFace: cutFrontOn ? null : { l: bbox.rear.l, r: bbox.rear.r, in: bbox.ribs.rearR, free: true },
       shellCut: state.cfg.shellCut ? shellCutGeom(cut, seg, pr) : null,
       header: (state.cfg.header ? state.cfg.header + '\n' : '') + '; --- Segment ' + (segIdx + 1) + ' ---',
       footer: state.cfg.footer
     };
+    if (SPL) SPL.patchOpt(opt);
     // Schnittzeitpunkt je Holm (App.sparModeOf): 'during' steckt bereits in der
     // Bahn (applySparCuts); 'afterTop' wird HotWire an der Nase eingespeist
     // (opt.noseSpar); 'after' folgt nach dem Profil mit Pause. Globaler Schalter
@@ -165,7 +178,11 @@
         const Rex = App.holeExcursionFinish(gr.lead[1], hpR.loop, hpR.corner, false, noAnchor);
         const Tex = App.holeExcursionFinish(gt.lead[1], hpT.loop, hpT.corner, false, noAnchor);
         if (Math.min(Rex.length, Tex.length) < 3) return;
-        emitSeq(Rex, Tex, T('Holm ') + no + T(' · Holmausschnitt'));
+        // Kern vorne/hinten geteilt: nur das Stück im Material dieses Teils (null = Holm
+        // liegt ganz im anderen Teil), Ein-/Ausstich dann jenseits der Fuge.
+        let Rq = Rex, Tq = Tex;
+        if (opt.sparSeqClip) { const c = opt.sparSeqClip(Rex, Tex); if (!c) return; Rq = c.R; Tq = c.T; }
+        emitSeq(Rq, Tq, T('Holm ') + no + T(' · Holmausschnitt'));
       } catch (e) { /* einzelnen Holm überspringen */ }
     });
     if (cutAny && !opt.inline) {
@@ -474,9 +491,17 @@
     const feed = state.cfg.feed, maxFeed = state.cfg.maxFeed || 0;
     const capF = v => (maxFeed > 0 ? Math.min(v, maxFeed) : v);
     const safeY = (state.cfg.blockY || 0) + App.blockH() + (state.material.safeH || 0);
+    // Werkstück-Drehung (Negativdesign, negsweeprot.js): Turmbahnen der gedrehten
+    // Regelfläche. Ohne Drehung unverändert linear.
+    const rot = P.sweepRot || null;
     return (rpA, tpA, label) => {
       const nn = Math.min(rpA.length, tpA.length), LL = [], RR = [];
       for (let i = 0; i < nn; i++) {
+        if (rot) {
+          LL.push(sweepProj2(rot, P.zRoot, P.zTip, rpA[i].x, rpA[i].y, tpA[i].x, tpA[i].y, 0));
+          RR.push(sweepProj2(rot, P.zRoot, P.zTip, rpA[i].x, rpA[i].y, tpA[i].x, tpA[i].y, mw));
+          continue;
+        }
         LL.push({ x: proj(rpA[i].x, tpA[i].x, 0), y: proj(rpA[i].y, tpA[i].y, 0) });
         RR.push({ x: proj(rpA[i].x, tpA[i].x, mw), y: proj(rpA[i].y, tpA[i].y, mw) });
       }
@@ -547,6 +572,11 @@
     if (P.stege) em('; ' + T('Kern in ') + P.stege.length + T(' Stege zerlegt (') + T(state.cfg.negStegeOnly ? 'NUR Stege, ohne Schalen' : 'im selben Schnitt') + T(') · Stegabstand ') + (state.cfg.negStegeGap || 0)
       + T(' mm · Nennbreiten Wurzel ') + P.stege.map(pc => pc.w.toFixed(1)).join(' + ') + ' mm'
       + P.stege.map(pc => (pc.st.sleeve || pc.st.capTop || pc.st.capBot) ? ' · S' + (pc.k + 1) + T(': Glasschlauch ') + pc.st.sleeve + T(' / Holmgurt ') + pc.st.capTop + '+' + pc.st.capBot : '').join(''));
+    if (P.sweepRot) {
+      const sr = P.sweepRot, r1 = v => Math.round(v * 10) / 10;
+      em('; ' + T('Werkstück gedreht (Pfeilung): ') + r1(sr.angleDeg) + T('° um die Hochachse — Block beim Aufspannen entsprechend drehen')
+        + T(' · X-Fahrweg ') + r1(sr.travelBefore) + ' → ' + r1(sr.travelAfter) + ' mm');
+    }
     em('; ' + T('erzeugt: ') + new Date().toISOString());
     em('G21 ; mm'); em('G90 ; absolut');
     em(App.matNote());
@@ -571,8 +601,11 @@
       const ckE = latte && App.negLatteKerf() === 'speed' ? App.cutKerf(1, 1) : ckH;
       const hkR = ckE.root / 2, hkT = ckE.tip / 2;
       const eRF = P.root.geom.edgeF, eTF = P.tip.geom.edgeF, eRR = P.root.geom.edgeR, eTR = P.tip.geom.edgeR;
-      const front = { l: at(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, 0), r: at(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, mw) }; // Nase
-      const rear = { l: at(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, 0), r: at(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, mw) };   // Endleiste
+      // Mit Werkstück-Drehung (P.sweepRot) liegen die planaren Randschnitte im
+      // gedrehten Block -> X je Turm aus der gedrehten Projektion (Höhe drehinvariant).
+      const ex = P.sweepRot ? ((a, b, z) => sweepProj2(P.sweepRot, P.zRoot, P.zTip, a, 0, b, 0, z).x) : at;
+      const front = { l: ex(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, 0), r: ex(P.root.xL - eRF - hkR, P.tip.xL - eTF - hkT, mw) }; // Nase
+      const rear = { l: ex(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, 0), r: ex(P.root.xT + eRR + hkR, P.tip.xT + eTR + hkT, mw) };   // Endleiste
       const fdn = capF(feed).toFixed(0);   // Randschnitt mit vollem Schnittvorschub in einem Zug
       // Y-Ziel = Maschinen-Vertikal 0: Der Randschnitt für den konstanten Überstand
       // fährt IMMER ganz auf Vertikal 0 hinunter — auch wenn der Block über die

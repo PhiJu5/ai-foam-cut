@@ -154,8 +154,9 @@
       if ((opt.meltDwell || 0) > 0) em('G4 P' + opt.meltDwell + ' ; ' + T('am Nullpunkt verweilen (durchschmelzen)'));
       gBlock1(fx(pos.l), safeY, fx(pos.r), T('vertikal hoch, ') + T(label));                // unten -> oben (Schnitt)
     }
-    function emitBlockFront() { if (bc) emitBlockAt(bc.front, 'Blockvorderkante'); }
-    function emitBlockRear()  { if (bc) emitBlockAt(bc.rear,  'hinteres Blockende'); }
+    // Eigene Beschriftung je Seite möglich (bc.*.label, z. B. Trennfuge beim geteilten Kern).
+    function emitBlockFront() { if (bc) emitBlockAt(bc.front, bc.front.label || 'Blockvorderkante'); }
+    function emitBlockRear()  { if (bc) emitBlockAt(bc.rear,  bc.rear.label || 'hinteres Blockende'); }
     // Von Null hoch auf Sicherheitshöhe — MAX.
     function goSafeAtOrigin() { em(`G1 ${ax.x}${f(0)} ${ax.y}${f(safeY)} ${ax.u}${f(0)} ${ax.v}${f(safeY)} F${maxMove.toFixed(0)} ; von Null hoch auf Sicherheitshöhe (max)`); }
 
@@ -264,8 +265,16 @@
         if (o.trans) {
           // i = erster Punkt (obere Steg-Spitze) der nächsten Kopie,
           // i-1 = letzter Punkt (untere Steg-Spitze) der vorigen Kopie.
+          // Liegt eine Steg-Spitze im Block (opt.leadFace, EL-Verlängerung kürzer als
+          // die Blockzugabe): bis zum hinteren Blockende mit Schnittvorschub.
+          if (leadThrough(L[i-1], R[i-1], i-1))
+            em(`G1 ${ax.x}${faceStop(LF.l, L[i-1])} ${ax.y}${fy(L[i-1].y)} ${ax.u}${faceStop(LF.r, R[i-1])} ${ax.v}${fy(R[i-1].y)} F${capF(feed).toFixed(0)} ; ` + T('Stapel: durch den Block bis zum hinteren Blockende (Schnittvorschub)'));
           em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[i-1].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[i-1].y)} F${airF.toFixed(0)} ; Stapel: an der Endleiste hinten aus dem Block`);
           em(`G1 ${ax.x}${f(0)} ${ax.y}${fy(L[i].y)} ${ax.u}${f(0)} ${ax.v}${fy(R[i].y)} F${airF.toFixed(0)} ; Stapel: in Luft (vor dem Block) zur nächsten Kopie`);
+          if (leadThrough(L[i], R[i], i)) {
+            em(`G1 ${ax.x}${faceStop(LF.l, L[i])} ${ax.y}${fy(L[i].y)} ${ax.u}${faceStop(LF.r, R[i])} ${ax.v}${fy(R[i].y)} F${airF.toFixed(0)} ; ` + T('Stapel: bis zum hinteren Blockende (außerhalb Block)'));
+            em(`G1 ${ax.x}${fx(L[i].x)} ${ax.y}${fy(L[i].y)} ${ax.u}${fx(R[i].x)} ${ax.v}${fy(R[i].y)} F${capF(feed).toFixed(0)} ; ` + T('Stapel: durch den Block an die nächste Kopie heran (Schnittvorschub)'));
+          } else
           em(`G1 ${ax.x}${fx(L[i].x)} ${ax.y}${fy(L[i].y)} ${ax.u}${fx(R[i].x)} ${ax.v}${fy(R[i].y)} F${airF.toFixed(0)} ; Stapel: an die nächste Kopie heran (Endleiste)`);
           continue;
         }
@@ -380,7 +389,10 @@
     }
     // Übergabepunkt Luft → Material je Turm (Maschinen-X als Text): die Blockfläche,
     // höchstens bis zum Konturpunkt und nie hinter Null-X.
-    const faceStop = (face, q) => { const m = Math.min(mXl(face), mXl(q.x)); return m > 1e-6 ? f(m) : f(0); };
+    // LF.free (Kernschnitt): genau auf die Blockfläche, auch wenn ein Turm dort hinter
+    // Null-X liegt (Turm-Verlängerung bei Zuspitzung) — der hintere Blockschnitt fährt
+    // dieselbe Stelle an. Geklemmt auf 0 stünde der Draht an der Rippe noch im Block.
+    const faceStop = (face, q) => { const m = Math.min(mXl(face), mXl(q.x)); return (LF && LF.free) || m > 1e-6 ? f(m) : f(0); };
 
     // Holm-Injektion an der Nase (Modus „Holmschnitt nach Oberseitenschnitt").
     // Der Draht steht nach der Oberseite an der Nase (L[iLE]/R[iLE]). Ablauf OHNE
@@ -464,7 +476,12 @@
       // pos: 'origin' (Nullpunkt), 'safe' (Sicherheitshöhe), 'nearLow' (am Null-X auf Steghöhe),
       //      'nearKerf'/'farKerf' (nahe/ferne Blockfläche auf Null geschnitten, Draht im Spalt)
       let pos = 'origin', nearCut = false, farCut = false;
-      const startsNear = q => mXn(L[q.idx[0]].x) <= mXn(L[q.idx[q.idx.length - 1]].x);
+      // Welches Ende eines Zugs liegt näher am Nullpunkt? An der Wurzelrippe (RP)
+      // entscheiden, nicht am linken Turm: Eine weit extrapolierte Turmbahn kann sich
+      // umkehren (vgl. noseRefOf) — z. B. an der Fuge eines geteilten Kerns, wo die
+      // Wurzel im Holmloch weit vor der Fuge steht und der Rand genau an ihr.
+      const refX = i => (RP && RP.length === L.length ? RP[i].x : L[i].x);
+      const startsNear = q => mXn(refX(q.idx[0])) <= mXn(refX(q.idx[q.idx.length - 1]));
       const upSafeAtZero = () => {
         if (pos === 'origin') goSafeAtOrigin();
         else mv(f(0), f(safeY), f(0), f(safeY), airF, T('am Nullpunkt senkrecht hoch auf Sicherheitshöhe (außerhalb Block)'));
@@ -567,7 +584,7 @@
         // „Vor Profilschnitt": zuerst die Blockseite, auf der der erste Zug NICHT beginnt.
         if (mode === 'before') {
           const Bo = s0Near ? farB : nearB;
-          emitBlockAt(Bo, (s0Near ? farTx : nearTx) === TX.nose ? 'Blockvorderkante' : 'hinteres Blockende');
+          emitBlockAt(Bo, Bo.label || ((s0Near ? farTx : nearTx) === TX.nose ? 'Blockvorderkante' : 'hinteres Blockende'));
           if (s0Near) farCut = true; else nearCut = true;
         }
         // Startseite auf Null — der Draht bleibt im Schnittspalt und steigt von dort
@@ -614,7 +631,9 @@
     // Blockschnitten und Profil — hinteres Blockende, Blockvorderkante, im vorderen
     // Spalt runter auf Schalenhöhe, Oberschale von vorne nach hinten bis in den
     // hinteren Spalt, dort auf den Profilanfang. Spart die Leerfahrt hoch/zurück/vor.
-    const shellMerged = !!(SC && bc && mode === 'before' && !front && !single && !AP);
+    // opt.noShellMerge (Kern vorne/hinten geteilt): nicht zusammenlegen — die Wendepunkte
+    // vor/hinter dem Block lägen sonst im Rohblock-Überstand an der Trennfuge.
+    const shellMerged = !!(SC && bc && mode === 'before' && !front && !single && !AP && !opt.noShellMerge);
     // Nicht hinter Null-X — außer das hintere Blockende liegt selbst dahinter (Pfeilung):
     // dann mindestens bis in dessen Schnittspalt, sonst bliebe die Schale angebunden.
     const backX = m => Math.max(Math.min(0, m), m - SC.preR);

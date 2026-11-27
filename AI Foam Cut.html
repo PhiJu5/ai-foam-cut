@@ -644,8 +644,6 @@
          tabmenu.js baut die Leiste beim Start nach der Nutzer-Gliederung um
          (Einstellungen → Menüleiste). -->
     <button data-view="material" class="active">Projektübersicht und Werkstoffzuordnung</button>
-    <button data-view="bib">Projektbibliothek</button>
-    <button data-view="bau">Bauanleitung</button>
     <div class="tab-more" data-group="Aero">
       <button type="button" class="tab-more-btn">Aero<span class="tab-more-ch">▾</span></button>
       <div class="tab-more-list">
@@ -659,10 +657,6 @@
         <button data-view="core">Kerndesign</button>
         <button data-view="neg">Negativschalendesign</button>
         <button data-view="form">Formenbau</button>
-        <button data-view="vbf">Verbinderform</button>
-        <button data-view="stegh">Steghöhen</button>
-        <button data-view="servo">Flächenservos</button>
-        <button data-view="lam">Laminierplan</button>
       </div>
     </div>
     <div class="tab-more" data-group="Rumpf">
@@ -690,16 +684,35 @@
       <button type="button" class="tab-more-btn">Spezial Module<span class="tab-more-ch">▾</span></button>
       <div class="tab-more-list">
         <button data-view="ausschnitt">Ausschnitte</button>
-        <button data-view="rib">Rippendesigner</button>
         <button data-view="schrift">Schriften</button>
         <button data-view="decal">Decals</button>
         <button data-view="fraese">Fräse</button>
         <button data-view="rot">Drehachse</button>
+        <button data-view="bib">Projektbibliothek</button>
       </div>
     </div>
     <button data-view="cad">CAD-Bearbeitung</button>
-    <button data-view="flz">Flugzeug gesamt</button>
-    <button data-view="fsim">Flugsimulator</button>
+    <div class="tab-more" data-group="Tragflächen Spezialmodule">
+      <button type="button" class="tab-more-btn">Tragflächen Spezialmodule<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="vbf">Verbinderform</button>
+        <button data-view="ballast">Ballastbox</button>
+        <button data-view="stegh">Steghöhen</button>
+        <button data-view="servo">Flächenservos</button>
+        <button data-view="srvr">Servorahmen</button>
+        <button data-view="lam">Laminierplan</button>
+        <button data-view="rib">Rippendesigner</button>
+        <button data-view="bau">Bauanleitung</button>
+      </div>
+    </div>
+    <div class="tab-more" data-group="Flugzeug">
+      <button type="button" class="tab-more-btn">Flugzeug<span class="tab-more-ch">▾</span></button>
+      <div class="tab-more-list">
+        <button data-view="fsim">Flugsimulator</button>
+        <button data-view="tfst">Tragflächenständer</button>
+        <button data-view="flz">Flugzeug gesamt</button>
+      </div>
+    </div>
   </div>
 
   <aside id="side"></aside>
@@ -1121,6 +1134,24 @@
         </div>
       </div>
 
+      <!-- Reiter „Ballastbox" (ballastbox.js): Ballastbox zum Aufschieben auf den Tragflächenverbinder -->
+      <div class="view" id="ballastView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Ballastbox für den Tragflächenverbinder (STL / 3MF / DXF)</span>
+          <div class="simlegend" id="ballastInfo" style="left:10px;right:auto;top:10px;max-width:520px;z-index:3">Keine Box.</div>
+          <canvas id="cBallast" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="ballastExport" title="Kasten und Deckel in Druckposition als STL bzw. 3MF speichern (mit Vorschau)">💾 STL / 3MF exportieren</button>
+            <button id="ballastDxf" title="Planzeichnung (Vorderansicht, Schnitt, Draufsicht mit Maßen) als DXF">📐 Planzeichnung DXF</button>
+            <button id="ballastIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="ballastFront">⬅ Vorderansicht</button>
+            <button id="ballastSide">➡ Seitenansicht</button>
+            <button id="ballastTop">⬇ Draufsicht</button>
+            <span class="hint" style="align-self:center">Ziehen = drehen · rechte Maustaste / Shift = schieben · Rad = Zoom · Mausrad-Doppelklick = Drehpunkt · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
+
       <div class="view" id="rproView">
         <div class="wing-pane" style="position:absolute;inset:0;border:0">
           <span class="pane-label">Rumpf — Umrisse und Spanten (nach DevFus)</span>
@@ -1238,8 +1269,44 @@
       <div class="view" id="flzView"></div>
       <!-- Reiter „Flugsimulator" (flugsim.js): mit dem Flugzeug aus „Flugzeug gesamt" fliegen -->
       <div class="view" id="fsimView"></div>
+      <!-- Reiter „Tragflächenständer" (staender.js): Stützen und Bohrschablone für den Rumpfanschluss -->
+      <div class="view" id="tfstView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Tragflächenständer — Stützen und Bohrschablone (STL / DXF)</span>
+          <div class="simlegend" id="tfstInfo" style="left:10px;right:auto;top:10px;max-width:520px;z-index:3">Keine Tragfläche im Tragflächendesign.</div>
+          <canvas id="cTfst" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simlegend" id="tfstMeasPanel" style="left:auto;right:130px;top:10px;bottom:auto;width:300px;max-width:300px;pointer-events:auto;z-index:4;display:none"></div>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="tfstStl" title="Alle Stützen flach liegend (mit Fußplatten) als STL bzw. 3MF speichern (mit Vorschau)">💾 Stützen STL</button>
+            <button id="tfstJig" title="Bohrschablone als STL bzw. 3MF speichern (mit Vorschau)">💾 Bohrschablone STL</button>
+            <button id="tfstDxf" title="Alle Umrisse als DXF zum Lasern oder Fräsen">📐 DXF</button>
+            <button id="tfstIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="tfstFront">⬅ Vorderansicht</button>
+            <button id="tfstSide">➡ Seitenansicht</button>
+            <button id="tfstTop">⬇ Draufsicht</button>
+            <button id="tfstMeas" title="Messwerkzeug: Abstand, Kette, Winkel, Radius und Wandstärke direkt am 3D-Modell messen (Klick setzt Punkte auf der Oberfläche)">📏 Messen</button>
+            <span class="hint" style="align-self:center">Ziehen = drehen · rechte Maustaste / Shift = schieben · Rad = Zoom · Mausrad-Doppelklick = Drehpunkt · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
       <!-- Reiter „Flächenservos" (servos.js): Servos, Hebel, Anlenkung, Kinematik -->
       <div class="view" id="servoView"></div>
+      <!-- Reiter „Servorahmen" (servorahmen.js): Servorahmen für KST-/Chaservo-Flächenservos zum 3D-Druck -->
+      <div class="view" id="srvrView">
+        <div class="wing-pane" style="position:absolute;inset:0;border:0">
+          <span class="pane-label">Servorahmen — für Flächenservos zum 3D-Druck (STL / 3MF)</span>
+          <div class="simlegend" id="srvrInfo" style="left:10px;right:auto;top:10px;max-width:560px;z-index:3">Kein Rahmen.</div>
+          <canvas id="cSrvr" style="position:absolute;inset:0;width:100%;height:100%"></canvas>
+          <div class="simbar" style="position:absolute;left:0;right:0;bottom:0;z-index:4">
+            <button id="srvrExport" title="Rahmen (und Deckel) in Druckposition als STL bzw. 3MF speichern (mit Vorschau)">💾 STL / 3MF exportieren</button>
+            <button id="srvrIso" title="Freie Ansicht zurücksetzen">⬚ Iso</button>
+            <button id="srvrTop">⬇ Draufsicht</button>
+            <button id="srvrShaft">◎ Blick auf die Welle</button>
+            <button id="srvrSide">➡ Seitenansicht</button>
+            <span class="hint" style="align-self:center">Ziehen = drehen · rechte Maustaste / Shift = schieben · Rad = Zoom · Mausrad-Doppelklick = Drehpunkt · Doppelklick = zurück</span>
+          </div>
+        </div>
+      </div>
 
       <div class="view" id="fraeseView">
         <div class="mwrap cutwrap">
@@ -1803,7 +1870,7 @@
   </div>
   <div class="body"><canvas id="cSeg3d"></canvas></div>
 </div>
-<script src="i18n.js?v=20261121vbf3"></script>
+<script src="i18n.js?v=20261127tm2"></script>
 <script src="theme.js?v=20261017c"></script>
 <script src="safety.js?v=20261022tr2"></script>
 <script src="airfoil.js?v=20261010despike"></script>
@@ -1817,53 +1884,58 @@
 <script src="pc2.js?v=20261025strak2"></script>
 <script src="dxf.js?v=20261004gerade2"></script>
 <script src="hotwire.js?v=20261112dbox"></script>
-<script src="hotwire_gcode.js?v=20261110nose"></script>
-<script src="sweeprot.js?v=20261004gerade2"></script>
+<script src="hotwire_gcode.js?v=20261127ktv6"></script>
+<script src="sweeprot.js?v=20261126swmin"></script>
 <script src="earcut.js?v=20261004gerade2"></script>
 <script src="grbl.js?v=20261107tbl"></script>
 <script src="viewcube.js?v=20261005home"></script>
-<script src="sim3d.js?v=20261112seg"></script>
+<script src="sim3d.js?v=20261127ktv6"></script>
 <script src="simmodel.js?v=20261004gerade2"></script>
 <script src="occt-import-js.js?v=20261018asm"></script>
 <script src="occt_wasm.js?v=20261018asm"></script>
 <script src="model3d.js?v=20261031ecken2"></script>
 <script src="model3d_gcode.js?v=20261025wn"></script>
-<script src="core.js?v=20261121negov"></script>
+<script src="core.js?v=20261126swmin"></script>
 <script src="cad.js?v=20261114nrib2"></script>
 <script src="cadpdf.js?v=20261023pv2"></script>
-<script src="gcode.js?v=20261112neil"></script>
+<script src="gcode.js?v=20261127ktv6"></script>
 <script src="spars.js?v=20261114xhk"></script>
 <script src="ribs.js?v=20261114nrib2"></script>
 <script src="dxfshapes.js?v=20261112neil2"></script>
 <script src="wingimport.js?v=20261010xflm"></script>
-<script src="filesys.js?v=20261112neil"></script>
+<script src="filesys.js?v=20261126swmin"></script>
 <script src="stlpreview.js?v=20261027mf3"></script>
 <script src="wingexport.js?v=20261004gerade2"></script>
 <script src="gmfc.js?v=20261101rumpf1"></script>
-<script src="render.js?v=20261121negov"></script>
+<script src="render.js?v=20261126ktv5"></script>
 <script src="measure2d.js?v=20261011dat"></script>
-<script src="sidebar.js?v=20261121negov"></script>
-<script src="pathpreview.js?v=20261107a"></script>
-<script src="gcodegen.js?v=20261112xsp6"></script>
+<script src="sidebar.js?v=20261126bart1"></script>
+<script src="pathpreview.js?v=20261126ktv2"></script>
+<script src="gcodegen.js?v=20261126ktv5"></script>
 <script src="cutpanel.js?v=20261107tbl"></script>
 <script src="stege.js?v=20261121nloop"></script>
 <script src="kernteile.js?v=20261025wn"></script>
+<script src="kernteilung.js?v=20261127ktv6"></script>
 <script src="negholme.js?v=20261112neil2"></script>
 <script src="nasenleiste.js?v=20261114nrib2"></script>
 <script src="neglatte.js?v=20261107a"></script>
+<script src="negsweeprot.js?v=20261126swmin"></script>
 <script src="neg3d.js?v=20261105n3d1"></script>
-<script src="stegh.js?v=20261119wrip4"></script>
+<script src="stegh.js?v=20261123stkv1"></script>
 <script src="bibliothek.js?v=20261107a"></script>
 <script src="bauanleitung.js?v=20261107c"></script>
 <script src="laminat.js?v=20261107a"></script>
 <script src="drehachse.js?v=20261107hms"></script>
 <script src="stuetzrippen.js?v=20261119wrip6"></script>
 <script src="wurzelrippe.js?v=20261119wrip6"></script>
-<script src="servos.js?v=20261119trim"></script>
+<script src="jetiexbus.js?v=20261122exb1"></script>
+<script src="servos.js?v=20261122exb1"></script>
 <script src="pc2wing.js?v=20261010tol"></script>
 <script src="stepexport.js?v=20261010prof"></script>
-<script src="formenbau.js?v=20261027vm2"></script>
-<script src="verbinder.js?v=20261121vbf3"></script>
+<script src="formenbau.js?v=20261122droop5"></script>
+<script src="verbinder.js?v=20261123stkv1"></script>
+<script src="ballastbox.js?v=20261127bart10"></script>
+<script src="servorahmen.js?v=20261126srvr3"></script>
 <script src="stlbody.js?v=20261101rumpf1"></script>
 <script src="rumpfpro.js?v=20261101rumpf1"></script>
 <script src="rproSpanten.js?v=20261101rumpf1"></script>
@@ -1886,22 +1958,28 @@
 <script src="decals_design.js?v=20261004gerade2"></script>
 <script src="decals.js?v=20261105flz1"></script>
 <script src="flugzeug.js?v=20261105fsim1"></script>
-<script src="flugsim.js?v=20261107fsim14"></script>
+<script src="fsim_ls4.js?v=20261126fg2"></script>
+<script src="fsim_ask21.js?v=20261126fg2"></script>
+<script src="fsim_ka6.js?v=20261126fg2"></script>
+<script src="fsim_arcus.js?v=20261126fg2"></script>
+<script src="fsim_dg300.js?v=20261126fg2"></script>
+<script src="flugsim.js?v=20261126fsim29"></script>
+<script src="staender.js?v=20261123tfst26"></script>
 <script src="neuralfoil_data.js?v=20261004gerade2"></script>
 <script src="neuralfoil.js?v=20261008align3"></script>
 <script src="profpolare.js?v=20261012re"></script>
 <script src="foilpolar.js?v=20261101b"></script>
 <script src="kfm.js?v=20261008align"></script>
 <script src="foildb.js?v=20261101a"></script>
-<script src="compute.js?v=20261114nrib2"></script>
-<script src="wings.js?v=20261114nrib2"></script>
+<script src="compute.js?v=20261126ktv2"></script>
+<script src="wings.js?v=20261126swmin"></script>
 <script src="overview_bg.js?v=20261004gerade2"></script>
 <script src="overview.js?v=20261023mf"></script>
 <script src="ptedit.js?v=20261011dat"></script>
 <script src="profedit.js?v=20261110name"></script>
-<script src="tabmenu.js?v=20261019tm1"></script>
-<script src="undo.js?v=20261119vbf1"></script>
-<script src="app.js?v=20261119vbf1"></script>
+<script src="tabmenu.js?v=20261127tm2"></script>
+<script src="undo.js?v=20261126srvr1"></script>
+<script src="app.js?v=20261126srvr1"></script>
 </body>
 </html>
 

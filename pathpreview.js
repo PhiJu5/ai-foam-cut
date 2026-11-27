@@ -52,12 +52,15 @@
   function previewCore() {
     const cut = App.activeCut(), idx = App.activeIdx(), seg = state.segments[idx];
     if (!cut || !seg) return null;
-    const proj = App.projectCut(cut, seg), o = App.blockOrigin(cut, seg);
+    const proj0 = App.projectCut(cut, seg), o = App.blockOrigin(cut, seg);
+    // Kern vorne/hinten geteilt (kernteilung.js): Bahn + Blockschnitte des gewählten Teils.
+    const proj = (App.coreSplitSpur && App.coreSplitSpur(proj0, cut, seg, idx)) || proj0;
+    const spl = App.coreSplitBlockCut ? App.coreSplitBlockCut(cut, seg, idx, proj0) : null;
     let L = proj.left, R = proj.right;
     if (!L || !R || L.length < 2) return null;
     // „Von vorne" oder nur eine Profilseite: Zug-Ablauf (wie emitPasses im G-Code-Schreiber).
     const oneSide = state.cfg.cutSides === 'top' || state.cfg.cutSides === 'bottom';
-    if ((o.sx > 0 || (oneSide && state.cfg.cutOrder !== 'only')) && window.HotWire && HotWire.cutPasses) return previewCoreFront(cut, seg, proj, o);
+    if ((o.sx > 0 || (oneSide && state.cfg.cutOrder !== 'only')) && window.HotWire && HotWire.cutPasses) return previewCoreFront(cut, seg, proj, o, spl);
     // Profilrichtung „Unterseite zuerst": dieselbe Umkehr wie im G-Code-Schreiber.
     if (state.cfg.profileDir === 'bottom' && L.length > 2) {
       const nn = L.length;
@@ -72,10 +75,11 @@
     const ox = o.x, oy = o.y;
     const mx = v => ox - v, my = v => v - oy;                 // Maschinenkoordinaten (wie fx/fy im G-Code)
     // Blockschnitt- und Schalen-Geometrie aus dem Kern (in der Design-exe vorhanden).
-    const bc = (state.cfg.cutOrder && state.cfg.cutOrder !== 'none') ? App.blockCutGeom(cut, seg, proj) : null;
+    const bc = spl ? spl.bc : (state.cfg.cutOrder && state.cfg.cutOrder !== 'none') ? App.blockCutGeom(cut, seg, proj) : null;
     const SC = state.cfg.shellCut ? App.shellCutGeom(cut, seg, proj) : null;
     const yBC = App.blockCutY ? App.blockCutY() : 0;          // unteres Ende der Blockschnitte (0 bzw. knapp unter angehobenem Block)
     let mode = state.cfg.cutOrder || (bc ? 'before' : 'none');
+    if (spl && mode === 'none') mode = 'before';   // geteilter Kern: Trennfuge = Blockschnitt
     if (mode === 'wrap' && !bc) mode = 'before';
 
     const closed = N > 1 &&
@@ -182,7 +186,7 @@
   // Anfahrt von der Seite des Einlaufs (nah = Nullpunktseite, fern = gegenüber),
   // Ausfahrt fern senkrecht hoch bzw. nah waagrecht zum Null-X, Blockschnitte
   // „vor/während/nach" wie dort.
-  function previewCoreFront(cut, seg, proj, o) {
+  function previewCoreFront(cut, seg, proj, o, spl) {
     const L = proj.left, R = proj.right, RP = proj.rootPath || L;
     const stackN = (proj.stack && proj.stack.count > 1) ? proj.stack.count : 1;
     const front = o.sx > 0;
@@ -190,11 +194,12 @@
     if (!ps.length) return null;
     const feed = state.cfg.feed, safeY = App.safeHeight();
     const mx = v => App.machX(o, v), my = v => v - o.y;
-    const bc = (state.cfg.cutOrder && state.cfg.cutOrder !== 'none') ? App.blockCutGeom(cut, seg, proj) : null;
-    const bb = App.blockCutGeom(cut, seg, proj);
+    const bc = spl ? spl.bc : (state.cfg.cutOrder && state.cfg.cutOrder !== 'none') ? App.blockCutGeom(cut, seg, proj) : null;
+    const bb = spl ? spl.bb : App.blockCutGeom(cut, seg, proj);
     const SC = state.cfg.shellCut ? App.shellCutGeom(cut, seg, proj) : null;
     const yBC = App.blockCutY ? App.blockCutY() : 0;          // unteres Ende der Blockschnitte (0 bzw. knapp unter angehobenem Block)
     let mode = state.cfg.cutOrder || (bc ? 'before' : 'none');
+    if (spl && mode === 'none') mode = 'before';   // geteilter Kern: Trennfuge = Blockschnitt
     if ((mode === 'wrap' && (!bc || stackN > 1)) || (mode !== 'none' && mode !== 'after' && !bc)) mode = bc ? 'before' : 'none';
     const nearB = bc ? (front ? bc.front : bc.rear) : null, farB = bc ? (front ? bc.rear : bc.front) : null;
     const farF = front ? bb.rear : bb.front;
@@ -284,7 +289,9 @@
     const ck = latte && App.negLatteKerf() === 'speed' ? App.cutKerf(1, 1) : App.cutKerf(P.cut.root.chord, P.cut.tip.chord);
     const hkR = ck.root / 2, hkT = ck.tip / 2;
     const zR = P.zRoot, zT = P.zTip, mw = P.mw, ox = P.ox;
-    const at = (a, b, z) => a + (b - a) * (z - zR) / ((zT - zR) || 1);
+    // Werkstück-Drehung (negsweeprot.js): Randschnitte im gedrehten Block.
+    const at = P.sweepRot && App.sweepProj2 ? ((a, b, z) => App.sweepProj2(P.sweepRot, zR, zT, a, 0, b, 0, z).x)
+      : ((a, b, z) => a + (b - a) * (z - zR) / ((zT - zR) || 1));
     const pos = (a, b) => ({ l: ox - at(a, b, 0), r: ox - at(a, b, mw) });   // Maschinen-X je Turm
     const front = pos(P.root.xL - P.root.geom.edgeF - hkR, P.tip.xL - P.tip.geom.edgeF - hkT);   // Nase
     const rear  = pos(P.root.xT + P.root.geom.edgeR + hkR, P.tip.xT + P.tip.geom.edgeR + hkT);   // Endleiste
@@ -312,7 +319,14 @@
       const P = App.negProjection();
       const proj = (vr, vt, zp) => vr + (zp - P.zRoot) / ((P.zTip - P.zRoot) || 1) * (vt - vr);
       const n = Math.min(P.rp.length, P.tp.length), L = [], R = [];
+      const rot = P.sweepRot && App.sweepProj2 ? P.sweepRot : null;   // Werkstück-Drehung (negsweeprot.js)
       for (let i = 0; i < n; i++) {
+        if (rot) {
+          const a = App.sweepProj2(rot, P.zRoot, P.zTip, P.rp[i].x, P.rp[i].y, P.tp[i].x, P.tp[i].y, 0);
+          const b = App.sweepProj2(rot, P.zRoot, P.zTip, P.rp[i].x, P.rp[i].y, P.tp[i].x, P.tp[i].y, P.mw);
+          L.push({ x: P.ox - a.x, y: a.y - P.oy }); R.push({ x: P.ox - b.x, y: b.y - P.oy });
+          continue;
+        }
         L.push({ x: P.ox - proj(P.rp[i].x, P.tp[i].x, 0), y: proj(P.rp[i].y, P.tp[i].y, 0) - P.oy });
         R.push({ x: P.ox - proj(P.rp[i].x, P.tp[i].x, P.mw), y: proj(P.rp[i].y, P.tp[i].y, P.mw) - P.oy });
       }

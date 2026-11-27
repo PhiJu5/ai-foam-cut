@@ -133,6 +133,7 @@
     if (state.dxfExport) state.dxfExport.segs = Array.isArray(rec.dxfExportSegs) ? rec.dxfExportSegs.filter(i => i < n) : null;
     const c = rec.cfg || {};
     if (App.migrateExtOverBlock) App.migrateExtOverBlock(c);   // alt: extOverBlock/-Clear -> LE/TE getrennt
+    if (App.migrateSweepRotMode) App.migrateSweepRotMode(c);   // Werkstück drehen: 'auto' -> 'ref'/'min'
     const keys = new Set(Object.keys(state.cfg).concat(Object.keys(c)).concat(Object.keys(PROJECT_DEFAULTS.cfg)));
     keys.forEach(k => {
       if (!isWingCfgKey(k)) return;

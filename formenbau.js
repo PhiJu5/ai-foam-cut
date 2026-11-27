@@ -97,6 +97,23 @@
     formWlDrawTwRoot: 2.5,     // Schränkung (Anstellwinkel) am Wurzelprofil (°, positiv = Nase nach außen / Toe-out)
     formWlDrawTwMid: 1.5,      // dito Mitte (nur mit Mittelprofil)
     formWlDrawTwTip: 0.5,      // dito Spitze
+    formDrPreset: 'ls3',       // Randbogen nach unten gezogen: zuletzt angewandte Vorlage (ls3|mild|kurz|custom)
+    formDrInit: false,         // Vorlage schon einmal auf die Endtiefe dieser Tragfläche angewandt (sonst beim ersten Wählen)
+    formDrAng: 85,             // Biegewinkel nach unten gegen die Fläche (letztes Segment), °
+    formDrLen: 70,             // Länge ab der Endrippe entlang der Mittellinie (inkl. Bogen und Spitze), mm
+    formDrR: 22,               // Biegeradius (mm)
+    formDrFlat: 0,             // gerader Teil vor dem Bogen (mm)
+    formDrStep: 0,             // Rücksprung der Nase: Länge (mm, 0 = über den Bogen verteilt)
+    formDrCMid: 80,            // Tiefe nach dem Bogen (% Endtiefe)
+    formDrCTip: 45,            // Tiefe am Ende vor der Spitzenrundung (% Endtiefe)
+    formDrThk: 85,             // relative Dicke am Ende (% der Endrippe)
+    formDrTeSweep: 0,          // Pfeilung der Endleiste im hängenden Teil (°) — nur bei formDrPlanMode 'lt' vorgegeben
+    formDrLeSweep: 50,         // Rückpfeilung der Nasenleiste im hängenden Teil gegen seine Mittellinie (°, ≥ 0)
+    formDrPlanMode: 'lc',      // 'lc' Rückpfeilung + Tiefe am Ende (Endleiste ergibt sich) | 'lt' Rückpfeilung + Pfeilung Endleiste (Tiefe am Ende ergibt sich)
+    formDrToe: 0,              // Anstellung im hängenden Teil (°, positiv = Nase nach außen)
+    formDrTipLen: 22,          // Spitzenrundung (mm)
+    formDrTipMode: 'ellipse',  // Spitzenform: 'ellipse' | 'sichel' | 'custom'
+    formDrTipPLE: 2, formDrTipPTE: 2, formDrTipRef: 50, formDrTipThk: 100,
     formAufmass: 0,            // Aufmaß (mm, nach außen; negativ = Abzug)
     formTeThk: 0,              // globale Endleistendicke (mm, 0 = Profil unverändert); gilt für Tragfläche, Randbogen und Winglet
     formTeEdge: 'out',         // Negativform / geteiltes Urmodell: Endleiste 'out' steht mit halber Dicke über die Trennfläche (Sehnenmitte) | 'blend' läuft in die Trennfläche aus (Keil) | 'flush' bündig je Hälfte auf dem eigenen Endleistenpunkt (wie vor 2026-09-06)
@@ -267,6 +284,9 @@
   }
   function C(k) { if (state.cfg[k] == null) state.cfg[k] = DEF[k]; return state.cfg[k]; }
   function S(k, v) { state.cfg[k] = v; }
+  // Abschluss mit 3D-Ringen (gebogene Mittellinie): Winglets und der nach unten gezogene Randbogen — für Formen
+  // gleich behandelt (eigenes Formteil, sonst hinterschnitten). Beschriftungen unterscheiden weiter Winglet / Randbogen.
+  const wlMode = m => m === 'winglet' || m === 'wldraw' || m === 'droop';
 
   // ---------- Rippen absolut aus dem Tragflächendesign -------------------
   /* Stationen (Wurzel + Außenenden aller Segmente) in mm: x = Sehne absolut
@@ -572,6 +592,7 @@
     if (opt.tipMode === 'round' && opt.tipLen > 0) for (const r of tipRings(last, prev, opt)) rings.push(r);
     else if (opt.tipMode === 'winglet') wl = wingletRings(last, prev, opt);
     else if (opt.tipMode === 'wldraw') wl = wingletDrawRings(last, prev, opt);
+    else if (opt.tipMode === 'droop') wl = droopRings(last, prev, opt);
     // globale Endleistendicke: Randbogen-/Winglet-Ringe sind skalierte Profile -> absolutes Maß erst hier
     if (opt.teThk > 0) { rings = rings.map(r => teThickApply(r, opt.teThk)); if (wl) wl = wl.map(r => teThickApply(r, opt.teThk)); }
     return { rings, stations, tipStart, wl, plan: plan ? plan.name : null, fadeStart, tipDih: opt.tipMode === 'flat' ? 0 : +opt.tipDih || 0 };
@@ -794,7 +815,8 @@
     const Pt = prof.tip ? unitProfile(prof.tip.pts, opt) : Pr;
     const Pm = prof.mid ? unitProfile(prof.mid.pts, opt) : null;
     const sl = endSlopes(last, prev);
-    const th0 = leSlopeY(last, prev), th1 = (90 - w.cant) * Math.PI / 180, beta = Math.max(0.05, th1 - th0);   // Nasenleisten-Steigung (wie die geneigte Endrippe)
+    // w.bend (rad, nur hängender Randbogen): Biegewinkel gegen die Richtung des letzten Segments statt Neigung aus der Senkrechten
+    const th0 = leSlopeY(last, prev), th1 = w.bend != null ? th0 + w.bend : (90 - w.cant) * Math.PI / 180, beta = Math.max(0.05, th1 - th0);   // Nasenleisten-Steigung (wie die geneigte Endrippe)
     let hUp = 0; for (const q of Pw) hUp = Math.max(hUp, q.y * c0);
     // Waagrechter Teil (Länge Lf): Richtung des letzten Segments läuft weiter, die Endleiste bleibt
     // auf der verlängerten Endleistenlinie der Tragfläche; die Nasenpfeilung geht per Smoothstep von
@@ -810,7 +832,8 @@
     let Rb = Math.max(w.R, 1.5 * hUp, 1);                    // sonst schneidet die Oberseite die Biegeachse
     if (Rb * beta > 0.8 * Ltot) Rb = 0.8 * Ltot / beta;
     const Lb = Rb * beta, Ls = Ltot - Lb, Tt = Lf + Lb + Ls;   // t = Strecke ab Flügelende (waagrecht, Bogen, gerade)
-    const cR = c0 * w.cRoot / 100, cT = c0 * w.cTip / 100, toe = w.toe * Math.PI / 180, tw = w.twist * Math.PI / 180;
+    const cR = c0 * w.cRoot / 100, toe = w.toe * Math.PI / 180, tw = w.twist * Math.PI / 180;
+    let cT = c0 * w.cTip / 100;   // hängender Randbogen mit „Rückpfeilung + Pfeilung Endleiste“: wird unten abgeleitet
     const mp = Math.min(0.95, Math.max(0.05, w.midPos / 100));
     const zb = zF + Rb * (Math.sin(th1) - Math.sin(th0)), yb = yF - Rb * (Math.cos(th1) - Math.cos(th0));
     // Schwung von Nasenleiste/Endleiste (Seitenansicht, z. B. Ventus 3): im senkrechten Teil wölbt sich die
@@ -824,7 +847,20 @@
     // Endleiste: gerade im waagrechten Teil (Verlängerung der Flügel-Endleiste oder eigene
     // Pfeilung) und gerade im senkrechten Teil (eigene Pfeilung); im Bogen geht die Steigung per
     // Smoothstep über -> Endleistenlinie ohne Knick.
-    const tanH = w.teWing ? sl.dxTE : Math.tan(w.teSweepH * Math.PI / 180), tanV = Math.tan(w.teSweep * Math.PI / 180);
+    const tanH = w.teWing ? sl.dxTE : Math.tan(w.teSweepH * Math.PI / 180);
+    let tanV = Math.tan(w.teSweep * Math.PI / 180);
+    const t0 = Math.min(Math.max(0, w.stepAt), Lf + Lb);
+    const Lr = Math.max(1, w.step > 0 ? Math.min(w.step, Tt - t0) : Lf + Lb - t0), tEnd = Math.min(Tt, t0 + Lr);
+    // Rückpfeilung (nur hängender Randbogen, w.leSweep °): die Nasenleiste läuft im hängenden Teil unter diesem Winkel
+    // gegen die Mittellinie nach hinten. Ab tEnd ist die Tiefe linear (cR -> cT), Nase = Endleiste − Tiefe; daher ergibt
+    // sich je nach w.planMode die Endleisten-Pfeilung ('lc': Tiefe am Ende vorgegeben) oder die Tiefe am Ende ('lt':
+    // Endleisten-Pfeilung vorgegeben). Endleiste auf ±60° bzw. Tiefe auf ≥ 3 % begrenzt (kurzer hängender Teil).
+    const spanT = Tt - tEnd;
+    if (w.leSweep != null) {
+      const tanL = Math.tan(w.leSweep * Math.PI / 180), TV = Math.tan(60 * Math.PI / 180);
+      if (w.planMode === 'lt') { if (spanT > 1e-6) cT = Math.max(0.03 * c0, cR - (tanL - tanV) * spanT); }
+      else tanV = Math.min(TV, Math.max(-TV, tanL + (spanT > 1e-6 ? (cT - cR) / spanT : 0)));
+    }
     const xTE0 = t => e.xTE + tanH * t + (tanV - tanH) * (t <= Lf ? 0 : t <= Lf + Lb ? Lb * ismooth((t - Lf) / Lb) : Lb * 0.5 + (t - Lf - Lb));
     // Nasenlinie ohne Rücksprung (Flügelpfeilung -> Rückpfeilung des waagrechten Teils) und
     // zugehörige Tiefe; ab Beginn t0 geht die Tiefe per Smoothstep über die Länge Lr in den
@@ -834,15 +870,31 @@
     const xTEat = t => xTE0(t) + bowTE(t);
     const xLEline = t => t < Lf ? e.xLE + tanW * t + (tanF - tanW) * Lf * ismooth(t / Lf) : xF + tanF * (t - Lf);
     const cLine = t => Math.max(0.15 * c0, xTE0(t) - xLEline(t));
-    const t0 = Math.min(Math.max(0, w.stepAt), Lf + Lb);
-    const Lr = Math.max(1, w.step > 0 ? Math.min(w.step, Tt - t0) : Lf + Lb - t0), tEnd = Math.min(Tt, t0 + Lr);
     // Zielverlauf = eine Gerade (Wurzeltiefe am Ende des Rücksprungs -> Spitzentiefe), auch vor tEnd
     // fortgesetzt: der Smoothstep des Rücksprungs läuft damit direkt in die Verjüngung ein (C1, keine
     // Plateau-/S-Form an der Nase).
     const cTarget = t => Tt <= tEnd ? cR : cR + (cT - cR) * (t - tEnd) / (Tt - tEnd);
+    /* Hängender Randbogen (w.noOver): die rückwärts verlängerte Zielgerade kann bei kurzem, stark verjüngtem
+     * hängendem Teil über die Endtiefe steigen -> Nase sprang nach vorn. Dort statt dessen monotone kubische
+     * Hermite-Kurve von (t0, Tiefe, Steigung der Fläche) nach (tEnd, cR, Steigung der Verjüngung) mit
+     * Fritsch-Carlson-Begrenzung: kein Überschwingen über die Starttiefe, C1 an beiden Enden. */
+    let herm = null;
+    if (w.noOver && t0 < tEnd) {
+      const p0 = cLine(t0), h = 1e-3, m0r = (cLine(t0 + h) - p0) / h, m1r = spanT > 1e-6 ? (cT - cR) / spanT : 0;
+      const D = (cR - p0) / Lr;
+      let m0 = m0r, m1 = m1r;
+      if (Math.abs(D) < 1e-9) { m0 = 0; m1 = 0; }
+      else {
+        let a = Math.min(3, Math.max(-1, m0r / D)), b = Math.min(3, Math.max(-3, m1r / D));   // a < 0 (leicht gegenläufige Flügelverjüngung) bleibt C1, Überstand fängt die Nasen-Sperre
+        if (b > 0 && a * a + b * b > 9) { const s = 3 / Math.hypot(a, b); a *= s; b *= s; }
+        m0 = a * D; m1 = b * D;
+      }
+      herm = t => { const u = (t - t0) / Lr, u2 = u * u, u3 = u2 * u;
+        return (2 * u3 - 3 * u2 + 1) * p0 + (u3 - 2 * u2 + u) * m0 * Lr + (-2 * u3 + 3 * u2) * cR + (u3 - u2) * m1 * Lr; };
+    }
     const cAt0 = t => {
       if (t < t0) return cLine(t);
-      if (t < tEnd) { const cl = cLine(t); return cl + (cTarget(t) - cl) * sm2((t - t0) / Lr); }
+      if (t < tEnd) { if (herm) return herm(t); const cl = cLine(t); return cl + (cTarget(t) - cl) * sm2((t - t0) / Lr); }
       return cTarget(t);
     };
     const cAt = t => Math.max(0.05 * c0, cAt0(t) + bowLE(t) + bowTE(t));
@@ -862,6 +914,12 @@
         const v = Ls > 0 ? Math.min(1, (s - Lb) / Ls) : 1;
         a = toe + tw * v;
         P = Pm ? (v < mp ? lerpRing(Pr, Pm, v / mp) : lerpRing(Pm, Pt, (v - mp) / (1 - mp))) : lerpRing(Pr, Pt, v);
+      }
+      // Dickenverjüngung (nur hängender Randbogen, w.thkEnd < 1): Abstand zur Sehnenlinie Nase→Endleiste per
+      // Smootherstep über die ganze Länge auf thkEnd -> Anstellung der Sehne bleibt, Dicke nimmt stetig ab.
+      if (w.thkEnd != null && Math.abs(w.thkEnd - 1) > 1e-6) {
+        const f = 1 - (1 - w.thkEnd) * sm2((s + Lf) / Tt), n = P.length, xT = (P[0].x + P[n - 1].x) / 2 || 1, yT = (P[0].y + P[n - 1].y) / 2;
+        P = P.map(q => { const yc = q.x / xT * yT; return { x: q.x, y: yc + (q.y - yc) * f }; });
       }
       return { th, y, z, P, a };
     };
@@ -891,8 +949,26 @@
       const f = t / hD, j = Math.min(nD - 1, Math.floor(f));
       return dTab[j] + (dTab[j + 1] - dTab[j]) * (f - j);
     };
+    /* Nasen-Sperre (nur hängender Randbogen, w.noOver): in der Draufsicht darf der Abschluss nie vor die verlängerte
+     * Nasenleiste der Tragfläche (x = xLE + dx·Δz) kommen. Vorderster Punkt eines Rings = Nase + c·m (m ≤ 0: Profil
+     * um die Anstellung gedreht, Spitzendicke eingerechnet). Liegt er vor der Sperrlinie (an der tatsächlichen z der
+     * Nase, inkl. Höhenausgleich), wird der ganze Querschnitt nach hinten geschoben (Tiefe bleibt) — weich
+     * (quadratisches Smooth-Max, Breite ws; die Breite läuft ab dem Flügelende von 0 ein -> Anschluss exakt). */
+    const thkTip = Math.max(1, (WL_TIP_PRESETS[w.tipMode] ? WL_TIP_PRESETS[w.tipMode].thk : +w.tipThk || 100) / 100);
+    const zCL = t => { const s = t - Lf; if (s < 0) return last.z + t * Math.cos(th0); if (s <= Lb) return zF + Rb * (Math.sin(th0 + s / Rb) - Math.sin(th0)); return zb + (s - Lb) * Math.cos(th1); };
+    const thCL = t => { const s = t - Lf; return s < 0 ? th0 : s <= Lb ? th0 + s / Rb : th1; };
+    const xLEat = t => {
+      const c = cAt(t), le = xTEat(t) - c;
+      if (!w.noOver) return le;
+      const q = secAt(t - Lf), ca = Math.cos(q.a), sa = Math.sin(q.a);
+      let m = 0; for (const p of q.P) m = Math.min(m, p.x * ca - p.y * thkTip * sa);
+      const z = zCL(t) - dAt(t) * Math.sin(thCL(t)), lim = e.xLE + sl.dx * (z - last.z) - c * m;
+      const ws = Math.min(0.5, 0.005 * c0) * sm2(t / Math.max(1, 0.1 * c0)), d = le - lim;
+      const f = ws <= 1e-9 ? Math.max(d, 0) : d >= ws ? d : d <= -ws ? 0 : (d + ws) * (d + ws) / (4 * ws);
+      return lim + f;
+    };
     const ringAt = (s, shrink) => {
-      const t = Lf + s, c = cAt(t), xLE = xTEat(t) - c;
+      const t = Lf + s, c = cAt(t), xLE = xLEat(t);
       const q = secAt(s), th = q.th, P = q.P, a = q.a, d = dAt(t);
       const y = q.y + d * Math.cos(th), z = q.z - d * Math.sin(th);
       const ca = Math.cos(a), sa = Math.sin(a), ct = Math.cos(th), st = Math.sin(th);
@@ -912,7 +988,7 @@
       if (s < 0) { z = last.z + t * Math.cos(th0); y = yLE0 + t * Math.sin(th0); }
       else if (s <= Lb) { th = th0 + s / Rb; z = zF + Rb * (Math.sin(th) - Math.sin(th0)); y = yF - Rb * (Math.cos(th) - Math.cos(th0)); }
       else { th = th1; z = zb + (s - Lb) * Math.cos(th1); y = yb + (s - Lb) * Math.sin(th1); }
-      return [xTEat(t) - cAt(t), y + d * Math.cos(th), z - d * Math.sin(th)];
+      return [xLEat(t), y + d * Math.cos(th), z - d * Math.sin(th)];
     };
     const dt = Math.min(0.25, step / 8), ANG = 2 * Math.PI / 180;
     let tLast = 0, pLast = lePt(0), dirRef = null, pPrev = pLast;
@@ -927,8 +1003,43 @@
       const nt = Math.max(4, Math.round(tipLen / step) * 2);
       for (let j = 1; j <= nt; j++) { const t = j / nt; out.push(ringAt(Lb + Lst + tipLen * t, wlTipShape(w, t))); }
     }
+    // Grundriss-Kennwerte des hängenden Teils (für die Anzeige der abgeleiteten Größe in der Seitenleiste)
+    const deg = v => Math.atan(v) * 180 / Math.PI;
+    out.plan = { teSweep: deg(tanV), leSweep: deg(tanV - (spanT > 1e-6 ? (cT - cR) / spanT : 0)), cTip: cT / c0 * 100, R: Rb, Lb, Ls };
     return out;
   }
+
+  // ---------- Randbogen nach unten gezogen (hängend, Segelflugzeuge der 70er/80er, z. B. LS 3) ----------
+  /* Eigener Abschluss (formTipMode 'droop', eigene Werte formDr*), gerechnet mit dem Winglet-Verfahren:
+   * Kreisbogen um eine Achse ∥ Sehne, Ringe senkrecht zur Mittellinie, stetige Übergänge von Tiefe/Pfeilung,
+   * Oberseiten-Ausgleich. Dafür werden die beiden Endrippen an der waagrechten Ebene durch die Nase der
+   * Endrippe gespiegelt, das „Winglet" der gespiegelten Fläche biegt nach oben, das Ergebnis wird zurück-
+   * gespiegelt. Folge: im Bogen liegt die Unterseite innen (Radiusgrenze aus der Unterseitentiefe, der
+   * Ausgleich hält die Unterseite vor dem Bogen gerade), die Oberseite außen; Toe positiv = Nase nach außen.
+   * loc/fr werden so zurückgerechnet, dass sie wie beim Winglet aussehen (en zeigt zur Oberseite, ex × en =
+   * Mittellinie) -> cap, tipSpine (gebogene Form), kinkTip und Wasserdichtheit wie beim Winglet. */
+  let droopPlan = null;   // Kennwerte des zuletzt gebauten hängenden Randbogens (abgeleitete Pfeilung / Tiefe, Radius)
+  function droopRings(last, prev, opt) {
+    const y0 = last.sm[leIndex(last.sm.length)].y;
+    const my = p => Object.assign({}, p, { y: 2 * y0 - p.y });
+    const mst = s => Object.assign({}, s, { sm: s.sm.map(my) });
+    const rings = wingletRings(mst(last), mst(prev), Object.assign({}, opt, { wl: opt.dr, wlProf: {} }));
+    droopPlan = rings.plan || null;
+    return rings.map(r => {
+      const o = Object.assign({}, r, { pts: r.pts.map(my) });
+      if (r.loc) o.loc = r.loc.map(q => ({ x: q.x, y: -q.y }));
+      if (r.fr) { const { O, ex, en } = r.fr; o.fr = { O: [O[0], 2 * y0 - O[1], O[2]], ex: [ex[0], -ex[1], ex[2]], en: [-en[0], en[1], -en[2]] }; }
+      return o;
+    });
+  }
+  /* Vorlagen (Längen relativ zur Endtiefe c): ang = Biegewinkel gegen die Fläche (°), len = Länge ab der Endrippe
+   * entlang der Mittellinie (inkl. Bogen und Spitze), R = Biegeradius, cMid/cTip = Tiefe nach dem Bogen / am Ende
+   * (% Endtiefe), thk = relative Dicke am Ende (%), le = Rückpfeilung der Nasenleiste (°), tip = Spitzenrundung. */
+  const DROOP_PRESETS = {
+    ls3:  { ang: 85, len: 0.55, R: 0.18, flat: 0, cMid: 80, cTip: 45, thk: 85, teSweep: 0, le: 50, tip: 0.18, tipMode: 'ellipse' },
+    mild: { ang: 45, len: 0.45, R: 0.35, flat: 0, cMid: 75, cTip: 50, thk: 85, teSweep: 0, le: 55, tip: 0.15, tipMode: 'ellipse' },
+    kurz: { ang: 70, len: 0.32, R: 0.14, flat: 0, cMid: 70, cTip: 40, thk: 80, teSweep: 0, le: 65, tip: 0.12, tipMode: 'ellipse' }
+  };
 
   // ---------- Winglet aus Zeichnung (Dreitafel: Aufriss / Draufsicht / Seitenansicht) ----
   /* Der Nutzer zeichnet Nasenlinie und Endleiste des Winglets als 3D-Kurven
@@ -3042,6 +3153,12 @@
         toe: +C('formWlToe') || 0, twist: +C('formWlTwist') || 0, midPos: +C('formWlMidPos') || 50, leBow: Math.min(60, Math.max(-60, +C('formWlLeBow') || 0)), leBowPos: Math.min(90, Math.max(10, +C('formWlLeBowPos') || 40)), teBow: Math.min(60, Math.max(-60, +C('formWlTeBow') || 0)), teBowPos: Math.min(90, Math.max(10, +C('formWlTeBowPos') || 40)), tipLen: Math.max(0, +C('formWlTipLen')), tipP: +C('formWlTipP') || 2,
         tipMode: C('formWlTipMode') || 'ellipse', tipPLE: +C('formWlTipPLE') || 2, tipPTE: +C('formWlTipPTE') || 2, tipRef: +C('formWlTipRef') || 0, tipThk: +C('formWlTipThk') || 100 },
       wlProf: C('formWlProf') || {},
+      dr: (() => { const dTip = +C('formDrTipLen'); return { step: Math.max(0, +C('formDrStep') || 0), stepAt: 0, flatWing: true, teWing: true, teSweep: Math.min(60, Math.max(-30, +C('formDrTeSweep') || 0)), teSweepH: 0,
+        flatLen: Math.max(0, +C('formDrFlat') || 0), flatSweep: 0, len: Math.max(5, +C('formDrLen') || 0), R: Math.max(0, +C('formDrR') || 0), cant: 0, bend: Math.min(120, Math.max(5, +C('formDrAng') || 0)) * Math.PI / 180,
+        leSweep: Math.min(80, Math.max(0, C('formDrLeSweep') == null ? 0 : +C('formDrLeSweep') || 0)), planMode: C('formDrPlanMode') === 'lt' ? 'lt' : 'lc', noOver: true,
+        cRoot: Math.max(5, +C('formDrCMid') || 0), cTip: Math.max(2, +C('formDrCTip') || 0), sweep: 0, toe: +C('formDrToe') || 0, twist: 0, midPos: 50, leBow: 0, leBowPos: 40, teBow: 0, teBowPos: 40,
+        thkEnd: Math.min(1.5, Math.max(0.2, (C('formDrThk') == null ? 100 : +C('formDrThk')) / 100)),
+        tipLen: Math.max(0, isFinite(dTip) ? dTip : 0), tipP: 2, tipMode: C('formDrTipMode') || 'ellipse', tipPLE: +C('formDrTipPLE') || 2, tipPTE: +C('formDrTipPTE') || 2, tipRef: +C('formDrTipRef') || 0, tipThk: +C('formDrTipThk') || 100 }; })(),
       wlDrawMode: C('formWlDrawMode') === 'pline' ? 'pline' : 'spline', wlDrawRootAt: +C('formWlDrawRootAt') || 30,
       wlDrawTw: { root: +C('formWlDrawTwRoot') || 0, mid: +C('formWlDrawTwMid') || 0, tip: +C('formWlDrawTwTip') || 0 },
       mirror: !!C('formMirror'), up: C('formUp'), origin: C('formOrigin'),
@@ -3245,7 +3362,7 @@
   let model = null;   // { W, ur, top, bot, opt, preview?, fit? }
   function buildWith(o) {
     // Winglets nur beim Urmodell oder als eigenes Formteil (sonst hinterschnitten -> flach)
-    if ((o.tipMode === 'winglet' || o.tipMode === 'wldraw') && o.target !== 'ur' && o.part !== 'tip') o = Object.assign({}, o, { tipMode: 'flat' });
+    if (wlMode(o.tipMode) && o.target !== 'ur' && o.part !== 'tip') o = Object.assign({}, o, { tipMode: 'flat' });
     if (o.part === 'tip') o = Object.assign({}, o, { mirror: false });
     // V-Form des Abschlusses: Urmodell (ganz/getrennt) und Einzelteile; Formhälften der ganzen Fläche ohne Knick
     if (o.tipDih && o.target !== 'ur' && o.part === 'all') o = Object.assign({}, o, { tipDih: 0 });
@@ -3293,10 +3410,12 @@
   function partSuffix(o) { if (o.grp && !o.grp.tipOnly) return '_' + T('bauteil') + (o.grp.i + 1) + '_seg' + o.grp.s0 + (o.grp.s1 !== o.grp.s0 ? '-' + o.grp.s1 : ''); if (o.part === 'tip') return (o.tipMode === 'winglet' || o.tipMode === 'wldraw') ? '_winglet' : '_randbogen'; return o.part === 'wing' ? '_flaeche' : ''; }
   const PREVIEW_MAX = 25000;   // Dreiecke; darüber gröberes Vorschau-Netz (Export bleibt fein)
   let fitInfo = null;   // Infozeile „Formhöhe passend zu den Negativschalen" im Seitenmenü: nach jedem Aufbau nachführen
+  let drInfo = null;    // Infozeile hängender Randbogen (abgeleitete Endleisten-Pfeilung bzw. Tiefe am Ende): nach jedem Aufbau nachführen
   function build() {
     const o = opts();
     model = buildWith(o);
     if (fitInfo) { try { fitInfo(); } catch (e) {} }
+    if (drInfo) { try { drInfo(); } catch (e) {} }
     if (model) {
       const n = ['ur', 'top', 'bot'].reduce((s, k) => s + (model[k] ? model[k].v.length / 9 : 0), 0);
       model.ntri = n;
@@ -4375,7 +4494,7 @@
     const pv = model && (model.preview || model); if (!pv) return;
     const hasWl = !!((pv.ur && pv.ur.wl) || (pv.parts && pv.parts.tip)), cur = C('formShow') || 'both';
     const halves = !!(pv.top && pv.bot), curH = C('formHalf') || 'both';
-    const wlN = !!(pv.ur && pv.ur.wl);
+    const wlN = !!(pv.ur && pv.ur.wl) && !(model.opt && model.opt.tipMode === 'droop');   // hängender Randbogen: 3D-Ringe wie Winglet, Beschriftung „Randbogen“
     const items = hasWl ? [['both', wlN ? 'Fläche + Winglet' : 'Fläche + Randbogen'], ['wing', 'nur Fläche'], ['wl', wlN ? 'nur Winglet' : 'nur Randbogen']]
       : halves ? [['h:both', 'beide Hälften'], ['h:top', 'nur obere Form'], ['h:bot', 'nur untere Form']] : [];
     items.push(['ps', 'Trennfläche']);
@@ -6097,20 +6216,32 @@
     if (typeof App.loadFileVia === 'function') App.loadFileVia({ 'text/plain': ['.dat', '.bez', '.txt', '.cor'] }, handler, 'fileDatWl', 'ldDat');
     else inp.click();
   }
+  // Vorlage des hängenden Randbogens anwenden: Längen/Radius relativ zur Endtiefe der aktiven Tragfläche.
+  function applyDroop(v) {
+    const P = DROOP_PRESETS[v]; if (!P) return;
+    const st = stationsAbs(), c = (st.length ? ribExtent(st[st.length - 1].pts).c : 0) || 100, mm = f => Math.max(0, Math.round(f * c));
+    S('formDrPreset', v); S('formDrAng', P.ang); S('formDrLen', mm(P.len)); S('formDrR', mm(P.R)); S('formDrFlat', mm(P.flat)); S('formDrStep', 0);
+    S('formDrCMid', P.cMid); S('formDrCTip', P.cTip); S('formDrThk', P.thk); S('formDrTeSweep', P.teSweep); S('formDrLeSweep', P.le); S('formDrPlanMode', 'lc'); S('formDrToe', 0);
+    S('formDrTipLen', mm(P.tip)); S('formDrTipMode', P.tipMode);
+    const Q = WL_TIP_PRESETS[P.tipMode]; if (Q) { S('formDrTipPLE', Q.pLE); S('formDrTipPTE', Q.pTE); S('formDrTipRef', Q.ref); S('formDrTipThk', Q.thk); }
+    S('formDrInit', true);
+  }
   // Winglet-Spitze: Form (Ellipse / Sichel / frei) + Länge; frei = eigene Exponenten, Bezugspunkt, Dicke.
-  function wlTipRows(body, rr, rb) {
-    selectRow(body, 'Spitzenform', [['ellipse', 'Ellipse (rund)'], ['sichel', 'Sichel (Endleiste läuft weiter, Nase zieht zurück)'], ['custom', 'frei parametrisch']], () => C('formWlTipMode') || 'ellipse', v => {
-      S('formWlTipMode', v); const P = WL_TIP_PRESETS[v]; if (P) { S('formWlTipPLE', P.pLE); S('formWlTipPTE', P.pTE); S('formWlTipRef', P.ref); S('formWlTipThk', P.thk); } rb(); },
-      'Abschluss der Winglet-Spitze wie beim Randbogen: Nasen- und Endleistenlinie laufen als Superellipsen zum Bezugspunkt zusammen. Ellipse: rund (Bezugspunkt Sehnenmitte). Sichel: Endleiste läuft fast gerade weiter, Nase pfeilt zur Spitze zurück. Frei: alle Werte einzeln.');
-    numRow(body, 'Spitzenrundung (mm)', () => C('formWlTipLen'), v => { S('formWlTipLen', v); rr(); }, { step: 1, min: 0, norender: true,
-      hint: '0 = ebener Abschluss, sonst Länge der Spitze entlang der Winglet-Mittellinie.' });
-    if (C('formWlTipMode') === 'custom') {
-      numRow(body, 'Bezugspunkt Spitze (% Sehne)', () => C('formWlTipRef'), v => { S('formWlTipRef', v); rr(); }, { step: 5, min: 0, max: 100, norender: true,
+  // pf = Schlüssel-Präfix ('formWl' Winglet | 'formDr' hängender Randbogen), dr = Texte des hängenden Randbogens, onEdit = z. B. Vorlage -> eigene Werte
+  function wlTipRows(body, rr, rb, pf, dr, onEdit) {
+    pf = pf || 'formWl'; const ed = () => { if (onEdit) onEdit(); };
+    selectRow(body, 'Spitzenform', [['ellipse', 'Ellipse (rund)'], ['sichel', 'Sichel (Endleiste läuft weiter, Nase zieht zurück)'], ['custom', 'frei parametrisch']], () => C(pf + 'TipMode') || 'ellipse', v => {
+      S(pf + 'TipMode', v); ed(); const P = WL_TIP_PRESETS[v]; if (P) { S(pf + 'TipPLE', P.pLE); S(pf + 'TipPTE', P.pTE); S(pf + 'TipRef', P.ref); S(pf + 'TipThk', P.thk); } rb(); },
+      dr ? 'Abschluss des hängenden Teils: Nasen- und Endleistenlinie laufen als Superellipsen zum Bezugspunkt zusammen. Ellipse: rund (Bezugspunkt Sehnenmitte). Sichel: Endleiste läuft fast gerade weiter, Nase zieht zur Spitze zurück. Frei: alle Werte einzeln.' : 'Abschluss der Winglet-Spitze wie beim Randbogen: Nasen- und Endleistenlinie laufen als Superellipsen zum Bezugspunkt zusammen. Ellipse: rund (Bezugspunkt Sehnenmitte). Sichel: Endleiste läuft fast gerade weiter, Nase pfeilt zur Spitze zurück. Frei: alle Werte einzeln.');
+    numRow(body, 'Spitzenrundung (mm)', () => C(pf + 'TipLen'), v => { S(pf + 'TipLen', v); ed(); rr(); }, { step: 1, min: 0, norender: true,
+      hint: dr ? '0 = ebener Abschluss, sonst Länge der Spitzenrundung entlang der Mittellinie (am Ende des hängenden Teils).' : '0 = ebener Abschluss, sonst Länge der Spitze entlang der Winglet-Mittellinie.' });
+    if (C(pf + 'TipMode') === 'custom') {
+      numRow(body, 'Bezugspunkt Spitze (% Sehne)', () => C(pf + 'TipRef'), v => { S(pf + 'TipRef', v); ed(); rr(); }, { step: 5, min: 0, max: 100, norender: true,
         hint: 'Punkt der letzten Rippe, in dem Nase und Endleiste zusammenlaufen: 0 = Nase, 50 = Sehnenmitte, 100 = Endleiste.' });
-      numRow(body, 'Verlauf Nasenlinie Spitze', () => C('formWlTipPLE'), v => { S('formWlTipPLE', v); rr(); }, { step: 0.25, min: 0.5, norender: true,
+      numRow(body, 'Verlauf Nasenlinie Spitze', () => C(pf + 'TipPLE'), v => { S(pf + 'TipPLE', v); ed(); rr(); }, { step: 0.25, min: 0.5, norender: true,
         hint: 'Superellipsen-Exponent: 1 = gerade, 2 = Viertelellipse, 3–8 = lange gerade weiter, dann schnell einlaufend.' });
-      numRow(body, 'Verlauf Endleiste Spitze', () => C('formWlTipPTE'), v => { S('formWlTipPTE', v); rr(); }, { step: 0.25, min: 0.5, norender: true });
-      numRow(body, 'Dicke am Ende (%)', () => C('formWlTipThk'), v => { S('formWlTipThk', v); rr(); }, { step: 5, min: 5, max: 150, norender: true });
+      numRow(body, 'Verlauf Endleiste Spitze', () => C(pf + 'TipPTE'), v => { S(pf + 'TipPTE', v); ed(); rr(); }, { step: 0.25, min: 0.5, norender: true });
+      numRow(body, 'Dicke am Ende (%)', () => C(pf + 'TipThk'), v => { S(pf + 'TipThk', v); ed(); rr(); }, { step: 5, min: 5, max: 150, norender: true });
     }
   }
   function wlProfRow(body, label, key, done) {
@@ -6126,7 +6257,7 @@
     row.appendChild(l); row.appendChild(box); body.appendChild(row);
   }
   function formSidebar(side) {
-    fitInfo = null;
+    fitInfo = null; drInfo = null;
     const rr = () => refresh();
     const rb = () => { buildSidebar(); refresh(); };
     const g = grp('Formenbau: Bauteil', true, 'form', { alwaysOpen: true });
@@ -6142,7 +6273,7 @@
       if (pl.err) { const hw = hint(g.body, pl.err); if (hw && hw.style) hw.style.color = 'var(--warn,#e6b450)'; }
       else hint(g.body, T('Grundriss-Quelle: ') + pl.name + ' (' + (pl.st.length - 1) + ' ' + T('Trapeze') + ')');
     }
-    const part = partMode(), tipIsWl = C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw';
+    const part = partMode(), tipIsWl = wlMode(C('formTipMode')), tipLblWl = C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw';
     // Bauteile aus Segmentgruppen (Fugen zwischen Segmenten, je Bauteil ein Urmodell / eine Form)
     const grpOn = !!grpOpt(), Jn = segJoints();
     if (Jn.length) {
@@ -6167,6 +6298,8 @@
               hint: 'Nur Darstellung: Abstand je Fuge in Spannweitenrichtung (0 = zusammengesetzt wie verbaut).' });
           if (C('formTarget') !== 'ur' && grpTipSep() === false && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw'))
             hint(g.body, 'Hinweis: Das Winglet ist bei Negativform / geteiltem Urmodell im letzten Bauteil hinterschnitten und wird dort flach abgeschlossen — „eigenes Bauteil“ wählen.');
+          else if (C('formTarget') !== 'ur' && grpTipSep() === false && C('formTipMode') === 'droop')
+            hint(g.body, 'Hinweis: Der nach unten gezogene Randbogen ist bei Negativform / geteiltem Urmodell im letzten Bauteil hinterschnitten und wird dort flach abgeschlossen — „eigenes Bauteil“ wählen.');
         } else hint(g.body, 'Mindestens eine Fuge wählen.');
       }
     }
@@ -6222,7 +6355,7 @@
         const s2 = document.createElement('button'); s2.textContent = T(sp ? 'Urmodell unten als STEP…' : 'Form unten als STEP…'); s2.onclick = () => exportMoldStep('bot'); demoBtn(s2);
         sr.appendChild(s1); sr.appendChild(s2);
       } else {
-        const wl = tipIsWl;
+        const wl = tipLblWl;
         const lbl = part === 'tip' ? (wl ? 'Nur Winglet als STEP…' : 'Nur Randbogen als STEP…')
           : part === 'wing' ? 'Nur Tragfläche als STEP…' : 'Urmodell als STEP…';
         const bs = document.createElement('button'); bs.textContent = T(lbl); bs.onclick = exportUrStep; demoBtn(bs); sr.appendChild(bs);
@@ -6243,7 +6376,7 @@
     const tipWl = tipIsWl;
     let pinGrp = null;
     if (C('formTipMode') !== 'flat' && (C('formTarget') === 'ur' || !tipWl || part === 'tip')) {
-      const wl = tipWl;
+      const wl = tipLblWl;
       const row2 = document.createElement('div'); row2.className = 'row full'; row2.style.display = 'grid'; row2.style.gap = '6px'; row2.style.gridTemplateColumns = '1fr 1fr';
       const c1 = document.createElement('button'); c1.textContent = T('Nur Tragfläche als STL…'); c1.onclick = exportWingOnly; demoBtn(c1);
       const c2 = document.createElement('button'); c2.textContent = T(wl ? 'Nur Winglet als STL…' : 'Nur Randbogen als STL…'); c2.onclick = exportTipOnly; demoBtn(c2);
@@ -6311,9 +6444,11 @@
     const tipOpts = planTip ? [['flat', 'Spitze aus dem Grundriss (flacher Deckel)']] : [['round', 'Randbogen (parametrisch)'], ['flat', 'flach (ebener Deckel)']];
     if (planTip) hint(t.body, 'Die Tragfläche verwendet den glatten Grundriss aus dem Planform Creator — dessen Kurve bildet die Spitze bereits. Ein parametrischer Randbogen wird deshalb nicht angehängt (Grundriss auf „Trapeze“ stellen, um ihn zu nutzen).');
     const wlOk = C('formTarget') === 'ur' || partMode() === 'tip';   // Winglet: Urmodell oder eigenes Formteil
+    if (wlOk) tipOpts.splice(1, 0, ['droop', 'Randbogen nach unten gezogen (z. B. LS 3)']);
     if (wlOk) { tipOpts.push(['winglet', 'Winglet (mit Übergangsbogen)']); tipOpts.push(['wldraw', 'Winglet aus Zeichnung (Dreitafel)']); }
+    else if (C('formTipMode') === 'droop') hint(t.body, 'Der nach unten gezogene Randbogen ist bei Formhälften der ganzen Tragfläche hinterschnitten — hier wird der flache Abschluss verwendet. Form dafür: Bauteil „nur Randbogen / Winglet“ wählen (Ziel Urmodell geteilt oder Negativform).');
     else if (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') hint(t.body, 'Winglets gibt es bei Formhälften der ganzen Tragfläche nicht (hinterschnitten) — hier wird der flache Abschluss verwendet. Winglet-Formen: Bauteil „nur Randbogen / Winglet“ wählen (Ziel Urmodell geteilt oder Negativform).');
-    selectRow(t.body, 'Form', tipOpts, () => (planTip && C('formTipMode') === 'round') ? 'flat' : wlOk ? C('formTipMode') : ((C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') ? 'flat' : C('formTipMode')), v => { S('formTipMode', v); if (v !== 'wldraw' && C('formView') === 'wl') S('formView', '3d'); rb(); },
+    selectRow(t.body, 'Form', tipOpts, () => (planTip && C('formTipMode') === 'round') ? 'flat' : wlOk ? C('formTipMode') : (wlMode(C('formTipMode')) ? 'flat' : C('formTipMode')), v => { S('formTipMode', v); if (v === 'droop' && !C('formDrInit')) applyDroop(C('formDrPreset') in DROOP_PRESETS ? C('formDrPreset') : 'ls3'); if (v !== 'wldraw' && C('formView') === 'wl') S('formView', '3d'); rb(); },
       'Verschließt das Außenende der Tragfläche. Randbogen: Nasen- und Endleistenlinie laufen als Superellipsen zum Bezugspunkt (Vorlagen nach echten Segelflugzeugen); flach: ebener Abschluss an der letzten Rippe; Winglet: Fläche biegt tangential in ein senkrecht/schräg stehendes Winglet mit eigenen Profilen.');
     if (C('formTipMode') !== 'flat' && !(planTip && C('formTipMode') === 'round') && (wlOk || C('formTipMode') === 'round'))
       numRow(t.body, 'V-Form Randbogen / Winglet (°)', () => C('formTipDih'), v => { S('formTipDih', v); rr(); }, { step: 0.5, min: -45, max: 60, norender: true,
@@ -6386,6 +6521,48 @@
       hint(t.body, 'Ohne eigenes Profil wird das Profil der Flügel-Endrippe weiterverwendet. Wurzel = am Ende des Übergangsbogens, Spitze = oben; optional ein drittes Profil dazwischen. Zwischen den Stützstellen wird linear gestrakt; im Übergangsbogen geht das Flügelprofil stetig ins Wurzelprofil über.');
       wlProfRow(t.body, 'Wurzel', 'root', rb); wlProfRow(t.body, 'Mitte (optional)', 'mid', rb); wlProfRow(t.body, 'Spitze', 'tip', rb);
       if ((C('formWlProf') || {}).mid) numRow(t.body, 'Lage Mitte (% Winglet-Länge)', () => C('formWlMidPos'), v => { S('formWlMidPos', v); rr(); }, { step: 5, min: 5, max: 95, norender: true });
+    }
+    if (C('formTipMode') === 'droop' && wlOk) {
+      hint(t.body, 'Nach unten gezogener Randbogen wie bei vielen Segelflugzeugen der 70er und 80er Jahre (z. B. LS 3): die Fläche biegt am Ende tangential in einem Kreisbogen nach unten, die Tiefe nimmt dabei stetig ab, der hängende Teil läuft in einer Spitzenrundung aus. Die Oberseite liegt außen, die Unterseite innen im Bogen; alle Übergänge sind knickfrei. Als Form (Negativform / geteiltes Urmodell) nur als eigenes Bauteil „nur Randbogen / Winglet“ – an der ganzen Tragfläche wäre er hinterschnitten.');
+      selectRow(t.body, 'Vorlage', [['custom', '— eigene Werte —'], ['ls3', 'LS 3-artig: fast senkrecht nach unten (85°)'], ['kurz', 'kurz und eng gebogen (70°)'], ['mild', 'leicht hängend (45°)']],
+        () => C('formDrPreset') in DROOP_PRESETS ? C('formDrPreset') : 'custom', v => { if (DROOP_PRESETS[v]) applyDroop(v); else S('formDrPreset', 'custom'); rb(); },
+        'Setzt alle Werte auf eine Vorlage (Längen und Radius relativ zur Endtiefe der Tragfläche). Danach frei änderbar.');
+      const cu = () => S('formDrPreset', 'custom');
+      const dn = (label, key, o) => numRow(t.body, label, () => C(key), v => { S(key, v); cu(); rr(); }, Object.assign({ norender: true }, o));
+      dn('Winkel nach unten (°)', 'formDrAng', { step: 1, min: 5, max: 120,
+        hint: 'Biegewinkel gegen die Fläche (Richtung des letzten Segments, V-Form eingerechnet): 90 = senkrecht nach unten, 45 = schräg. Ältere Segelflugzeuge: etwa 60–90°.' });
+      dn('Länge (mm)', 'formDrLen', { step: 1, min: 5,
+        hint: 'Länge ab der letzten Rippe entlang der Mittellinie (Nasenlinie in der Vorderansicht), inklusive Bogen und Spitzenrundung. Typisch 0,3–0,6 × Endtiefe.' });
+      dn('Biegeradius (mm)', 'formDrR', { step: 1, min: 0,
+        hint: 'Radius, mit dem die Fläche nach unten biegt (Achse parallel zur Sehne, an der Nasenlinie gemessen). Wird automatisch auf mindestens das 1,5-fache der Unterseitentiefe und höchstens so weit begrenzt, dass der Bogen in die Länge passt. Klein = enger Knick, groß = weiche Rundung.' });
+      dn('Gerader Teil vor dem Bogen (mm)', 'formDrFlat', { step: 1, min: 0,
+        hint: 'Verlängert die Fläche vor dem Bogen gerade (V-Form, Pfeilung und Endleistenlinie laufen weiter). 0 = der Bogen beginnt an der letzten Rippe.' });
+      dn('Tiefe nach dem Bogen (% Endtiefe)', 'formDrCMid', { step: 5, min: 5, max: 150,
+        hint: 'Tiefe am Ende des Bogens. Die Endleiste läuft in der Linie der Tragfläche weiter, die Nase wandert stetig nach hinten.' });
+      dn('Rücksprung Nase: Länge (mm)', 'formDrStep', { step: 1, min: 0,
+        hint: 'Länge ab der letzten Rippe, auf der die Tiefe von der Endtiefe auf die Tiefe nach dem Bogen zurückgeht. 0 = über geraden Teil und Bogen verteilt.' });
+      dn('Rückpfeilung Nasenleiste (°)', 'formDrLeSweep', { step: 1, min: 0, max: 80,
+        hint: 'Winkel, unter dem die Nasenleiste im hängenden Teil nach hinten läuft (gegen dessen Mittellinie, 0 = gerade nach unten). Im Bogen geht sie stetig aus der Nasenleiste der Tragfläche hervor. Die Nase steht in der Draufsicht nie vor der verlängerten Nasenleiste der Tragfläche.' });
+      const pm = C('formDrPlanMode') === 'lt' ? 'lt' : 'lc';
+      selectRow(t.body, 'Außerdem vorgegeben', [['lc', 'Tiefe am Ende (Endleiste ergibt sich)'], ['lt', 'Pfeilung Endleiste (Tiefe am Ende ergibt sich)']], () => pm, v => { S('formDrPlanMode', v); cu(); rb(); },
+        'Im hängenden Teil legen Nasenleiste, Endleiste und Tiefe einander fest. Neben der Rückpfeilung wird deshalb entweder die Tiefe am Ende oder die Pfeilung der Endleiste vorgegeben; der andere Wert ergibt sich und steht darunter.');
+      if (pm === 'lc') dn('Tiefe am Ende (% Endtiefe)', 'formDrCTip', { step: 5, min: 2, max: 150,
+        hint: 'Tiefe am Ende des hängenden Teils (die Spitzenrundung läuft darin aus); ab dem Bogenende linear.' });
+      else dn('Pfeilung Endleiste hängender Teil (°)', 'formDrTeSweep', { step: 1, min: -30, max: 60,
+        hint: 'Pfeilung der Endleiste im hängenden Teil gegen seine Mittellinie (positiv = nach hinten, negativ = nach vorn); im Bogen stetiger Übergang aus der Endleiste der Tragfläche.' });
+      const di = document.createElement('div'); di.className = 'hint';
+      drInfo = () => {
+        const p = droopPlan;
+        if (!p) { di.textContent = ''; return; }
+        di.textContent = (pm === 'lc' ? T('Ergibt sich: Pfeilung Endleiste') + ' ' + p.teSweep.toFixed(1) + '°' : T('Ergibt sich: Tiefe am Ende') + ' ' + p.cTip.toFixed(0) + ' % ' + T('der Endtiefe'))
+          + ' · ' + T('wirksamer Biegeradius') + ' ' + p.R.toFixed(1) + ' mm';
+      };
+      drInfo(); t.body.appendChild(di);
+      dn('Dicke am Ende (%)', 'formDrThk', { step: 5, min: 20, max: 150,
+        hint: 'Relative Profildicke am Ende in % der Endrippe (100 = Profil wird nur mit der Tiefe skaliert). Nimmt über die ganze Länge stetig ab; die Lage der Sehne (Anstellung) bleibt.' });
+      dn('Anstellung hängender Teil (°)', 'formDrToe', { step: 0.5,
+        hint: 'Verdrehung des hängenden Teils um seine Nase, im Bogen stetig eingeblendet: positiv = Nase nach außen (zur Oberseite), negativ = nach innen. Meist 0.' });
+      wlTipRows(t.body, rr, rb, 'formDr', true, cu);
     }
     if (C('formTipMode') === 'wldraw' && wlOk) {
       hint(t.body, 'Nasenlinie und Endleiste des Winglets werden als Raumkurven gezeichnet — über ihre Projektionen in Aufriss (Biegung, Neigung), Draufsicht (Grundriss, Pfeilung, Toe) und Seitenansicht (Umriss des stehenden Winglets). Ein Griff verschiebt nur die beiden Koordinaten der jeweiligen Ansicht, die Ansichten bleiben so immer widerspruchsfrei. Punkt 0 sitzt fest am Flügelende, die Kurve schließt tangential an Nasen- bzw. Endleistenlinie des letzten Segments an. Neigung und Pfeilung ergeben sich aus der Zeichnung; die Schränkung (Toe-out, Twist) wird je Profil als Winkel angegeben und bleibt beim Bearbeiten der Kurven erhalten — die Endleistenkurve bestimmt nur die Tiefe, die tatsächliche Endleiste ist gestrichelt eingezeichnet. Ausgewählter Punkt zeigt seine Tangentengriffe (wie in Fusion): Ende ziehen = Richtung/Länge der Tangente, Rechtsklick = zurück auf automatisch.');
@@ -6597,7 +6774,7 @@
         if (gq.jA != null) stkRows(jStkGrp.body, 'formStkJ' + gq.jA);
         if (gq.jB != null) stkRows(jStkGrp.body, 'formStkJ' + gq.jB);
       } }
-    const pm = partMode(), pmWl = pm === 'tip' && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw');
+    const pm = partMode(), pmWl = pm === 'tip' && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw');   // nur Beschriftung
     const lblRoot = pm === 'tip' ? 'Überstand am Anschluss zur Tragfläche (mm)' : 'Überstand Wurzel (mm)';
     const lblTip = pmWl ? 'Überstand hinter der Winglet-Spitze (mm)' : pm === 'wing' ? 'Überstand hinter der letzten Rippe (mm)' : 'Überstand hinter Randbogen (mm)';
     const hintRoot = pm === 'tip' ? '0 = Form endet an der letzten Rippe der Tragfläche (Profil dort offen, Anschluss an die Tragfläche). Größer: Form läuft über den Anschluss hinaus.' : null;
@@ -6774,7 +6951,7 @@
       selectRow(sg.body, 'Aufteilung', [['len', 'feste Stücklänge (von der Wurzel)'], ['seg', 'Tragflächen-Segmente, je in n Stücke'], ['n', 'gesamt in n gleich lange Stücke'], ['max', 'gleich lang, höchstens max. Länge']],
         () => segOpts().mode, v => { S('formSegMode', v); rb(); },
         'Feste Stücklänge: ab dem Wurzelende immer die gleiche Länge, das letzte Stück ist der Rest. Tragflächen-Segmente: die Trennstellen liegen auf den Segmentgrenzen des Entwurfs (Randbogen und Überstände zählen zum ersten/letzten Segment), jedes Segment wird zusätzlich in n gleich lange Stücke geteilt. Gesamt in n Stücke: gleich lange Stücke über die ganze Länge. Max. Länge: so viele gleich lange Stücke, dass keines länger als der Wert ist.');
-      if (partMode() === 'tip' && (C('formTipMode') === 'winglet' || C('formTipMode') === 'wldraw') && C('formTarget') !== 'ur')
+      if (partMode() === 'tip' && wlMode(C('formTipMode')) && C('formTarget') !== 'ur')
         selectRow(sg.body, 'Trennebenen (Winglet-Form)', [['part', 'senkrecht zur Trennfläche'], ['back', 'senkrecht zum ebenen Formhinterbau'], ['z', 'senkrecht zur Spannweite (wie Tragfläche)']],
           () => ['back', 'z'].includes(C('formSegDir')) ? C('formSegDir') : 'part', v => { S('formSegDir', v); rb(); },
           'Richtung der Trennebenen bei der gebogenen Winglet-Form. Senkrecht zur Trennfläche: jede Ebene steht quer zum Winglet an ihrer Stelle; die Stücklängen zählen längs des Winglets (Bogenlänge). Senkrecht zum ebenen Formhinterbau: die Ebene steht zusätzlich rechtwinklig auf der Auflagefläche (nur mit Formhinterbau „ebene Auflagefläche“, sonst wie senkrecht zur Trennfläche). Senkrecht zur Spannweite: wie bei der Tragfläche (Ebenen z = konstant). Bei schrägen Ebenen werden Passstifte automatisch gesetzt.');

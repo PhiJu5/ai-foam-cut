@@ -396,11 +396,11 @@
       if (M.size > 50) M.clear();
       const out = [];
       // Hauptsteckung ab der Wurzelrippe (bei schräger Rippe dort, wo sie die Mitte der Steckung trifft)
-      if (c.stkOn) { const cen = z => stkCenter(G, c, z), z0 = rootZLine(G, c, cen); out.push(stkCalc(G, c, { z0, z1: clamp(z0 + (+c.stkLen || 0), 0, G.L), wall: c.stkWall, round: c.stkForm === 'round', w: c.stkW, fix: c.stkFix, d: c.stkD, v: c.stkV, cen })); }
+      if (c.stkOn) { const cen = z => stkCenter(G, c, z), z0 = rootZLine(G, c, cen); out.push(stkCalc(G, c, { z0, z1: clamp(z0 + (+c.stkLen || 0), 0, G.L), wall: c.stkWall, round: c.stkForm === 'round', w: c.stkW, fix: c.stkFix, d: c.stkD, mode: stkModeOf(c), v: c.stkV, cen })); }
       // Teilungen in Spannweitenrichtung: eigene Steckung je Trennstelle, x mm nach innen und x mm nach außen
       (c.stkSplit || []).forEach((t, i) => {
         const zt = clamp(+t.z || 0, 0, G.L), z0 = Math.max(clamp(zt - Math.max(0, +t.li || 0), 0, G.L), Math.min(zt, rootZLine(G, c, z => capCenter(G, c, z)))), z1 = clamp(zt + Math.max(0, +t.la || 0), 0, G.L);
-        const S = stkCalc(G, c, { z0, z1, wall: t.wall, round: t.form === 'round', w: t.w, fix: t.fix, d: t.d, v: 0, cen: z => capCenter(G, c, z) });
+        const S = stkCalc(G, c, { z0, z1, wall: t.wall, round: t.form === 'round', w: t.w, fix: t.fix, d: t.d, mode: t.vMode === 'wing' ? 'wing' : 'level', v: 0, cen: z => capCenter(G, c, z) });
         S.split = i; S.zt = zt; out.push(S);
       });
       M.set(key, out);
@@ -417,10 +417,28 @@
     if (e >= a && hit(e)) last = e;
     return last == null ? a : Math.min(b, Math.min(last + 1, S.len));
   }
+  // Höhe der V-Form-Linie der Tragfläche bei z (Stationen inkl. globaler V-Form), im Rahmen von section() (flipY aufgehoben)
+  function riseAt(z) {
+    const st = App.wing && App.wing.stations; if (!st || st.length < 2) return 0;
+    const sg = state.cfg.flipY ? -1 : 1;
+    for (let i = 1; i < st.length; i++) if (z <= st[i].z || i === st.length - 1) {
+      const a = st[i - 1], b = st[i], d = b.z - a.z, t = d > 0 ? (z - a.z) / d : 0;
+      return sg * ((+a.yRise || 0) + ((+b.yRise || 0) - (+a.yRise || 0)) * t);
+    }
+    return 0;
+  }
+  // Neigung der Tragfläche (V-Form, °) zwischen z0 und z1: Bezug für die Lage der Steckung
+  const wingAngle = (z0, z1) => z1 > z0 + 1e-6 ? Math.atan((riseAt(z1) - riseAt(z0)) / (z1 - z0)) * 180 / Math.PI : 0;
+  // Lage der Hauptsteckung: 'wing' = parallel zur Tragfläche, 'level' = waagrecht, 'free' = eigener Winkel gegen die Fläche.
+  // Alte Stände ohne Angabe behalten ihre Lage (waagrecht bzw. der Winkel bei Rund).
+  const stkModeOf = c => c.stkVMode || (c.stkForm === 'round' && +c.stkV ? 'free' : 'level');
   function stkCalc(G, c, P) {
     const z0 = P.z0, len = P.z1, wall = Math.max(0, +P.wall || 0), round = !!P.round, zs = [], cen = P.cen;
-    // V-Form nur bei Rund: positiver Winkel = Hülse fällt nach außen gegen die Profilebene (Höhe y = cy + z·tan, tan < 0)
-    const vDeg = round ? clamp(+P.v || 0, -45, 45) : 0, tan = -Math.tan(vDeg * Math.PI / 180), cos = Math.cos(vDeg * Math.PI / 180);
+    // Lage über die Einbindetiefe: vDeg = Winkel gegen die Tragfläche (+ = Hülse fällt nach außen gegen die Profilebene),
+    // tubeDeg = Neigung gegen die Waagrechte (Höhe y = cy + z·tan). waagrecht: vDeg = V-Form der Fläche → gerade Steckung.
+    const wAng = wingAngle(z0, len), mode = P.mode || 'level';
+    const vDeg = mode === 'level' ? wAng : mode === 'free' ? clamp(+P.v || 0, -45, 45) : 0, tubeDeg = mode === 'level' ? 0 : wAng - vDeg;
+    const tan = Math.tan(tubeDeg * Math.PI / 180), cos = Math.cos(tubeDeg * Math.PI / 180);
     const N = Math.max(1, Math.min(40, Math.ceil((len - z0) / 10)));
     for (let i = 0; i <= N; i++) zs.push(z0 + (len - z0) * i / N);
     jointsIn(G, z0, len).forEach(q => zs.push(q.z));
@@ -444,12 +462,12 @@
     // Festes Maß: Hülse ergibt sich daraus, die Prüfung meldet, wenn es nicht passt
     const fix = !!P.fix && +P.d > 0, D = fix ? +P.d : 0;
     const oW = fix && round ? D + 2 * wall : pOW, oH = fix ? D + 2 * wall : pOH, b = box(oW), warn = [];
-    if (!b) return { z0, cx: cen, round, wall, len, fix, vDeg, tan: 0, pH, pW, inW: 0, inH: 0, oW, oH: 0, warn: [T('Die Hülse ragt aus dem Profil.')] };
+    if (!b) return { z0, cx: cen, round, wall, len, fix, mode, vDeg, wAng, tubeDeg, tan, pH, pW, inW: 0, inH: 0, oW, oH: 0, warn: [T('Die Hülse ragt aus dem Profil.')] };
     if (fix && oH > b.H + 1e-6) warn.push(T('Passt nicht: Hülse außen') + ' ' + f1(oH) + ' mm, ' + T('Platz zwischen den Gurten') + ' ' + f1(b.H) + ' mm');
     if (oW > capMin + 1e-6) warn.push(T('Die Hülse ist breiter als der Gurt an der schmalsten Stelle:') + ' ' + f1(capMin) + ' mm');
     const inH = oH - 2 * wall, inW = oW - 2 * wall;
     if (inH <= 0 || inW <= 0) warn.push(T('Zwischen den Gurten bleibt kein Platz für die Steckung.'));
-    return { z0, cx: cen, round, wall, len, fix, vDeg, tan, pH, pW, oW, oH, inW: Math.max(0, inW), inH: Math.max(0, inH), cy: (b.top + b.bot) / 2, warn };
+    return { z0, cx: cen, round, wall, len, fix, mode, vDeg, wAng, tubeDeg, tan, pH, pW, oW, oH, inW: Math.max(0, inW), inH: Math.max(0, inH), cy: (b.top + b.bot) / 2, warn };
   }
   // Abgerundet: die Steckung muss hineinpassen
   const fl1 = v => (Math.floor(v * 10 + 1e-6) / 10).toFixed(1);
@@ -464,6 +482,8 @@
     else line(T('Steckung möglich: Dicke') + ' ' + fl1(S.pH) + ' mm × ' + T('Breite') + ' ' + fl1(S.pW) + ' mm', '#7ee0a0');
     if (S.fix) line(T('Eingetragen:') + ' ' + (S.round ? 'Ø ' + f1(S.inH) : f1(S.inH) + ' × ' + f1(S.inW)) + ' mm');
     line(S.round ? T('Hülse außen: Ø') + ' ' + f1(S.oH) + ' mm' : T('Hülse außen:') + ' ' + f1(S.oH) + ' × ' + f1(S.oW) + ' mm');
+    if (Math.abs(S.wAng) > 0.05 || Math.abs(S.tubeDeg) > 0.05)
+      line(T('Neigung der Hülse') + ' ' + f1(S.tubeDeg) + '°, ' + T('V-Form der Tragfläche') + ' ' + f1(S.wAng) + '°' + (S.split == null ? ', ' + T('Knick der Steckung') + ' ' + f1(Math.abs(2 * S.tubeDeg)) + '°' : ''));
     S.warn.forEach(w => line(w, '#ffb454'));
     if (S.split != null && S.cy != null) c.holm.forEach((st, k) => {
       const d = stegData(G, c, st, 'holm');
@@ -641,7 +661,7 @@
     const dk = mkGrp('stk');
     App.boolRow(dk, 'Steckung vorsehen', () => !!c.stkOn, v => {
       c.stkOn = v;
-      if (v && c.stkWall == null) { c.stkWall = 1; c.stkLen = Math.round(Math.min(200, L)); c.stkForm = 'square'; c.stkW = 15; }
+      if (v && c.stkWall == null) { c.stkWall = 1; c.stkLen = Math.round(Math.min(200, L)); c.stkForm = 'square'; c.stkW = 15; c.stkVMode = 'wing'; }
       refresh(true);
     });
     stkBox = (c.stkOn || (c.stkSplit || []).length) ? document.createElement('div') : null;
@@ -651,7 +671,12 @@
       numRow(dk, 'Wandstärke Hülse (mm)', () => c.stkWall, v => { c.stkWall = Math.max(0, v); upd(); }, GR);
       numRow(dk, 'Einbindetiefe ab Wurzel (mm)', () => c.stkLen, v => { c.stkLen = clamp(v, 0, L); upd(); }, Object.assign({}, NR, { step: 10 }));
       if (c.stkForm !== 'round') numRow(dk, 'Breite Steckung (mm)', () => c.stkW, v => { c.stkW = Math.max(0, v); upd(); }, GB);
-      if (c.stkForm === 'round') numRow(dk, 'V-Form der Steckung (° je Seite)', () => c.stkV || 0, v => { c.stkV = clamp(v, -45, 45); upd(); }, Object.assign({}, NR, { step: 0.5, min: -45, max: 45 }));
+      selectRow(dk, 'Lage der Steckung', [['wing', 'parallel zur Tragfläche (V-Form)'], ['level', 'waagrecht (gerade Steckung)'], ['free', 'eigener Winkel']], () => stkModeOf(c), v => {
+        // beim Wechsel auf „eigener Winkel“ mit der bisherigen Lage vorbelegen (kein Sprung)
+        if (v === 'free' && stkModeOf(c) !== 'free') { const S0 = stkData(G, c); c.stkV = S0 ? Math.round(S0.vDeg * 10) / 10 : 0; }
+        c.stkVMode = v; refresh(true);
+      }, 'Parallel zur Tragfläche: Die Hülse folgt der V-Form; die Steckung ist in der Mitte um 2 × V-Form geknickt. Waagrecht: gerade Steckung durch den Rumpf, die Hülse liegt schräg in der Fläche (weniger Platz zwischen den Gurten).');
+      if (stkModeOf(c) === 'free') numRow(dk, 'Winkel gegen die Tragfläche (° je Seite)', () => c.stkV || 0, v => { c.stkV = clamp(v, -45, 45); upd(); }, Object.assign({}, NR, { step: 0.5, min: -45, max: 45, hint: '+ = Hülse fällt nach außen gegen die Profilebene. 0 = parallel zur Tragfläche, gleich der V-Form der Fläche = waagrecht.' }));
       App.boolRow(dk, 'Festes Maß eintragen', () => !!c.stkFix, v => { c.stkFix = v; if (v && !(+c.stkD > 0)) { const S0 = stkData(G, c); c.stkD = S0 ? Math.floor(S0.pH * 10) / 10 : 0; } refresh(true); });
       if (c.stkFix) numRow(dk, c.stkForm === 'round' ? 'Durchmesser Steckung (mm)' : 'Dicke Steckung (mm)', () => c.stkD, v => { c.stkD = Math.max(0, v); upd(); }, GR);
     }
@@ -660,7 +685,7 @@
     numRow(dk, 'Anzahl Teilungen', () => (c.stkSplit || []).length, v => {
       const n = Math.max(0, Math.min(10, Math.round(v))), A = c.stkSplit || (c.stkSplit = []);
       while (A.length > n) A.pop();
-      while (A.length < n) A.push({ z: Math.round(L * (A.length + 1) / (n + 1)), li: 100, la: 100, form: 'square', w: 10, wall: 1 });
+      while (A.length < n) A.push({ z: Math.round(L * (A.length + 1) / (n + 1)), li: 100, la: 100, form: 'square', w: 10, wall: 1, vMode: 'wing' });
       refresh(true);
     }, { step: 1, min: 0, max: 10, int: true, norender: true, enter: true });
     (c.stkSplit || []).forEach((t, i) => {
@@ -669,6 +694,7 @@
       numRow(dk, 'Steckung in den Flügel innen (mm)', () => t.li, v => { t.li = Math.max(0, v); upd(); }, Object.assign({}, NR, { step: 10 }));
       numRow(dk, 'Steckung in den Flügel außen (mm)', () => t.la, v => { t.la = Math.max(0, v); upd(); }, Object.assign({}, NR, { step: 10 }));
       selectRow(dk, 'Form', [['square', 'Vierkant'], ['round', 'Rund']], () => t.form || 'square', v => { t.form = v; refresh(true); });
+      selectRow(dk, 'Lage der Steckung', [['wing', 'parallel zur Tragfläche (V-Form)'], ['level', 'waagrecht']], () => t.vMode === 'wing' ? 'wing' : 'level', v => { t.vMode = v; refresh(true); });
       numRow(dk, 'Wandstärke Hülse (mm)', () => t.wall, v => { t.wall = Math.max(0, v); upd(); }, GR);
       if (t.form !== 'round') numRow(dk, 'Breite Steckung (mm)', () => t.w, v => { t.w = Math.max(0, v); upd(); }, GB);
       App.boolRow(dk, 'Festes Maß eintragen', () => !!t.fix, v => { t.fix = v; if (v && !(+t.d > 0)) { const S0 = stkAll(G, c).find(q => q.split === i); t.d = S0 ? Math.floor(S0.pH * 10) / 10 : 0; } refresh(true); });

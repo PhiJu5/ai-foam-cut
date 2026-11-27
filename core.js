@@ -247,9 +247,15 @@
       // Dreht den Block um die Hochachse, bis die Bezugslinie parallel zur Draht-
       // achse liegt -> weniger X-Fahrweg. Wirkt NUR auf die Turmbahnen (left/right).
       sweepRot: false,
-      sweepRotMode: 'auto',                // 'auto' (aus Bezugslinie) | 'manual' (fester Winkel)
+      sweepRotMode: 'min',                 // 'min' (kürzester Fahrweg) | 'ref' (aus Bezugslinie; alt 'auto') | 'manual' (fester Winkel)
       sweepRotRef: 0,                      // Sehnenanteil der Bezugslinie: 0 = Nasenleiste, 0.25 = t/4, 1 = Endleiste
       sweepRotAngle: 0,                    // fester Drehwinkel (°) im Modus 'manual'
+      // Dasselbe im Negativdesign (negsweeprot.js) — EIGENE Werte, keine Kopplung
+      // an die Kern-Drehung; je Tragfläche über das neg*-Präfix.
+      negSweepRot: false,
+      negSweepRotMode: 'min',              // 'min' | 'ref' (alt 'auto') | 'manual' — wie sweepRotMode
+      negSweepRotRef: 0,                   // Sehnenanteil der Bezugslinie (0 = Nasenleiste)
+      negSweepRotAngle: 0,                 // fester Drehwinkel (°) im Modus 'manual'
       flipY: false,                        // Profil kopfüber schneiden (Unterseite oben, V-Form mitgespiegelt)
       stackCount: 1,                       // Kern übereinander stapeln: Anzahl Kopien (1 = aus)
       stackGap: 5,                         // vertikaler Abstand zwischen gestapelten Kernen (mm)

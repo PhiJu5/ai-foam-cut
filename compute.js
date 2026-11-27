@@ -707,7 +707,9 @@
       leStyle: state.cfg.leStyle, teStyle: state.cfg.teStyle
     });
     const segIdx = state.segments.indexOf(seg);
-    const res = applyStack(App.noseBarApply ? App.noseBarApply(applySparCuts(pr, cut, segIdx), cut, segIdx) : applySparCuts(pr, cut, segIdx));
+    const res0 = App.noseBarApply ? App.noseBarApply(applySparCuts(pr, cut, segIdx), cut, segIdx) : applySparCuts(pr, cut, segIdx);
+    // Kern vorne/hinten geteilt (kernteilung.js): kein Stapeln — geteilt wird eine Kopie.
+    const res = (App.coreSplitOn && App.coreSplitOn(segIdx)) ? res0 : applyStack(res0);
     // Manueller Schnittpfad-Override dieses Segments (falls vorhanden).
     const ovr = state.pathEdit && state.pathEdit[segIdx];
     let out = startAtTop(ovr ? applyPathOverride(res, ovr) : res);
@@ -715,9 +717,11 @@
     // LETZTER Schritt und projiziert nur left/right rotiert neu — erfasst dadurch
     // Holme/Stapel/Override (alle stecken bereits in rootPath/tipPath).
     if (state.cfg.sweepRot && window.SweepRot) {
+      const mw = state.cfg.machineWidth, mirror = rootAtRight(), bz = effBlockZ(cut.span);
+      const mode = state.cfg.sweepRotMode || 'min';
       const rotOpts = {
-        machineWidth: state.cfg.machineWidth,
-        mode: state.cfg.sweepRotMode,
+        machineWidth: mw,
+        mode,
         ref: state.cfg.sweepRotRef,
         angleDeg: state.cfg.sweepRotAngle
       };
@@ -726,21 +730,28 @@
       // Geometrie in z (dz), sodass der dem Wurzelseiten-Portal am nächsten
       // gelegene Blockeckpunkt exakt blockZ entfernt liegt (statt der — nun
       // schräg stehenden — Wurzelebene).
-      const rot = SweepRot.rotation(out, rotOpts);
-      if (rot) {
-        const e = blockExt(seg, cut.root.chord, cut.tip.chord);
-        const xr = cut.root.pts.map(p => p.x), xt = cut.tip.pts.map(p => p.x);
-        const corners = [
-          [Math.max.apply(null, xr) + e.teR, out.zRoot], [Math.min.apply(null, xr) - e.leR, out.zRoot],
-          [Math.max.apply(null, xt) + e.teT, out.zTip],  [Math.min.apply(null, xt) - e.leT, out.zTip]
-        ];
+      const e = blockExt(seg, cut.root.chord, cut.tip.chord);
+      const xr = cut.root.pts.map(p => p.x), xt = cut.tip.pts.map(p => p.x);
+      const corners = [
+        [Math.max.apply(null, xr) + e.teR, out.zRoot], [Math.min.apply(null, xr) - e.leR, out.zRoot],
+        [Math.max.apply(null, xt) + e.teT, out.zTip],  [Math.min.apply(null, xt) - e.leT, out.zTip]
+      ];
+      const zRange = rot => {
         let zmin = Infinity, zmax = -Infinity;
         corners.forEach(([x, z]) => { const p = SweepRot.rotXZ(x, z, rot.a, rot.px, rot.pz); if (p.z < zmin) zmin = p.z; if (p.z > zmax) zmax = p.z; });
-        const mw = state.cfg.machineWidth, mirror = rootAtRight();
-        // mirror: Wurzelseite am RECHTEN Portal (z=mw) -> nächster Punkt = max z.
-        const bz = effBlockZ(cut.span);
-        rotOpts.dz = mirror ? ((mw - bz) - zmax) : (bz - zmin);
+        return { zmin, zmax };
+      };
+      // mirror: Wurzelseite am RECHTEN Portal (z=mw) -> nächster Punkt = max z.
+      const dzFor = rot => { const r = zRange(rot); return mirror ? ((mw - bz) - r.zmax) : (bz - r.zmin); };
+      // „Automatisch (kürzester Fahrweg)": Winkel suchen, bei dem beide Turmbahnen
+      // zusammen den kleinsten X-Fahrweg brauchen; der gedrehte Block muss dabei
+      // zwischen die Portale passen. Holme/Stapel/Override stecken schon in out.
+      if (mode === 'min') {
+        const fits = (rot, dz) => { const r = zRange(rot); return r.zmin + dz >= -1e-6 && r.zmax + dz <= mw + 1e-6; };
+        rotOpts.angleRad = SweepRot.bestAngle(out, { machineWidth: mw, dzFor, fits });
       }
+      const rot = SweepRot.rotation(out, rotOpts);
+      if (rot) rotOpts.dz = dzFor(rot);
       out = SweepRot.apply(out, rotOpts);
     }
     return out;
@@ -891,6 +902,17 @@
     if (cfg.extOverBlockClearTE == null) cfg.extOverBlockClearTE = 5;
   }
   migrateExtOverBlock(state.cfg);
+  // „Werkstück drehen": der alte Modus 'auto' (Bezugslinie) heißt jetzt 'ref'; neuer
+  // Standard ist 'min' (kürzester Fahrweg). War die Drehung im Projekt AN, bleibt es
+  // bei der Bezugslinie (G-Code unverändert); war sie aus, war 'auto' nur die alte
+  // Vorgabe -> beim Einschalten gleich die neue Automatik. Kern und Negativdesign.
+  function migrateSweepRotMode(cfg) {
+    if (!cfg) return;
+    [['sweepRot', 'sweepRotMode'], ['negSweepRot', 'negSweepRotMode']].forEach(([on, m]) => {
+      if (cfg[m] === 'auto') cfg[m] = cfg[on] ? 'ref' : 'min';
+    });
+  }
+  Object.assign(App, { migrateSweepRotMode });
   Object.assign(App, { currentFeed, currentHeat, matNote, currentKerf, currentWireS, cutKerf, delMaterial, effSweep, extEffTip, migrateExtOverBlock });
   Object.assign(App, { ribFitCfg, feedPair, inheritRootExtensions, kerfForSpeed, kerfPair, lerpProfile, matField, matHeat, matOptions });
   Object.assign(App, { heatForSpeed, heatPair, matHeatSlow, setHeatSlow, wireSFor, matExtPower, relayLevel, extPowerText });

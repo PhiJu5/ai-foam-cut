@@ -78,6 +78,16 @@
       "default": true
     },
     {
+      "id": "kernteilung",
+      "name": "Kern vorne/hinten teilen (tiefe Wurzelrippen)",
+      "description": "Kerndesign: den Kern eines Segments an einer Trennfuge parallel zur Spannweite in ein vorderes und ein hinteres Teil zerlegen, wenn die Rippe nicht in den Verfahrweg passt. Jedes Teil eigener Rohblock und eigenes Programm; die Fuge wird als senkrechter Blockschnitt mit gleichem Abbrand an Wurzel und Rand gefahren, geklebt ergibt sich das Maß eines Schnitts aus einem Stück.",
+      "files": [
+        "kernteilung.js"
+      ],
+      "tabs": [],
+      "default": true
+    },
+    {
       "id": "steghoehe",
       "name": "Steghöhen (Holm- und Ruderstege)",
       "description": "Reiter „Steghöhen“: Holm- und Ruderstege aus dem Tragflächendesign festlegen, Höhenliste je Steg (alle x mm und an jedem Segmentstoß), Draufsicht, Vorderansicht und Schnitte, Übernahme in die CAD-Bearbeitung.",
@@ -97,9 +107,10 @@
     {
       "id": "servos",
       "name": "Flächenservos (Servos, Ruderhörner, Anlenkung)",
-      "description": "Reiter „Flächenservos“: Servos aus einer Typenliste platzieren, Hebel, Ruderhorn, Anlenkung normal oder überkreuz, Kinematik mit Ausschlag, Übersetzung und Moment; Kollisionsprüfung gegen Stege, Gurt und Steckung; automatische Schnitte durch Servo und Anlenkung.",
+      "description": "Reiter „Flächenservos“: Servos aus einer Typenliste platzieren, Hebel, Ruderhorn, Anlenkung normal oder überkreuz, Kinematik mit Ausschlag, Übersetzung und Moment; Kollisionsprüfung gegen Stege, Gurt und Steckung; automatische Schnitte durch Servo und Anlenkung; Sender live über Jeti EX Bus (USB-Seriell-Adapter) mit Kanalzuordnung und Schleppzeiger.",
       "files": [
-        "servos.js"
+        "servos.js",
+        "jetiexbus.js"
       ],
       "tabs": [
         "servo"
@@ -201,6 +212,36 @@
       "default": true,
       "views": [
         "vbfView"
+      ]
+    },
+    {
+      "id": "ballastbox",
+      "name": "Ballastbox (auf den Tragflächenverbinder)",
+      "description": "Reiter „Ballastbox“ (Menü Tragflächen): parametrische Ballastbox für den 3D-Druck in drei Bauarten — zum Aufschieben auf den Tragflächenverbinder mit Lippe und Klettband, Kasten mit Hülse und Klemmschraube oder Durchsteckblock mit Klemmschrauben (Deckel mit Aussparungen für die Schraubenköpfe) — Verbindermaße (Breite, Höhe, V-Knick) frei oder aus Verbinderform / Steghöhen / Formenbau übernommen; Breite, Höhe und Tiefe der Box folgen aus Maß und Anzahl der Ballaststücke (nebeneinander × übereinander × hintereinander, Quader oder Rundmaterial), Spiel, Trennwänden und Wandstärke; Anschlagwand mit Lippe, Klettband-Schlaufen, Stülpdeckel (bündig oder übergestülpt), Ballastmasse und Schwerpunktlage, STL/3MF in Druckposition.",
+      "files": [
+        "ballastbox.js"
+      ],
+      "tabs": [
+        "ballast"
+      ],
+      "default": true,
+      "views": [
+        "ballastView"
+      ]
+    },
+    {
+      "id": "servorahmen",
+      "name": "Servorahmen (Flächenservos, 3D-Druck)",
+      "description": "Reiter „Servorahmen“ (Menü Tragflächen): Servorahmen zum Einkleben auf die Beplankung für alle KST- und Chaservo-Servos (dazu MKS und eigene Maße) als STL/3MF — Laschenrahmen (Servo an flachen Laschen oder Flansch-Laschen verschraubt, Laschenmaße aus den KST-Datenblättern X06/X10/X12-508/HS08, sonst selbst eintragbar) oder Klemmrahmen mit verschraubtem Deckel für laschenlose Servos; Spiel, Wandstärke, offener oder geschlossener Boden, Klebeflansch, Kabelschlitz, Anschläge, Gegenlager mit Miniatur-Kugellager in der Flucht der Abtriebswelle, Schraubenwahl mit Kern-/Durchgangslöchern, normal/gespiegelt/als Paar, Masse und Einbauhöhe; Servos aus dem Reiter Flächenservos übernehmbar.",
+      "files": [
+        "servorahmen.js"
+      ],
+      "tabs": [
+        "srvr"
+      ],
+      "default": true,
+      "views": [
+        "srvrView"
       ]
     },
     {
@@ -483,7 +524,12 @@
       "name": "Flugsimulator (mit dem Gesamtmodell fliegen)",
       "description": "Reiter „Flugsimulator“: mit dem Flugzeug aus „Flugzeug gesamt“ wie mit einem Modellflugzeug fliegen — Pilotensicht am Boden oder Verfolgerkamera, Hand-/Hoch-/Bodenstart, Wind und Thermik, Steuerung per Tastatur oder Fernsteuerung (USB-Joystick).",
       "files": [
-        "flugsim.js"
+        "flugsim.js",
+        "fsim_ls4.js",
+        "fsim_ask21.js",
+        "fsim_ka6.js",
+        "fsim_arcus.js",
+        "fsim_dg300.js"
       ],
       "tabs": [
         "fsim"
@@ -494,6 +540,21 @@
       ],
       "requires": [
         "flugzeug"
+      ]
+    },
+    {
+      "id": "staender",
+      "name": "Tragflächenständer (Stützen und Bohrschablone)",
+      "description": "Reiter „Tragflächenständer“ (Menü Flugzeug): Stützen, die die Tragflächen beim Einkleben der Anschlüsse in den Rumpf in Höhe und Anstellwinkel halten — Oberkante = Profilunterseite an der Stelle x mm ab Wurzel (mit Spiel/Polster), Haken für Gummiringe vorne und hinten, Fußplatte zum Einstecken; dazu eine Bohrschablone aus zwei Platten mit der Wurzelrippe aus „Steghöhen“ (originale Profilkontur, Hülse und Bohrungen als Bohrführung, in Richtung der Steckung), unten verbunden, lichter Abstand vorne/hinten für den Rumpf. Ausgabe STL (flach druckbar oder zusammengebaut) und DXF.",
+      "files": [
+        "staender.js"
+      ],
+      "tabs": [
+        "tfst"
+      ],
+      "default": true,
+      "views": [
+        "tfstView"
       ]
     },
     {

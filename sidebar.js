@@ -68,7 +68,7 @@
     });
   }
   // Gruppen, die standardmäßig OFFEN starten (weiterhin zuklappbar).
-  const GRP_OPEN_DEFAULT = new Set(['vbfMain', 'rpssMain', 'rpssCuts', 'rpssSel', 'rpssJoints', 'Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
+  const GRP_OPEN_DEFAULT = new Set(['vbfMain', 'ballType', 'ballMain', 'ballPieces', 'srvrServo', 'srvrFrame', 'srvrView', 'rpssMain', 'rpssCuts', 'rpssSel', 'rpssJoints', 'Quelle Gcode', 'Tragfläche, Schnitt und Block', 'Blocklage', 'Segmente', 'Werkstoff', 'matdb', 'Erstellen', 'Bearbeiten', 'Fang & Optionen', 'cadLayer', 'Maschinengeometrie', 'Vorschub-Modus', 'Maschinengrenzen & Warnungen']);
   /* opts.alwaysOpen = true -> Gruppe ist dauerhaft offen und NICHT klappbar
    * (kein Pfeil, kein Klick). Sonst: gemerkter Zustand, Standard zugeklappt
    * (außer in GRP_OPEN_DEFAULT). */
@@ -520,6 +520,13 @@
     row.appendChild(l); row.appendChild(s); body.appendChild(row);
     return s;
   }
+  // „Werkstück drehen (Pfeilung)": Winkel-Modi, gemeinsam für Kern- und
+  // Negativdesign (negsweeprot.js nutzt App.SWEEP_ROT_MODES/_HINT).
+  const SWEEP_ROT_MODES = [['min', 'Automatisch (kürzester Fahrweg)'], ['ref', 'Aus Bezugslinie'], ['manual', 'Fester Winkel']];
+  const SWEEP_ROT_MODE_HINT = '„Automatisch": sucht den Drehwinkel mit dem kürzesten X-Fahrweg beider '
+    + 'Portale (der gedrehte Block muss zwischen die Portale passen). „Aus Bezugslinie": dreht die '
+    + 'gewählte Linie (Sehnenanteil) parallel zur Drahtachse — sind Nasen- und Endleiste verschieden '
+    + 'stark gepfeilt, kann der Fahrweg dabei sogar länger werden. „Fester Winkel": eigener Wert.';
   function areaRow(body, label, get, set) {
     const row = document.createElement('div'); row.className = 'row full';
     const l = document.createElement('label'); l.textContent = T(label);
@@ -1876,6 +1883,7 @@
     side.appendChild(shc.g);
     if (App.noseBarSidebar) App.noseBarSidebar(side);       // Nasenleiste (Vierkant-Tasche)
     if (App.kernTeileSidebar) App.kernTeileSidebar(side);   // Kern zerteilen (Stege) + Schale erhalten
+    if (App.coreSplitSidebar) App.coreSplitSidebar(side);   // Kern vorne/hinten teilen (kernteilung.js)
 
     // --- Elliptische Fläche aus Planform Creator (pc2wing.js) ---------
     if (App.pc2WingSidebar) App.pc2WingSidebar(side);
@@ -2130,18 +2138,18 @@
     const swr = grp('Werkstück drehen (Pfeilung)', true, 'core');
     boolRow(swr.body, 'Drehung aktiv', () => state.cfg.sweepRot,
       // Profilvergleich öffnet NUR über den Button unten, nicht beim Einschalten.
-      v => { state.cfg.sweepRot = v; buildSidebar(); render(); if (!v) closeSweepCmp(); },
-      'Dreht das Werkstück um die Hochachse, bis die Bezugslinie parallel zur '
-      + 'Drahtachse liegt — so braucht ein stark gepfeiltes Segment deutlich weniger '
-      + 'X-Fahrweg. Der Heißdraht schneidet weiter die gleiche Regelfläche; die nötige '
+      v => { state.cfg.sweepRot = v; buildSidebar(); render(); if (!v) closeSweepCmp('core'); },
+      'Dreht das Werkstück um die Hochachse, damit ein stark gepfeiltes Segment '
+      + 'weniger X-Fahrweg braucht. Der Heißdraht schneidet weiter die gleiche Regelfläche; die nötige '
       + 'Profil-„Verzerrung" an den Türmen entsteht automatisch. Wirkt nur auf die '
       + 'Turmbahnen/G-Code, nicht auf das Kerndesign.');
     if (state.cfg.sweepRot) {
-      selectRow(swr.body, 'Winkel', [['auto', 'Automatisch (aus Bezugslinie)'], ['manual', 'Fester Winkel']],
-        () => state.cfg.sweepRotMode, v => { state.cfg.sweepRotMode = v; buildSidebar(); render(); },
-        '„Automatisch": Drehwinkel so, dass die gewählte Bezugslinie (Sehnenanteil) '
-        + 'parallel zur Drahtachse liegt (minimaler Versatz). „Fester Winkel": eigener Wert.');
-      if (state.cfg.sweepRotMode === 'auto')
+      // 'auto' = alter Name von „Aus Bezugslinie" (Altprojekte, migrateSweepRotMode).
+      const swMode = () => { const m = state.cfg.sweepRotMode; return m === 'manual' ? 'manual' : (m === 'ref' || m === 'auto') ? 'ref' : 'min'; };
+      selectRow(swr.body, 'Winkel', SWEEP_ROT_MODES,
+        swMode, v => { state.cfg.sweepRotMode = v; buildSidebar(); render(); },
+        SWEEP_ROT_MODE_HINT);
+      if (swMode() === 'ref')
         numRow(swr.body, 'Bezugslinie (Sehnenanteil 0–1)', () => state.cfg.sweepRotRef,
           v => { state.cfg.sweepRotRef = Math.max(0, Math.min(1, v)); render(); },
           { step: 0.05, min: 0, max: 1,
@@ -2255,6 +2263,8 @@
       hint(pv.body, 'Profil, Block, Anfahrt, Startpunkt und Schnittrichtung stellt der Reiter „Ausschnitte" ein.');
     } else {
       pv.body.appendChild(segmentSelectRow());
+      // Kern vorne/hinten geteilt (kernteilung.js): welches Teil das Programm schneidet.
+      if (state.cfg.gcodeSource === 'core' && App.coreSplitGcodeRow) App.coreSplitGcodeRow(pv.body);
     }
     if (App.matFree && App.matFree()) matFreeGcodeRows(pv.body);
     side.appendChild(pv.g);
@@ -2399,11 +2409,14 @@
 
     if (App.stegeSidebar) App.stegeSidebar(side);   // Kern in Stege zerlegen (nur mit Kern)
     if (App.negSparSidebar) App.negSparSidebar(side);   // Holmausschnitte im Kern (nur mit Kern)
+    if (App.negSweepRotSidebar) App.negSweepRotSidebar(side);   // Werkstück drehen (Pfeilung), eigene Einstellungen (negsweeprot.js)
     App.ptEditMenu(side, 'neg');   // Punkte-Editor (Negativschalendesign)
 
     // --- Reiter „Formenbau" (form, optionales Feature) ------------------
     if (App.formSidebar) App.formSidebar(side);
     if (App.vbfSidebar) App.vbfSidebar(side);   // Reiter „Verbinderform“ (vbf, optionales Feature)
+    if (App.ballastSidebar) App.ballastSidebar(side);   // Reiter „Ballastbox“ (ballast, optionales Feature)
+    if (App.srvrSidebar) App.srvrSidebar(side);   // Reiter „Servorahmen“ (srvr, optionales Feature)
 
     // --- Reiter „Rumpf" (rpro) und „Rumpf Spanten" (rprob), optionale Features ---
     if (App.rproSidebar) App.rproSidebar(side);
@@ -2426,6 +2439,7 @@
     if (App.decalSidebar) App.decalSidebar(side);
     if (App.flzSidebar) App.flzSidebar(side);   // Reiter „Flugzeug gesamt“ (optional)
     if (App.fsimSidebar) App.fsimSidebar(side); // Reiter „Flugsimulator“ (optional)
+    if (App.tfstSidebar) App.tfstSidebar(side); // Reiter „Tragflächenständer“ (optional)
 
     // --- Reiter „Aerodynamik" (aero, optionales Feature) ------------------
     if (App.aeroSidebar) App.aeroSidebar(side);
@@ -3974,12 +3988,12 @@
   }
 
   // ---- Registry: eigene Top-Level-Namen bereitstellen (automatisch) ----
-  Object.assign(App, { kerfModeOf, kerfModeRow, kerfTrueRow });
+  Object.assign(App, { kerfModeOf, kerfModeRow, kerfTrueRow, SWEEP_ROT_MODES, SWEEP_ROT_MODE_HINT });
   Object.assign(App, { AXIS_L, GRP_OPEN_DEFAULT, GRP_PALETTE, HINTS_KEY, MENU_COL_KEY, MENU_REG, NOTES_KEY, applyHintsMode });
   Object.assign(App, { applyMenuColor, applyMenuColors, applyNotesEnabled, applySidebarFilter, areaRow, blockCutLowRows, boolRow, buildModelGcodeSidebar, buildModelScene });
   Object.assign(App, { buildModelSidebar, buildModelStlSidebar, buildNotePop, buildPlateScene, buildPlateSidebar, buildSidebar, closeNotePop, decorateFields });
   Object.assign(App, { decorateHints, decorateNotes, effBlockZ, extTriple, grp, grpColor, grpColorDefault, grpKey });
-  Object.assign(App, { grpState, hint, hintHost, mgCfg, mgOpt, mkMini, modelGcode, newSpar });
+  Object.assign(App, { grpState, hint, hintHost, mgCfg, mgOpt, mkMini, modelGcode, newSpar, releaseGcodeLock });
   Object.assign(App, { noteBuckets, noteGet, noteHas, noteKey, noteSet, numRow, numRowEnter, openNotePop, plateCfg });
   Object.assign(App, { plateGcode, platePlacements, profilePicker, refreshNoteMarks, saveMenuColors, scheduleMenuColors, segBox, segCard });
   Object.assign(App, { segmentCutCard, segmentSelectRow, segmentShapeCard, segmentSheetRows, selectRow, setHintsMode, setNotesEnabled, sheetingGroup });

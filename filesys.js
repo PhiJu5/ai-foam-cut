@@ -1905,6 +1905,7 @@
     // Entfernter EL-Modus „Skelett-Keil" -> auf „Horizontal" migrieren.
     if (state.cfg.teStyle === 'camber') state.cfg.teStyle = 'horizontal';
     App.migrateExtOverBlock(state.cfg);   // alt: ein Schalter für NL & EL -> getrennt
+    if (App.migrateSweepRotMode) App.migrateSweepRotMode(state.cfg);   // Werkstück drehen: 'auto' -> 'ref'/'min'
     // Aus dem Projekt kommt nur die ausgewählte Werkstoff-ID; die Datenbank
     // selbst (mats/props/kerf/feed/heat/cal, height, safeH, meltDwell,
     // preheatSec, preheatH) bleibt unangetastet. Altprojekte mit vollem

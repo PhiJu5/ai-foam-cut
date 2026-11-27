@@ -20,6 +20,7 @@ die hier aufgefuehrten Lizenzen gelten ausschliesslich fuer die jeweils genannte
 | 7 | replicad-opencascadejs / Open CASCADE Technology (`occad_lib.js`, `occad_wasm.js`) | siehe Abschnitt 7 | LGPL-2.1 | alle Ausgaben (CAD-Volumen im Reiter „3D-Bearbeitung“) |
 | 8 | NeuralFoil, AeroSandbox (JS-Portierung in `neuralfoil.js`, `neuralfoil_data.js`) | | MIT | alle Ausgaben (Profilpolaren) |
 | 9 | XFOIL (`XFOIL/xfoil.exe`) | 6.99 | GPL | Windows-Ausgaben (Profilpolaren) |
+| 10 | FlightGear-Segler LS4, ASK 21, Ka 6 CR, Arcus, DG-300 (`fsim_ls4.js`, `fsim_ask21.js`, `fsim_ka6.js`, `fsim_arcus.js`, `fsim_dg300.js`) | FGAddon trunk, Stand 2026-11 | GPL-2.0-or-later | alle Ausgaben (Reiter „Flugsimulator“) |
 
 ---
 
@@ -884,3 +885,29 @@ SOFTWARE.
 
 Copyright (C) Mark Drela, Harold Youngren. Unverändertes Programm, läuft als
 eigener Prozess. Quellcode: https://web.mit.edu/drela/Public/web/xfoil/
+
+---
+
+## 10. FlightGear-Segler (3D-Modelle im Flugsimulator) — GNU General Public License 2.0 or later
+
+Die fünf eingebauten Scale-Segler des Reiters „Flugsimulator“ stammen aus dem FlightGear-Flugzeugarchiv
+FGAddon (https://sourceforge.net/p/flightgear/fgaddon/, Pfad `trunk/Aircraft/<Typ>`). Laut FlightGear-Wiki stehen
+sie unter der **GNU General Public License, Version 2 oder (nach Wahl) jeder späteren Version** (GPLv2+); die Ordner
+enthalten den Lizenztext (`COPYING`). Die daraus erzeugten Datenpakete `fsim_*.js` bleiben unter dieser Lizenz.
+
+| Datei | Vorbild | FGAddon-Ordner | Urheber des Modells |
+|---|---|---|---|
+| `fsim_ls4.js` | Rolladen-Schneider LS4 | `Aircraft/LS4` | Bea Wolf (D-ECHO), nach der ASK 13 von Patrice Poly |
+| `fsim_ask21.js` | Schleicher ASK 21 | `Aircraft/ASK21` | Heiko Schulz, AJ MacLeod, Thomas Polzer, Viktor Radnai, Bea Wolf, Gilberto Agostinho |
+| `fsim_ka6.js` | Schleicher Ka 6 CR | `Aircraft/Ka6` | Bea Wolf (D-ECHO), nach der ASK 13 von Patrice Poly |
+| `fsim_arcus.js` | Schempp-Hirth Arcus | `Aircraft/Arcus` | Bea Wolf (D-ECHO), nach der ASK 21 |
+| `fsim_dg300.js` | Glaser-Dirks DG-300 Elan | `Aircraft/DG-300` | Bea Wolf (D-ECHO) |
+
+**Änderungen:** Nur das Außenmodell samt Cockpit wurde übernommen (Motorvarianten, Achsenhilfslinien und doppelte
+Innenansicht-Scheiben ausgeblendet). Die AC3D-Geometrie wurde in Simulator-Koordinaten gedreht, je Teil
+quantisiert und mit den Ruderachsen aus der Modell-XML gespeichert. Die Texturen wurden auf 1024 Pixel verkleinert.
+Das Werkzeug dafür liegt im Quellcode unter `tools/fg_glider_convert.py`. Die Quellform der Modelle sind die
+unveränderten FGAddon-Dateien (AC3D `.ac`, Modell-XML, PNG-Texturen) unter der oben genannten Adresse.
+
+Der vollständige Lizenztext ist die GNU General Public License, Version 2 (https://www.gnu.org/licenses/old-licenses/gpl-2.0.html),
+wie in den FGAddon-Ordnern als `COPYING` beigelegt.

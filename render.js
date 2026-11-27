@@ -1105,6 +1105,8 @@
     if (state.cfg.showBlock) legP.push(L('#5d6b7d', T('Block (Rohling)'), dashFor('block', [7, 5]), 'rect'));
     if (anyHinge) legP.push(L(App.PAL.hinge, T('Scharnierlinie'), dashFor('hinge', [5, 4]), 'line', 1.6));
     if (anySpar) sparLegend(legP);
+    // Kerndesign: Trennfuge „Kern vorne/hinten teilen" (kernteilung.js).
+    if (App.coreSplitPlan && state.activeTab === 'core') App.coreSplitPlan(ctx, V, legP, { leTe, poly, L, showBlock: !!state.cfg.showBlock });
     if (pc2Leg) pc2Leg.forEach(e => legP.push(L(e[0], e[1], e[2], e[3], e[4])));
     legP.push(L('#ffffff44', T('Viertel-Sehnenlinie (t/4)'), [6, 4], 'line', 1));
     drawLegend(ctx, 14, 20, legP, { top: true });
@@ -1383,27 +1385,48 @@
     }
   }
   let sweepCmpOpen = false;
+  // Quelle des Vergleichs: 'core' (Kerndesign, cfg.sweepRot) oder 'neg'
+  // (Negativdesign, negsweeprot.js, cfg.negSweepRot) — getrennte Einstellungen.
+  let sweepCmpSrc = 'core';
+  // { on, idx, cut, pr } — pr mit sweepRot/zRoot/zTip/rootCore/tipCore (wie projectCut).
+  function sweepCmpData() {
+    const idx = App.activeIdx();
+    if (sweepCmpSrc === 'neg') {
+      if (!state.cfg.negSweepRot || !App.negProjection) return { on: false, idx };
+      const prev = App.matCtxOverride; App.matCtxOverride = 'neg';
+      let P; try { P = App.negProjection(); } finally { App.matCtxOverride = prev; }
+      return { on: true, idx: P.idx, cut: P.cut,
+        pr: { sweepRot: P.sweepRot, zRoot: P.zRoot, zTip: P.zTip, rootCore: P.rPts, tipCore: P.tPts } };
+    }
+    if (!state.cfg.sweepRot) return { on: false, idx };
+    const cut = App.activeCut();
+    return { on: true, idx, cut, pr: App.projectCut(cut, state.segments[idx]) };
+  }
   function renderSweepCmp() {
     if (!sweepCmpOpen) return;
     const hintEl = document.getElementById('sweepCmpHint');
-    if (!state.cfg.sweepRot) { if (hintEl) hintEl.textContent = T('Werkstück-Drehung ist nicht aktiv.'); return; }
-    const cut = App.activeCut(), seg = state.segments[App.activeIdx()];
-    const pr = App.projectCut(cut, seg);
+    const D = sweepCmpData();
+    if (!D.on) { if (hintEl) hintEl.textContent = T('Werkstück-Drehung ist nicht aktiv.'); return; }
+    const cut = D.cut, pr = D.pr;
     const cmp = sweepCmpProfiles(cut, pr);
     if (!cmp) { if (hintEl) hintEl.textContent = T('Keine Drehung angewandt (Winkel ≈ 0).'); return; }
-    if (hintEl) hintEl.textContent =
-      T('Segment') + ' ' + (App.activeIdx() + 1) + ' · ' + T('Drehwinkel') + ' ' + (Math.round(pr.sweepRot.angleDeg * 10) / 10) + '°. '
+    if (hintEl) hintEl.textContent = (sweepCmpSrc === 'neg' ? T('Negativschale') + ' · ' : '')
+      + T('Segment') + ' ' + (D.idx + 1) + ' · ' + T('Drehwinkel') + ' ' + (Math.round(pr.sweepRot.angleDeg * 10) / 10) + '°. '
       + T('Blau = konstruiertes Profil, Orange = was der Draht an der Führungsebene abfährt (chord-normiert überlagert). Das fertige Werkstück (Schnitt senkrecht zur Spannweite) bleibt das Original.');
     drawCmpCanvas(document.getElementById('cSweepCmpRoot'), cmp.root.orig, cmp.root.dist, document.getElementById('sweepCmpRootInfo'));
     drawCmpCanvas(document.getElementById('cSweepCmpTip'),  cmp.tip.orig,  cmp.tip.dist,  document.getElementById('sweepCmpTipInfo'));
   }
-  function openSweepCmp() {
+  // src 'neg' = Negativdesign; sonst (auch Klick-Ereignis als Argument) Kerndesign.
+  function openSweepCmp(src) {
     const m = document.getElementById('sweepCmpModal'); if (!m) return;
+    sweepCmpSrc = src === 'neg' ? 'neg' : 'core';
     sweepCmpOpen = true; m.classList.add('open'); renderSweepCmp();
     // Nach dem Layout erneut zeichnen (Canvas-Maße stehen ggf. erst dann).
     requestAnimationFrame(renderSweepCmp);
   }
-  function closeSweepCmp() {
+  // src ('core' | 'neg'): nur schließen, wenn das Fenster gerade diese Quelle zeigt.
+  function closeSweepCmp(src) {
+    if (typeof src === 'string' && src !== sweepCmpSrc) return;
     const m = document.getElementById('sweepCmpModal'); if (m) m.classList.remove('open');
     sweepCmpOpen = false;
   }
@@ -1411,9 +1434,9 @@
   // exportieren — in echten mm, jede Kontur auf eigenem farbigem Layer. Wurzel
   // und Rand werden vertikal getrennt platziert, damit sie sich nicht überlagern.
   async function exportSweepCmpDxf() {
-    if (!(state.cfg.sweepRot && window.SweepRot && window.Dxf)) { toast(T('Drehung nicht aktiv.')); return; }
-    const cut = App.activeCut(), seg = state.segments[App.activeIdx()];
-    const pr = App.projectCut(cut, seg);
+    const D = window.SweepRot && window.Dxf ? sweepCmpData() : { on: false };
+    if (!D.on) { toast(T('Drehung nicht aktiv.')); return; }
+    const cut = D.cut, pr = D.pr;
     const cmp = sweepCmpProfiles(cut, pr);
     if (!cmp) { toast(T('Keine Drehung angewandt (Winkel ≈ 0).')); return; }
     // Original UND verzerrt je Rippe auf DIESELBE Sehnenlinie legen (LE im
@@ -1424,7 +1447,7 @@
     const thickOf = a => { let lo = Infinity, hi = -Infinity; a.forEach(p => { if (p.y < lo) lo = p.y; if (p.y > hi) hi = p.y; }); return hi - lo; };
     const off = Math.max(thickOf(rootO), thickOf(rootD), thickOf(tipO), thickOf(tipD), 10) * 1.6 + 20;   // Rand unter Wurzel
     const shift = (pts, d) => pts.map(p => ({ x: p.x, y: p.y - d }));
-    const seg1 = App.activeIdx() + 1;
+    const seg1 = D.idx + 1;
     const ang = Math.round((pr.sweepRot.angleDeg || 0) * 10) / 10;
     const layers = [
       { name: 'Wurzel_Original_S' + seg1, color: 5, polys: [{ pts: rootO, closed: true }] },
@@ -1433,7 +1456,7 @@
       { name: 'Rand_verzerrt_' + ang + 'deg', color: 2, polys: [{ pts: shift(tipD, off), closed: true }] }
     ];
     const text = Dxf.write(layers, { precision: state.cfg.precision != null ? state.cfg.precision : 4 });
-    await exportViaPicker('profilvergleich-drehung-S' + seg1 + '.dxf', text, 'application/dxf', 'save');
+    await exportViaPicker('profilvergleich-drehung-' + (sweepCmpSrc === 'neg' ? 'neg-' : '') + 'S' + seg1 + '.dxf', text, 'application/dxf', 'save');
   }
   // Zoom (Mausrad, am Cursor) + Pan (Ziehen) + Reset (Doppelklick) je Canvas.
   function setupSweepCmpNav(id) {
@@ -1467,7 +1490,8 @@
     const el = document.getElementById('sweepRotInfo');
     if (!el) return;
     const i = pr && pr.sweepRot;
-    if (!i) { el.textContent = T('Keine Drehung angewandt.'); return; }
+    const m = state.cfg.sweepRotMode, minMode = m !== 'manual' && m !== 'ref' && m !== 'auto';
+    if (!i) { el.textContent = T(minMode ? 'Keine Drehung angewandt — gedreht wird der Fahrweg nicht kürzer.' : 'Keine Drehung angewandt.'); return; }
     const f = v => (Math.round(v * 10) / 10);
     el.textContent = T('Drehwinkel') + ': ' + f(i.angleDeg) + '°  ·  '
       + T('X-Fahrweg') + ': ' + f(i.travelBefore) + ' → ' + f(i.travelAfter) + ' mm  ('
@@ -1525,8 +1549,10 @@
     // Schnittspur inkl. kerf: der VOLLSTÄNDIGE Drahtweg (Kern + kerf/2 UND die
     // Schnittverlängerungen), also pr.rootPath/tipPath — so wird gezeichnet, wie
     // wirklich geschnitten wird.
-    const rootSpur = pr.rootPath;
-    const tipSpur = pr.tipPath;
+    // Kern vorne/hinten geteilt (kernteilung.js): nur die Bahn des gewählten Teils.
+    const prS = (mfg && App.coreSplitSpur) ? (App.coreSplitSpur(pr, cut, s, idx) || pr) : pr;
+    const rootSpur = prS.rootPath;
+    const tipSpur = prS.tipPath;
 
     // Weitere Segment-Profile (nur im Tragflächendesigner wählbar). Jedes Paneel
     // liegt in seinem eigenen lokalen X-Frame (Wurzel bei 0, Außen um sweep
@@ -1664,7 +1690,7 @@
     const spurOn = (cfgKerf || stacked) && !ktOn;
     if (spurOn) {
       const heat = state.cfg.kerfHeat && state.cfg.kerfMode === 'speed';
-      const partsR = spurParts(pr, rootSpur), partsT = spurParts(pr, tipSpur);
+      const partsR = spurParts(prS, rootSpur), partsT = spurParts(prS, tipSpur);
       if (heat) {
         // Wertebereich der Skala aus den tatsächlichen kerf-Werten beider Rippen.
         let lo = Infinity, hi = -Infinity;
@@ -1832,6 +1858,7 @@
                             : T('Profile flach überlagert (V-Form ausgeblendet)')]);
     if (ktOn) App.kernTeileDraw(ctx, V, leg, { idx, dyR, dyT, shR, shT, kerf: cfgKerf });
     if (App.noseBarDraw && !ktOn) App.noseBarDraw(ctx, V, leg, { idx, dyR, dyT, shR, shT, err: !!(pr && pr.noseBarErr) });
+    if (App.coreSplitDraw && mfg && !ktOn) App.coreSplitDraw(ctx, V, leg, { idx, cut, seg: s, pr, dyR, dyT, shR, shT, kerf: cfgKerf, cy, bh });
     drawLegend(ctx, 14, h - 8, leg, { kheat });
     if (state.activeTab === 'core') drawSparWarnings(ctx, w, h);
     if (state.activeTab === 'core') App.ptDrawHandles(ctx, App.profDraw, 'prof');
@@ -2787,14 +2814,27 @@
       z += cut.span || 0; dx += (cut.tip.pl && cut.tip.pl.leOffset) || 0;
     });
     const P = (zz, x) => ({ x: zz, y: -x });
+    // Werkstück-Drehung im Negativdesign (negsweeprot.js): den Formblock je Segment
+    // um seinen Mittelpunkt drehen — „wie er wirklich liegt" (wie drawPlan im Kern).
+    // Profil-Grundriss und Schalenrand bleiben fest gezeichnet.
+    const rotBlk = (pts, k) => {
+      const a = App.negSweepRotPlanAngle ? App.negSweepRotPlanAngle(k) : 0;
+      if (!a) return pts;
+      const c = Math.cos(a), s = Math.sin(a);
+      let cx = 0, cy = 0; pts.forEach(p => { cx += p.x; cy += p.y; }); cx /= pts.length; cy /= pts.length;
+      return pts.map(p => { const dx = p.x - cx, dy = p.y - cy; return { x: cx + dx * c - dy * s, y: cy + dx * s + dy * c }; });
+    };
+    const blks = segZ.map((_, k) => { const r0 = R[2 * k], r1 = R[2 * k + 1];
+      return rotBlk([P(r0.z, r0.bF), P(r1.z, r1.bF), P(r1.z, r1.bR), P(r0.z, r0.bR)], k); });
     const all = []; R.forEach(r => { all.push(P(r.z, r.bF), P(r.z, r.bR)); });
+    blks.forEach(b => all.push.apply(all, b));
     const pad = Math.max(6, Math.min(46, Math.min(w, h) * 0.18));
     const V = makeView(w, h, bounds(all), pad, nav.negelev);
     grid(ctx, w, h, V);
     const act = Math.max(0, Math.min(App.activeIdx(), segZ.length - 1));
     for (let k = 0; k < segZ.length; k++) {
       const r0 = R[2 * k], r1 = R[2 * k + 1], c = SEGCOL[k % SEGCOL.length];
-      drawBlock(ctx, V, [P(r0.z, r0.bF), P(r1.z, r1.bF), P(r1.z, r1.bR), P(r0.z, r0.bR)], App.PAL.block);
+      drawBlock(ctx, V, blks[k], App.PAL.block);
       poly(ctx, V, [P(r0.z, r0.xF), P(r1.z, r1.xF), P(r1.z, r1.xT), P(r0.z, r0.xT)], true);
       ctx.fillStyle = hexA(c, k === act ? 0.28 : 0.10); ctx.strokeStyle = c; ctx.lineWidth = k === act ? 2.5 : 1.5;
       ctx.setLineDash([]); ctx.fill(); ctx.stroke();
@@ -2945,7 +2985,7 @@
   // Während der Negativschalen-Darstellung gilt die Werkstoff-Zuweisung „Negativschalen".
   function renderNeg() {
     App.matCtxOverride = 'neg';
-    try { renderNeg_(); drawNegElev(); if (App.neg3dRefresh) App.neg3dRefresh(); } finally { App.matCtxOverride = null; if (App.meas2dOverlay) App.meas2dOverlay('neg'); }
+    try { renderNeg_(); drawNegElev(); if (App.neg3dRefresh) App.neg3dRefresh(); if (App.negSweepRotInfo && state.cfg.negSweepRot) App.negSweepRotInfo(); } finally { App.matCtxOverride = null; if (App.meas2dOverlay) App.meas2dOverlay('neg'); }
   }
   function renderNeg_() {
     const cv = document.getElementById('cNeg');

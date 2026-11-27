@@ -56,12 +56,17 @@
   }
 
   /* Ermittelt den Drehwinkel (rad).
+   *   opts.angleRad : fest vorgegeben (z. B. von bestAngle im Modus 'min').
    *   mode 'manual' : angleDeg direkt.
-   *   mode 'auto'   : so, dass die Bezugslinie (Sehnenanteil ref) parallel zur
-   *                   Drahtachse liegt -> minimaler X-Versatz/Fahrweg.
+   *   mode 'ref'    : so, dass die Bezugslinie (Sehnenanteil ref) parallel zur
+   *                   Drahtachse liegt ('auto' = alter Name dafür). Kürzt den
+   *                   Fahrweg nur, wenn Nasen- und Endleiste ähnlich gepfeilt sind.
+   *   mode 'min'    : ohne angleRad wie 'ref' — der Aufrufer sucht den Winkel mit
+   *                   bestAngle(), weil der Fahrweg vom Portalabstand (dz) abhängt.
    * Rückgabe 0, wenn keine sinnvolle Drehung möglich/nötig.
    */
   function computeAngle(pr, opts) {
+    if (opts.angleRad != null) return opts.angleRad;
     if (opts.mode === 'manual') return (opts.angleDeg || 0) * Math.PI / 180;
     const rootRef = pr.rootCore || pr.rootPath, tipRef = pr.tipCore || pr.tipPath;
     if (!rootRef || !tipRef || !rootRef.length || !tipRef.length) return 0;
@@ -89,12 +94,89 @@
     if (!isFinite(a) || Math.abs(a) < 1e-9) return null;
     const rootRef = pr.rootCore || pr.rootPath, tipRef = pr.tipCore || pr.tipPath;
     if (!rootRef || !tipRef || !rootRef.length || !tipRef.length) return null;
-    // Pivot in Spannweitenmitte und Sehnenmitte -> das Paneel bleibt (bis auf die
-    // Drehung) an seinem Platz. (Der Pivot beeinflusst nur die absolute Lage,
-    // nicht die Form/den Fahrweg-Gewinn.)
-    const pz = (pr.zRoot + pr.zTip) / 2;
-    const px = (refX(rootRef, 0.5) + refX(tipRef, 0.5)) / 2;
-    return { a: a, angleDeg: a * 180 / Math.PI, px: px, pz: pz };
+    const p = pivotOf(pr);
+    return { a: a, angleDeg: a * 180 / Math.PI, px: p.px, pz: p.pz };
+  }
+  // Pivot in Spannweitenmitte und Sehnenmitte -> das Paneel bleibt (bis auf die
+  // Drehung) an seinem Platz. (Der Pivot beeinflusst nur die absolute Lage,
+  // nicht die Form/den Fahrweg-Gewinn.)
+  function pivotOf(pr) {
+    const rootRef = pr.rootCore || pr.rootPath, tipRef = pr.tipCore || pr.tipPath;
+    return { px: (refX(rootRef, 0.5) + refX(tipRef, 0.5)) / 2, pz: (pr.zRoot + pr.zTip) / 2 };
+  }
+
+  /* X-Fahrweg beider Portale zusammen (wie travelAfter von apply), ohne Listen
+   * anzulegen. rot = {a, px, pz}, dz = z-Verschiebung nach der Drehung.
+   * Infinity, wenn eine Drahtlinie parallel zu den Turmebenen läge. */
+  function travelAt(pr, rot, dz, mw) {
+    const root = pr.rootPath, tip = pr.tipPath, n = Math.min(root.length, tip.length);
+    const c = Math.cos(rot.a), s = Math.sin(rot.a), px = rot.px, pz = rot.pz;
+    const dR = pr.zRoot - pz, dT = pr.zTip - pz;
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const xr = root[i].x - px, xt = tip[i].x - px;
+      const Rx = px + xr * c - dR * s, Rz = pz + xr * s + dR * c + dz;
+      const Tx = px + xt * c - dT * s, Tz = pz + xt * s + dT * c + dz;
+      const span = Tz - Rz;
+      if (Math.abs(span) < 1e-6) return Infinity;
+      const k = (Tx - Rx) / span;
+      const x0 = Rx - Rz * k, x1 = Rx + (mw - Rz) * k;   // Turm links (z=0) / rechts (z=mw)
+      if (x0 < lo) lo = x0; if (x0 > hi) hi = x0;
+      if (x1 < lo) lo = x1; if (x1 > hi) hi = x1;
+    }
+    return hi >= lo ? hi - lo : 0;
+  }
+
+  /* Modus „kürzester Fahrweg" ('min'): Drehwinkel (rad), bei dem die X-Ausdehnung
+   * BEIDER Turmbahnen zusammen am kleinsten ist. Bei Segmenten, deren Nasen- und
+   * Endleiste verschieden stark gepfeilt sind, liegt das Optimum zwischen den
+   * beiden Kanten — die Nasenleiste als Bezugslinie kann den Fahrweg dort sogar
+   * verlängern (z. B. Nase 46° gepfeilt, Endleiste fast gerade).
+   *   o.machineWidth
+   *   o.dzFor(rot)    -> z-Verschiebung nach der Drehung (Portalabstand, wie apply)
+   *   o.fits(rot, dz) -> false, wenn der gedrehte Block nicht zwischen die Portale
+   *                      passt (der Winkel scheidet dann aus)
+   *   o.maxDeg        -> Suchbereich ±maxDeg (Standard 60°)
+   *   o.minGain       -> Mindestgewinn in mm (Standard 1), sonst keine Drehung
+   * Suche: 0,5°-Raster von 0 nach außen (gleicher Fahrweg -> kleinerer Winkel),
+   * dann goldener Schnitt im Nachbarintervall. Rückgabe 0 = Drehung bringt nichts.
+   */
+  function bestAngle(pr, o) {
+    o = o || {};
+    const mw = o.machineWidth;
+    if (!pr || !pr.rootPath || !pr.tipPath || pr.rootPath.length < 2 || !(mw > 0)) return 0;
+    const rootRef = pr.rootCore || pr.rootPath, tipRef = pr.tipCore || pr.tipPath;
+    if (!rootRef.length || !tipRef.length || Math.abs(pr.zTip - pr.zRoot) < 1e-9) return 0;
+    const piv = pivotOf(pr);
+    const at = a => ({ a, px: piv.px, pz: piv.pz });
+    const dzOf = rot => (o.dzFor ? o.dzFor(rot) : 0);
+    const cost = a => {
+      const rot = at(a), dz = dzOf(rot);
+      if (o.fits && !o.fits(rot, dz)) return Infinity;
+      return travelAt(pr, rot, dz, mw);
+    };
+    const r0 = at(0), c0 = travelAt(pr, r0, dzOf(r0), mw);   // ohne Drehung (Vergleichswert)
+    const step = 0.5 * Math.PI / 180, maxA = (o.maxDeg || 60) * Math.PI / 180;
+    let best = 0, bc = c0;
+    for (let k = 1; k * step <= maxA + 1e-12; k++) {
+      for (const sg of [1, -1]) {
+        const a = sg * k * step, c = cost(a);
+        if (c < bc - 1e-6) { bc = c; best = a; }
+      }
+    }
+    if (best !== 0) {
+      const g = (Math.sqrt(5) - 1) / 2;
+      let lo = best - step, hi = best + step;
+      let x1 = hi - g * (hi - lo), x2 = lo + g * (hi - lo), f1 = cost(x1), f2 = cost(x2);
+      for (let it = 0; it < 30; it++) {
+        if (f1 < f2) { hi = x2; x2 = x1; f2 = f1; x1 = hi - g * (hi - lo); f1 = cost(x1); }
+        else { lo = x1; x1 = x2; f1 = f2; x2 = lo + g * (hi - lo); f2 = cost(x2); }
+      }
+      const am = f1 < f2 ? x1 : x2, cm = Math.min(f1, f2);
+      if (cm < bc) { best = am; bc = cm; }
+    }
+    const gain = o.minGain != null ? o.minGain : 1;
+    return (isFinite(bc) && c0 - bc >= gain) ? best : 0;
   }
 
   /* Wendet die Drehung an: gibt eine KOPIE von pr zurück, in der NUR left/right
@@ -147,5 +229,5 @@
     return Object.assign({}, pr, { left, right, sweepRot: info });
   }
 
-  global.SweepRot = { apply, computeAngle, rotation, rotXZ };
+  global.SweepRot = { apply, bestAngle, computeAngle, rotation, rotXZ, travelAt };
 })(window);

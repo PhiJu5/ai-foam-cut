@@ -3,6 +3,9 @@
  * Servos, Hebel, Ruderhörner und Anlenkung (normal/überkreuz) mit Kinematik. Daten in cfg.stegH.srv,
  * Geometrie und Kollisionen über App.StegApi aus den Steghöhen (Stege, Holmgurt, Steckung).
  * Ansicht: Draufsicht, darunter je Servo automatisch ein Schnitt durch die Anlenkung.
+ * Sender live: Mit jetiexbus.js (Jeti-Empfänger, Ausgang EX Bus, USB-Seriell-Adapter) stellt der Kanal
+ * das Servo statt des Reglers. Trimmung und Mischer kommen dann aus dem Sender; die Trimmung hier
+ * bleibt außen vor. Je Servo: Kanal sv.rxCh, Umkehr sv.rxRev, Mitte sv.rxMid (µs), Winkel sv.rxDeg bei ±500 µs.
  */
 (function () {
   'use strict';
@@ -12,6 +15,7 @@
   const { stkAll, capFace, cfg, geo, frame, section, capCenter, stkCenter, capAt, insetOf, shellOf, layA, webOf, allStege, stkData, ruderAt, secOne, profOf, f1, fl1, clamp } = App.StegApi;
   const T = s => (window.I18N ? window.I18N.t(s) : s);
   let side = null, boxes = [], win = null, cv = null, list = null, posPct = [], cards = [], openParts = {};
+  let rxPeak = [], monEl = null, statEl = null, rxWasOn = false, rxRaf = 0;   // Sender live (nur Sitzung)
   const isOpen = () => !!win && state.activeTab === 'servo';
 
   // ---------- Flächenservos ----------
@@ -27,7 +31,8 @@
     return p ? { a: p[2], t: p[3], b: p[4], tq: p[5] } : { a: Math.max(0, +sv.a || 0), t: Math.max(0, +sv.t || 0), b: Math.max(0, +sv.b || 0) };
   }
   // Servo liegt flach auf der Einbauseite: gemessen wird über die ganze Grundfläche an der engsten Stelle (auf der sicheren Seite)
-  function srvCalc(G, c, sv) {
+  // ext: Kinematik-Tabelle zusätzlich bis ±ext° (Sender live kann über den Servoweg hinaus stellen)
+  function srvCalc(G, c, sv, ext) {
     const { a, b, t } = srvDims(sv), z = +sv.z || 0, f = frame(G, clamp(z, 0, G.L)), xc = f.le + f.c * (+sv.pos || 0) / 100;
     const dx = a, dz = b, top = sv.side === 'top', warn = [], gap = Math.max(0, +c.srvGap || 0);
     const onOuter = !!c.layOn && sv.on === 'outer', R = { z, xc, dx, dz, t, top, warn };
@@ -56,7 +61,7 @@
       const x1 = x0 + sA, z1 = z0, y1 = y0 + cA, sec = section(G, x1, clamp(z1, 0, G.L));
       R.arm = { x0, y0, z0, x1, y1, z1, out: sec ? (armTop ? y1 - sec.top : sec.bot - y1) : null };
     }
-    if (sv.lkOn) R.lk = srvLink(G, c, sv, R, (sv.armSide || sv.side) === 'top');
+    if (sv.lkOn) R.lk = srvLink(G, c, sv, R, (sv.armSide || sv.side) === 'top', ext || 0);
     const hx = q => { const g = frame(G, q); return g.le + g.c * (1 - g.hp / 100); };
     if (xc + dx / 2 > Math.min(hx(clamp(z - dz / 2, 0, G.L)), hx(clamp(z + dz / 2, 0, G.L)))) warn.push(T('Reicht über die Scharnierlinie.'));
     allStege(G, c).forEach(d => {
@@ -86,7 +91,7 @@
     const a = -tr * Math.PI / 180, dx = R.arm.x1 - R.arm.x0, dy = R.arm.y1 - R.arm.y0;
     return { tr, p: [R.arm.x0, R.arm.y0], q: [R.arm.x0 + dx * Math.cos(a) - dy * Math.sin(a), R.arm.y0 + dx * Math.sin(a) + dy * Math.cos(a)] };
   }
-  function srvLink(G, c, sv, R, top) {
+  function srvLink(G, c, sv, R, top, ext) {
     const warn = R.warn, A = R.arm;
     const Ru = ruderAt(G, Object.assign({}, c, { lipOn: false }), clamp(A.z0, 0, G.L), []);
     if (!Ru) { warn.push(T('Kein Scharnierpunkt an dieser Stelle.')); return null; }
@@ -97,8 +102,8 @@
     const S = [A.x0, A.y0], T0 = [A.x1, A.y1], rod = Math.hypot(T0[0] - hole[0], T0[1] - hole[1]), H = Ru.H;
     const rot = (p, c0, deg) => { const a = -deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a); return [c0[0] + (p[0] - c0[0]) * ca - (p[1] - c0[1]) * sa, c0[1] + (p[0] - c0[0]) * sa + (p[1] - c0[1]) * ca]; };
     const err = (d, ph) => { const t = rot(T0, S, d), h = rot(hole, H, ph); return Math.hypot(t[0] - h[0], t[1] - h[1]) - rod; };
-    const rg = srvRange(sv), sweep = sgn => {
-      const P = [], lim = sgn > 0 ? rg.pos : rg.neg, ds = []; let ph = 0, last = null;
+    const rg = srvRange(sv), sweep = (sgn, lim) => {
+      const P = [], ds = []; let ph = 0, last = null;
       for (let d = 1; d < lim; d += 1) ds.push(d);
       if (lim > 0) ds.push(lim);
       for (const d of ds) {
@@ -113,7 +118,10 @@
       }
       return { P, dead: false };
     };
-    const a = sweep(1), b = sweep(-1), pts = b.P.slice().reverse().concat([[0, 0]], a.P);
+    const a = sweep(1, rg.pos), b = sweep(-1, rg.neg), pts = b.P.slice().reverse().concat([[0, 0]], a.P);
+    // Sender live: Tabelle weiter als der Servoweg, damit ein zu großer Senderweg sichtbar wird (Ende = Totpunkt)
+    let ptsX = null;
+    if (ext > Math.max(rg.pos, rg.neg)) { const ax = sweep(1, ext), bx = sweep(-1, ext); ptsX = bx.P.slice().reverse().concat([[0, 0]], ax.P); }
     if (a.dead || b.dead) warn.push(T('Totpunkt: Das Gestänge streckt sich vor dem vollen Servoweg.'));
     const dAt = i => { const p = pts[Math.max(0, i - 1)], n = pts[Math.min(pts.length - 1, i + 1)]; return n[0] !== p[0] ? (n[1] - p[1]) / (n[0] - p[0]) : 0; };
     const i0 = pts.findIndex(p => p[0] === 0), ratio = dAt(i0), ph = pts.map(p => p[1]), down = Math.max(0, ...ph), up = -Math.min(0, ...ph);
@@ -124,7 +132,7 @@
     const tq = sv.tq != null ? +sv.tq : srvDims(sv).tq || 0;
     if (tq > 0 && need * 2 > tq) warn.push(T('Servomoment knapp: nötig mit Faktor 2') + ' ' + f1(need * 2) + ' kg·cm');
     if (Math.abs(ratio) < 1e-3) warn.push(T('Keine Übersetzung: Hebel und Horn bewegen das Ruder hier nicht.'));
-    return { rg, cross, S, T0, hole, base, H, rot, rod, pts, ratio, up, down, need, tq, dead: a.dead || b.dead, Ru };
+    return { rg, cross, S, T0, hole, base, H, rot, rod, pts, ptsX, ratio, up, down, need, tq, dead: a.dead || b.dead, Ru };
   }
   // Ruderausschlag zu einem Servowinkel (aus der Tabelle); am Totpunkt bleibt es bei der letzten möglichen Stellung
   function lkRudder(L, d) {
@@ -171,6 +179,7 @@
     hint(side, 'Stege, Holmgurt und Steckung kommen aus dem Reiter Steghöhen und werden auf Kollisionen geprüft. Der Schnitt durch die Anlenkung entsteht je Servo automatisch.');
     const ds = side, L = G.L, upd = update, NR = { step: 0.5, min: 0, norender: true, enter: true }, GR = Object.assign({}, NR, { step: 0.1 }), GB = Object.assign({}, NR, { step: 1 });
     const SL = srvList(c); boxes = [];
+    rxSide(ds);
     numRow(ds, 'Anzahl', () => SL.length, v => {
       const n = clamp(Math.round(v) || 0, 0, 12);
       while (SL.length < n) SL.push({ type: 'x10mini', z: Math.round(L * 0.5), pos: 50, side: 'bot', armSide: 'bot', on: 'inner', arm: 12, armA: 0, armShaft: 'rear', armEnd: 'out', a: 30, t: 10, b: 30 });
@@ -180,8 +189,8 @@
     SL.forEach((sv, i) => {
       subhead(ds, T('Servo') + ' ' + (i + 1), '#5fd8e8');
       // Aufklappbare Teile je Servo; Zustand bleibt beim Neuaufbau erhalten
-      const part = (key, title) => {
-        const k = key + i, d = document.createElement('details'); d.open = openParts[k] !== false; d.ontoggle = () => { openParts[k] = d.open; };
+      const part = (key, title, def) => {
+        const k = key + i, d = document.createElement('details'); d.open = openParts[k] != null ? openParts[k] : def !== false; d.ontoggle = () => { openParts[k] = d.open; };
         const h = document.createElement('summary'); h.textContent = T(title); h.style.cssText = 'cursor:pointer;font-weight:700;font-size:12px;margin-top:4px';
         d.appendChild(h); ds.appendChild(d); return d;
       };
@@ -215,12 +224,123 @@
         numRow(pH, 'Horn hinter Scharnierlinie (mm)', () => sv.hornX || 0, v => { sv.hornX = v; upd(); }, Object.assign({}, GB, { min: -100 }));
         numRow(pH, 'Hornwinkel (°, 0 = senkrecht, + = nach hinten)', () => sv.hornA || 0, v => { sv.hornA = clamp(v, -80, 80); upd(); }, Object.assign({}, NR, { step: 5, min: -80, max: 80 }));
       }
+      // Sender live: welcher Kanal stellt dieses Servo, und wie das Servo µs in Grad umsetzt
+      if (RX()) {
+        const pR = part('r', 'Sender (Kanal)', !!(+sv.rxCh > 0));
+        hint(pR, 'Mitte und Winkel aus dem Servo-Datenblatt (meist 1500 µs, 1000–2000 µs ≈ ±45°). Läuft das Ruder falsch herum: Drehrichtung umkehren, im Sender nichts ändern.');
+        selectRow(pR, 'Kanal', [['0', '—']].concat(Array.from({ length: 24 }, (_, k) => [String(k + 1), T('Kanal') + ' ' + (k + 1)])), () => String(+sv.rxCh || 0), v => { sv.rxCh = +v || 0; rxPeak[i] = null; refresh(true); });
+        App.boolRow(pR, 'Drehrichtung umkehren', () => !!sv.rxRev, v => { sv.rxRev = v; rxPeak[i] = null; upd(); });
+        numRow(pR, 'Servomitte (µs)', () => sv.rxMid != null ? sv.rxMid : 1500, v => { sv.rxMid = clamp(v, 800, 2200); rxPeak[i] = null; upd(); }, Object.assign({}, NR, { step: 1, min: 800, max: 2200 }));
+        numRow(pR, 'Servowinkel bei ±500 µs (°)', () => sv.rxDeg != null ? sv.rxDeg : 45, v => { sv.rxDeg = clamp(v, 5, 90); rxPeak[i] = null; upd(); }, Object.assign({}, GB, { min: 5, max: 90 }));
+      }
       const box = document.createElement('div'); ds.appendChild(box); boxes[i] = box;
     });
     if (scr) scr.scrollTop = keep;
   }
   function refresh(rebuild) { if (!isOpen()) return; if (rebuild) { buildSide(); buildCards(); } update(); }
-  function update() { srvResult(); draw(); drawCards(); }
+  function update() { cards.forEach(k => { k.Rx = null; k.lastUs = null; }); srvResult(); draw(); drawCards(); }
+
+  // ---------- Sender live (Jeti EX Bus, jetiexbus.js) ----------
+  const RX = () => window.JetiExBus || null;
+  const BAUD_KEY = 'hw_exbus_baud';
+  const baudMode = () => { try { return localStorage.getItem(BAUD_KEY) || 'auto'; } catch (e) { return 'auto'; } };
+  // Servowinkel aus dem Kanal: null, solange kein Sender verbunden/zugeordnet ist
+  function rxDeg(sv) {
+    const J = RX(); if (!J || !J.isOn() || !(+sv.rxCh > 0)) return null;
+    const us = J.value(+sv.rxCh); if (us == null) return null;
+    const mid = sv.rxMid != null ? +sv.rxMid : 1500, k = (sv.rxDeg != null ? +sv.rxDeg : 45) / 500;
+    return { us, d: (sv.rxRev ? -1 : 1) * (us - mid) * k };
+  }
+  function rxSide(ds) {
+    const J = RX(); if (!J) return;
+    const on = J.isOn(), d = document.createElement('details'); d.open = openParts.rx != null ? openParts.rx : on; d.ontoggle = () => { openParts.rx = d.open; };
+    const h = document.createElement('summary'); h.textContent = T('Sender live (Jeti EX Bus)'); h.style.cssText = 'cursor:pointer;font-weight:700;font-size:12px;margin-top:2px;color:#ffd27a';
+    d.appendChild(h); ds.appendChild(d);
+    App.hint(d, 'Empfänger-Ausgang auf EX Bus stellen und über einen USB-Seriell-Adapter anschließen. Trimmung, Mischer und Servowege kommen fertig aus dem Sender; hier wird je Servo nur der Kanal zugeordnet.');
+    const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:4px';
+    const btn = (t, f, tip) => { const b = document.createElement('button'); b.textContent = T(t); b.style.padding = '2px 8px'; if (tip) b.title = T(tip); b.onclick = f; return b; };
+    const bc = btn(on ? 'Trennen' : 'Sender verbinden', async () => {
+      try { if (J.isOn()) await J.disconnect(); else { rxPeak = []; await J.connect(baudMode()); } }
+      catch (e) { if (e && e.name === 'NotFoundError') return; const m = T(e && e.message || String(e)); if (App.toast) App.toast(m); else alert(m); }
+      refresh(true);
+    }, on ? '' : 'USB-Seriell-Adapter wählen (Anschluss, an dem der Empfänger hängt)');
+    const sel = document.createElement('select');
+    [['auto', 'Baudrate automatisch'], ['125000', '125 kBaud'], ['250000', '250 kBaud']].forEach(o => { const e = document.createElement('option'); e.value = o[0]; e.textContent = T(o[1]); sel.appendChild(e); });
+    sel.value = baudMode(); sel.title = T('Wie im Empfänger eingestellt; „automatisch“ probiert beide');
+    sel.onchange = () => { try { localStorage.setItem(BAUD_KEY, sel.value); } catch (e) {} J.setMode(sel.value); };
+    row.append(bc, sel, btn('Verkabelung …', wiringHelp, 'Schaltplan: Empfänger – Adapter – PC'));
+    d.appendChild(row);
+    statEl = document.createElement('div'); statEl.style.cssText = 'font-size:12px;margin-top:4px'; d.appendChild(statEl);
+    monEl = document.createElement('div'); monEl.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;margin-top:4px;font-size:11px'; d.appendChild(monEl);
+    if (on) d.appendChild(btn('Schleppzeiger zurücksetzen', () => { rxPeak = []; drawCards(); }, 'Größte Ausschläge nach oben und unten je Servo neu messen'));
+    rxStatus(); rxMon();
+  }
+  function rxStatus() {
+    const J = RX(); if (!J || !statEl || !statEl.isConnected) return;
+    const s = J.status(); let t, col = '#9aa7b8';
+    if (!s.on) { t = s.err ? T('Getrennt:') + ' ' + T(s.err) : T('Nicht verbunden.'); if (s.err) col = '#ff6b6b'; }
+    else if (s.age > 1000) {
+      t = T('Verbunden, aber keine Daten') + ' (' + (s.baud / 1000) + ' kBaud' + (s.mode === 'auto' ? ', ' + T('suche') : '') + '). ' + T('Sender an? Ausgang auf EX Bus? Verkabelung prüfen.'); col = '#ffb454';
+    } else {
+      t = T('Empfange') + ' ' + s.nch + ' ' + T('Kanäle') + ' · ' + (s.baud / 1000) + ' kBaud · ' + s.rate + ' ' + T('Pakete/s') + (s.sim ? ' · ' + T('Testdaten') : '') + (s.bad ? ' · ' + s.bad + ' ' + T('Prüfsummenfehler') : ''); col = '#7ee0a0';
+    }
+    statEl.textContent = t; statEl.style.color = col;
+  }
+  // Kanal-Monitor: alle Kanäle als Balken um 1500 µs, zugeordnete Servos dabei
+  function rxMon() {
+    const J = RX(); if (!J || !monEl || !monEl.isConnected) return;
+    const us = J.isOn() ? J.values() : [], n = us.length;
+    monEl.style.display = n ? 'grid' : 'none';
+    if (monEl.childElementCount !== n) {
+      monEl.innerHTML = '';
+      for (let k = 0; k < n; k++) {
+        const e = document.createElement('div'); e.style.cssText = 'display:flex;align-items:center;gap:4px;min-width:0';
+        const a = document.createElement('span'); a.style.cssText = 'width:52px;white-space:nowrap;overflow:hidden';
+        const b = document.createElement('div'); b.style.cssText = 'flex:1;height:7px;background:#222a35;border-radius:3px;position:relative;min-width:30px';
+        const f = document.createElement('div'); f.style.cssText = 'position:absolute;top:0;bottom:0;background:#5fd8e8;border-radius:3px'; b.appendChild(f);
+        const v = document.createElement('span'); v.style.cssText = 'width:34px;text-align:right;color:#9aa7b8';
+        e.append(a, b, v); monEl.appendChild(e);
+      }
+    }
+    const used = {}; srvList(cfg()).forEach((sv, i) => { if (+sv.rxCh > 0) (used[sv.rxCh] = used[sv.rxCh] || []).push('S' + (i + 1)); });
+    for (let k = 0; k < n; k++) {
+      const e = monEl.children[k], [a, b, v] = e.children, f = b.firstChild, x = clamp((us[k] - 1500) / 750, -1, 1), u = used[k + 1];
+      a.textContent = 'K' + (k + 1) + (u ? ' ' + u.join(',') : ''); a.style.color = u ? '#ffd27a' : '';
+      f.style.left = (50 + Math.min(0, x) * 50) + '%'; f.style.width = Math.max(1, Math.abs(x) * 50) + '%';
+      v.textContent = Math.round(us[k]);
+    }
+  }
+  function rxEvent(kind) {
+    if (!isOpen()) return;
+    const J = RX(), on = J.isOn();
+    if (on !== rxWasOn) { rxWasOn = on; refresh(true); return; }   // Seitenleiste und Karten auf Live umstellen
+    if (kind === 'status') { rxStatus(); cards.forEach(k => { k.lastUs = null; }); }   // „kein Signal“ nachführen
+    if (!rxRaf) rxRaf = requestAnimationFrame(rxTick);
+  }
+  function rxTick() {
+    rxRaf = 0; if (!isOpen()) return;
+    rxMon(); rxStatus();
+    const SL = srvList(cfg());
+    cards.forEach(card => {
+      const sv = SL[card.i], L = sv && rxDeg(sv); if (!L) return;
+      if (card.lastUs != null && Math.abs(card.lastUs - L.us) < 0.25) return;   // nur neu zeichnen, wenn sich etwas tut
+      card.lastUs = L.us; drawCard(card);
+    });
+  }
+  // Anzeige unter der Karte im Live-Betrieb: Kanal, Schleppzeiger, Hinweise
+  function rxLive(card, sv, L, dS, st, mm, tab, rg) {
+    const pk = rxPeak[card.i] || (rxPeak[card.i] = { lo: 0, hi: 0, mlo: 0, mhi: 0 });
+    if (st.ph < pk.lo) { pk.lo = st.ph; pk.mlo = mm; }
+    if (st.ph > pk.hi) { pk.hi = st.ph; pk.mhi = mm; }
+    const J = RX(), warn = [];
+    if (Math.abs(dS) > rg.mx + 0.05) warn.push(T('Servo über dem Servoweg') + ' ±' + f1(rg.mx) + '°');
+    if (tab && (dS < tab.pts[0][0] - 0.05 || dS > tab.pts[tab.pts.length - 1][0] + 0.05)) warn.push(T('Totpunkt: Das Gestänge streckt sich'));
+    if (J && J.age() > 500) warn.push(T('kein Signal'));
+    card.lCh.textContent = T('Sender') + ' K' + sv.rxCh + ': ' + Math.round(L.us) + ' µs → ' + T('Servo') + ' ' + f1(dS) + '°';
+    card.lPk.textContent = T('Schleppzeiger: oben') + ' ' + f1(-pk.lo) + '° (' + f1(Math.abs(pk.mlo)) + ' mm) · ' + T('unten') + ' ' + f1(pk.hi) + '° (' + f1(Math.abs(pk.mhi)) + ' mm)';
+    card.lWarn.textContent = warn.join(' · ');
+  }
+  if (RX()) RX().on(rxEvent);
   function show() { if (!win) build(); if (App.recompute) App.recompute(); refresh(true); }
 
   // ---------- Ansicht ----------
@@ -260,8 +380,16 @@
           const el = document.createElement('label'); el.style.cssText = 'display:flex;gap:4px;align-items:center;white-space:nowrap'; el.title = T('Endlagen mit Hebel, Gestänge, Horn und Ruder gestrichelt mit übernehmen');
           const ec = document.createElement('input'); ec.type = 'checkbox'; ec.checked = !!sv.cadEnd; ec.onchange = () => { sv.cadEnd = ec.checked; };
           const es = document.createElement('span'); es.textContent = T('mit Endlagen'); el.append(ec, es); bar.append(cb, el); }
-        w.append(h, bar, c0); row.appendChild(w);
-        const card = { i, cv: c0, head: h, title: t, view: null };
+        // Sender live: statt des Reglers Kanal, Schleppzeiger und Hinweise
+        const lb2 = document.createElement('div'); lb2.style.cssText = 'display:none;gap:4px 12px;align-items:center;flex-wrap:wrap;margin-bottom:3px;font-size:12px';
+        const lCh = document.createElement('span'); lCh.style.color = '#ffd27a';
+        const lPk = document.createElement('span'); lPk.style.color = '#c8d2e0';
+        const lRs = document.createElement('button'); lRs.textContent = T('zurücksetzen'); lRs.title = T('Schleppzeiger dieses Servos zurücksetzen'); lRs.style.padding = '1px 6px';
+        lRs.onclick = () => { rxPeak[i] = null; card.lastUs = null; drawCard(card); };
+        const lWarn = document.createElement('span'); lWarn.style.color = '#ffb454';
+        lb2.append(lCh, lPk, lRs, lWarn);
+        w.append(h, bar, lb2, c0); row.appendChild(w);
+        const card = { i, cv: c0, head: h, title: t, view: null, bar, lbar: lb2, lCh, lPk, lWarn };
         c0.addEventListener('wheel', e => {
           e.preventDefault(); if (!card.view) return; const r = c0.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, f = Math.exp(-e.deltaY * 0.0015), V = card.view;
           const wx = (mx - V.ox) / V.s, wy = (V.oy - my) / V.s; V.s *= f; V.ox = mx - wx * V.s; V.oy = my + wy * V.s; drawCard(card);
@@ -280,7 +408,10 @@
   function drawCards() { if (isOpen()) cards.forEach(drawCard); }
   function drawCard(card) {
     const G = geo(), c = cfg(), sv = srvList(c)[card.i]; if (!G || !sv) return;
-    const R = srvCalc(G, c, sv), r = card.cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, w = r.width, h = r.height; if (w < 2 || h < 2) return;
+    // Sender live: Kanal stellt das Servo; Ergebnis zwischenspeichern, weil bis zu 60-mal je Sekunde gezeichnet wird
+    const live = rxDeg(sv), R = live ? (card.Rx || (card.Rx = srvCalc(G, c, sv, 90))) : srvCalc(G, c, sv);
+    if (card.bar) { card.bar.style.display = live ? 'none' : 'flex'; card.lbar.style.display = live ? 'flex' : 'none'; }
+    const r = card.cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1, w = r.width, h = r.height; if (w < 2 || h < 2) return;
     const z = clamp(R.arm ? R.arm.z0 : R.z, 0, G.L), name = (SERVOS.find(p => p[0] === sv.type) || [0, T('Eigene Maße')])[1];
     card.title.textContent = 'S' + (card.i + 1) + ' · ' + name;
     card.head.textContent = T('Schnitt durch die Anlenkung') + ' · ' + f1(z) + ' mm ' + T('ab Wurzel');
@@ -297,8 +428,14 @@
     const V = card.view, X = u => V.ox + u * V.s, Y = v => V.oy - v * V.s;
     g.font = '12px sans-serif';
     // Der Regler stellt das Servo, das Ruder folgt über die Kinematik
-    const K = R.lk, rg = srvRange(sv), pct = posPct[card.i] || 0, dS = srvStick(rg, pct),   /* wie am Sender: Knüppelmitte = Trimmung, ±100 % = Wegende */ st = K ? lkRudder(K, dS) : { d: dS, ph: 0 };
-    card.head.textContent += ' · ' + T('Servo') + ' ' + f1(st.d) + '°' + (K ? ' · ' + T('Ruder') + ' ' + f1(st.ph) + '°' : '');
+    const K = R.lk, rg = srvRange(sv), tab = K && K.ptsX ? { pts: K.ptsX } : K;
+    let dS, st;
+    if (live) { dS = live.d; st = tab ? lkRudder(tab, dS) : { d: clamp(dS, -90, 90), ph: 0 }; }   // Trimmung/Mischer schon im Kanal
+    else { dS = srvStick(rg, posPct[card.i] || 0); st = K ? lkRudder(K, dS) : { d: dS, ph: 0 }; }   /* wie am Sender: Knüppelmitte = Trimmung, ±100 % = Wegende */
+    // Ausschlag an der Endleiste: Rudertiefe × sin(Ruderwinkel)
+    const fz = frame(G, z), mm = fz.c * fz.hp / 100 * Math.sin(st.ph * Math.PI / 180);
+    card.head.textContent += ' · ' + T('Servo') + ' ' + f1(st.d) + '°' + (K ? ' · ' + T('Ruder') + ' ' + f1(st.ph) + '° (' + f1(mm) + ' mm)' : '');
+    if (live) rxLive(card, sv, live, dS, st, mm, tab, rg);
     secOne(g, G, allStege(G, c), q, X, Y, V.s, st.ph);
     // Servo, Hebel, Anlenkung
     if (R.avail == null) return;
@@ -306,8 +443,8 @@
     g.beginPath(); g.rect(X(R.xc - R.dx / 2 - q.le), Y(R.y0 + R.t + q.dy), R.dx * V.s, R.t * V.s); g.fillStyle = col + '66'; g.fill(); g.strokeStyle = col; g.lineWidth = 1.2; g.stroke();
     const seg = (a, b, c2, lw) => { const u = P(a), v = P(b); g.beginPath(); g.moveTo(u[0], u[1]); g.lineTo(v[0], v[1]); g.strokeStyle = c2; g.lineWidth = lw; g.stroke(); };
     const dot = p => { const u = P(p); g.fillStyle = '#ffffff'; g.beginPath(); g.arc(u[0], u[1], 3, 0, 7); g.fill(); };
-    // Trimmung: roter Strich = Servomitte, weißer Hebel = aktuelle Stellung
-    const TA = trimArm(sv, R);
+    // Trimmung: roter Strich = Servomitte, weißer Hebel = aktuelle Stellung (live trimmt der Sender)
+    const TA = live ? null : trimArm(sv, R);
     if (TA) { seg(TA.p, TA.q, '#ff4d4d', 2); const u = P(TA.q), tx = T('Trimmung') + ' ' + (TA.tr > 0 ? '+' : '') + f1(TA.tr) + '°'; g.fillStyle = '#ff4d4d'; g.fillText(tx, clamp(u[0] - g.measureText(tx).width - 6, 2, w), clamp(u[1], 12, h - 4)); }
     if (K) {
       const tip = K.rot(K.T0, K.S, st.d), ho = K.rot(K.hole, K.H, st.ph), ba = K.rot(K.base, K.H, st.ph);
@@ -448,6 +585,74 @@
     }
     if (App.switchView && document.getElementById('cadView')) App.switchView('cad');
   }
+  // ---------- Verkabelungsplan Sender live ----------
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  function wiringSvg() {
+    const t = (x, y, s, o) => '<text x="' + x + '" y="' + y + '"' + (o ? ' ' + o : '') + '>' + esc(T(s)) + '</text>';
+    const mid = 'text-anchor="middle"', end = 'text-anchor="end"', b = 'font-weight="700"', sm = 'font-size="11"', mu = 'fill="#9aa7b8"';
+    const box = (x, y, w, h, st) => '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" rx="8" fill="#18202a" stroke="' + (st || '#5fd8e8') + '" stroke-width="1.4"/>';
+    const pin = (x, y, col) => '<rect x="' + x + '" y="' + (y - 7) + '" width="13" height="14" rx="2" fill="' + col + '"/>';
+    const ORG = '#ff9f43', RED = '#ff5b5b', BRN = '#c08850', GRN = '#7ee0a0';
+    return '<svg viewBox="0 0 960 470" style="width:100%;display:block" font-family="sans-serif" font-size="12" fill="#c8d2e0">'
+      + '<rect width="960" height="470" rx="8" fill="#10141a"/>'
+      // Sender
+      + box(20, 50, 150, 112) + '<line x1="150" y1="50" x2="161" y2="22" stroke="#5fd8e8" stroke-width="3"/><circle cx="161" cy="22" r="3" fill="#5fd8e8"/>'
+      + t(95, 78, 'Jeti-Sender', mid + ' ' + b) + t(95, 96, 'DC / DS', mid) + t(95, 118, 'Trimmung, Mischer,', mid + ' ' + sm + ' ' + mu) + t(95, 133, 'Servowege, Kurven', mid + ' ' + sm + ' ' + mu) + t(95, 150, '(alles im Sender)', mid + ' ' + sm + ' ' + mu)
+      + '<path d="M182 80 q10 15 0 30 M194 72 q14 23 0 46 M206 64 q18 31 0 62" stroke="#9aa7b8" stroke-width="1.5" fill="none"/>' + t(198, 150, '2,4 GHz', mid + ' ' + sm + ' ' + mu)
+      // Empfänger
+      + box(230, 40, 200, 190) + t(330, 64, 'Jeti-Empfänger', mid + ' ' + b)
+      + pin(421, 92, '#3a4350') + t(414, 96, 'Servos (1 … n)', end)
+      + pin(421, 124, '#ffd27a') + t(414, 128, 'Ausgang → EX Bus', end + ' fill="#ffd27a" ' + b)
+      + pin(421, 156, '#3a4350') + t(414, 160, 'Akku / BEC', end)
+      + t(330, 194, 'Gerät-Explorer: einen Ausgang', mid + ' ' + sm + ' ' + mu) + t(330, 209, '(z. B. Ext. oder E1) auf EX Bus', mid + ' ' + sm + ' ' + mu)
+      // Servos
+      + '<path d="M434 92 L470 62" stroke="#9aa7b8" stroke-width="1.5" fill="none"/><rect x="470" y="40" width="80" height="28" rx="4" fill="#18202a" stroke="#9aa7b8"/>' + t(510, 58, 'Servos', mid + ' ' + mu)
+      // Servostecker und Adern
+      + '<rect x="440" y="104" width="24" height="44" rx="3" fill="#2a3340" stroke="#9aa7b8"/>'
+      + '<path d="M464 112 H515 l4 -6 l8 12 l8 -12 l8 12 l8 -12 l4 6 H600 V100 H640" stroke="' + ORG + '" stroke-width="2.5" fill="none"/>' + t(535, 97, '1 kΩ (optional)', mid + ' ' + sm + ' fill="' + ORG + '"')
+      + '<path d="M464 126 H590 V156 H640" stroke="' + RED + '" stroke-width="2.5" stroke-dasharray="6 4" fill="none"/>'
+      + '<path d="M464 140 H580 V184 H640" stroke="' + BRN + '" stroke-width="2.5" fill="none"/>'
+      + t(444, 216, 'orange = Signal', sm + ' fill="' + ORG + '"') + t(444, 231, 'rot = + (nur Variante A)', sm + ' fill="' + RED + '"') + t(444, 246, 'braun = − (GND)', sm + ' fill="' + BRN + '"')
+      // Adapter
+      + box(640, 60, 180, 160) + t(730, 82, 'USB-Seriell-Adapter', mid + ' ' + b)
+      + pin(634, 100, ORG) + t(653, 104, 'RXD') + pin(634, 128, '#3a4350') + t(653, 132, 'TXD – frei lassen', mu)
+      + pin(634, 156, RED) + t(653, 160, '5 V') + pin(634, 184, BRN) + t(653, 188, 'GND')
+      + t(730, 210, '3,3-V-Pegel', mid + ' ' + sm + ' ' + mu) + t(730, 240, 'z. B. FTDI FT232R, CP2102N, CH340', mid + ' ' + sm + ' ' + mu)
+      // USB und PC
+      + '<line x1="820" y1="140" x2="862" y2="140" stroke="#9aa7b8" stroke-width="5"/>' + t(841, 130, 'USB', mid + ' ' + sm + ' ' + mu)
+      + box(862, 100, 86, 80) + t(905, 128, 'PC', mid + ' ' + b) + t(905, 146, 'AI Foam Cut', mid + ' ' + sm) + t(905, 162, 'Flächenservos', mid + ' ' + sm + ' ' + mu)
+      // Akku
+      + '<line x1="330" y1="230" x2="330" y2="262" stroke="' + GRN + '" stroke-width="2" stroke-dasharray="5 4"/>'
+      + '<rect x="250" y="262" width="160" height="46" rx="6" fill="#18202a" stroke="' + GRN + '" stroke-dasharray="5 4"/>' + t(330, 282, 'Empfängerakku / BEC', mid) + t(330, 298, 'nur Variante B', mid + ' ' + sm + ' fill="' + GRN + '"')
+      // Varianten
+      + box(20, 330, 455, 120, RED) + t(34, 354, 'Variante A – nur Empfänger am Tisch', b + ' fill="' + RED + '"')
+      + t(34, 376, 'Rote Ader (+) an 5 V des Adapters: USB versorgt den Empfänger.') + t(34, 396, 'Kein Akku, keine Servos am Empfänger – USB liefert nur 0,5 A.') + t(34, 416, 'Gut zum Zuordnen der Kanäle und Prüfen der Mischer.')
+      + box(490, 330, 455, 120, GRN) + t(504, 354, 'Variante B – Empfänger im Modell mit Servos', b + ' fill="' + GRN + '"')
+      + t(504, 376, 'Empfängerakku oder BEC versorgt Empfänger und Servos.') + t(504, 396, 'Rote Ader NICHT an den Adapter (abkleben), nur Signal und GND.') + t(504, 416, 'Motor abstecken oder Propeller ab, falls ein Regler dranhängt.')
+      + '</svg>';
+  }
+  function wiringHelp() {
+    const back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center';
+    const box = document.createElement('div'); box.style.cssText = 'width:min(94vw,1000px);max-height:92vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;box-shadow:0 10px 40px rgba(0,0,0,.5);color:var(--txt);font-size:13px';
+    const hd = document.createElement('div'); hd.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px';
+    const ti = document.createElement('b'); ti.style.flex = '1'; ti.textContent = T('Verkabelung: Jeti-Empfänger (EX Bus) → USB-Seriell-Adapter → PC');
+    const x = document.createElement('button'); x.textContent = '✕'; x.title = T('Schließen'); x.style.padding = '2px 8px';
+    hd.append(ti, x);
+    const pic = document.createElement('div'); pic.innerHTML = wiringSvg();
+    const ol = document.createElement('ol'); ol.style.cssText = 'margin:10px 0 2px 18px;padding:0;line-height:1.45';
+    ['Im Sender den Gerät-Explorer öffnen, den Empfänger wählen und einen Ausgang (je nach Empfänger z. B. „Ext.“ oder „E1“) auf „EX Bus“ stellen. Die Geschwindigkeit (125 oder 250 kBaud) findet „Baudrate automatisch“ selbst.',
+      'Adapter mit 3,3-V-Pegel verwenden (Umschalter auf 3,3 V, falls vorhanden). Er muss 125 000 Baud können: FTDI FT232R, CP2102N und CH340 können das, ältere CP2102 ohne „N“ treffen 125 000 Baud nicht genau.',
+      'Nur RXD und GND anschließen, bei Variante A dazu 5 V. TXD bleibt frei: Die App hört nur mit und sendet nichts. Der Widerstand (1 kΩ) in der Signalleitung schützt bei Verwechslung, nötig ist er nicht.',
+      'In der App „Sender verbinden“ drücken und den Anschluss des Adapters wählen. Im Kanal-Monitor wandert der gerade bewegte Kanal; dann je Servo unter „Sender (Kanal)“ den Kanal zuordnen.',
+      'Trimmung, Mischer, Servowege und Kurven nur im Sender einstellen, die Kanäle kommen fertig gemischt an. Läuft ein Ruder in der Anzeige falsch herum, hier „Drehrichtung umkehren“ setzen.',
+      'Bei Funkausfall schickt der Empfänger keine Kanalpakete; die Anzeige meldet dann „keine Daten“.'
+    ].forEach(s => { const li = document.createElement('li'); li.textContent = T(s); ol.appendChild(li); });
+    box.append(hd, pic, ol); back.appendChild(box);
+    const close = () => { document.removeEventListener('keydown', key, true); back.remove(); };
+    const key = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+    x.onclick = close; back.addEventListener('mousedown', e => { if (e.target === back) close(); });
+    document.addEventListener('keydown', key, true); document.body.appendChild(back);
+  }
   function servoSidebar(side0) {
     const g = App.grp('Flächenservos', true, 'servo', { key: 'servoM', alwaysOpen: true });
     if (App.wingSelectEl) {
@@ -461,5 +666,5 @@
     if (isOpen()) refresh(true);
   }
   App.servoSidebar = servoSidebar;
-  window.Servos = { show, refresh, _test: { cutDxf, srvCalc, lkRudder, srvRange, srvStick, srvStickZero, SERVOS, srvList, cards: () => cards } };
+  window.Servos = { show, refresh, wiringHelp, _test: { cutDxf, srvCalc, lkRudder, srvRange, srvStick, srvStickZero, SERVOS, srvList, rxDeg, wiringSvg, peaks: () => rxPeak, cards: () => cards } };
 })();

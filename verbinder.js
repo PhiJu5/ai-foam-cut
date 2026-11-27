@@ -58,6 +58,7 @@
     latT: 3,                // Stärke der Latte an der dünnsten Stelle (mm)
     holes: 'nut',           // 'nut' Durchgang + Sechskant unten | 'thru' Durchgang | 'none'
     screw: 'M4', pitch: 50, edge: 15,
+    fib: 'rov',                              // Fasermaterial: 'rov' (Rovings) | 'ud100' | 'ud200' | 'ud300' (UD-Gelege g/m²)
     tex: 800, phi: 60, rhoF: 1.8, over: 4,   // Faserbedarf: Feinheit, Faservolumenanteil %, Dichte, Überfüllung %
     explode: 12, showPart: true, showSec: true
   };
@@ -73,6 +74,7 @@
   const r6 = z => Math.round(z * 1e6) / 1e6;
   const f1 = v => (Math.round(v * 10) / 10).toFixed(1), f2 = v => (Math.round(v * 100) / 100).toFixed(2);
   const fmt = v => String(Math.round(v * 100) / 100).replace('.', ',');
+  const FIBS = ['rov', 'ud100', 'ud200', 'ud300'];
 
   function params(c) {
     const p = {};
@@ -92,6 +94,7 @@
     p.holes = ['nut', 'thru', 'none'].indexOf(c.holes) >= 0 ? c.holes : 'nut';
     p.screw = SCREWS[c.screw] ? c.screw : 'M4';
     p.pitch = clamp(num(c.pitch, 50), 5, 5000); p.edge = clamp(num(c.edge, 15), 0, 5000);
+    p.fib = FIBS.indexOf(c.fib) >= 0 ? c.fib : 'rov'; p.udW = p.fib === 'rov' ? 0 : +p.fib.slice(2);
     p.tex = clamp(num(c.tex, 800), 1, 1e6); p.phi = clamp(num(c.phi, 60), 1, 90); p.rhoF = clamp(num(c.rhoF, 1.8), 0.1, 20); p.over = clamp(num(c.over, 4), 0, 100);
     return p;
   }
@@ -585,7 +588,8 @@
             if (S.round) { v.shape = 'circle'; v.d = Math.floor(S.inH * 10 + 1e-6) / 10; }
             else { v.shape = 'rect'; v.a = Math.floor(S.inW * 10 + 1e-6) / 10; v.b = Math.floor(S.inH * 10 + 1e-6) / 10; }
             v.len1 = v.len2 = Math.round(len);
-            v.vDeg = Math.round(Math.abs(2 * (segAngle(0) - (S.round ? (+S.vDeg || 0) : 0))) * 100) / 100; v.vPick = 'root';
+            // Knick = 2 × Neigung der Hülse gegen die Waagrechte (Lage aus „Steghöhen“: parallel zur Fläche, waagrecht, eigener Winkel)
+            v.vDeg = Math.round(Math.abs(2 * (S.tubeDeg != null ? S.tubeDeg : segAngle(0) - (+S.vDeg || 0))) * 100) / 100; v.vPick = 'root';
             return T('Querschnitt') + ' ' + txt + ', ' + T('Länge je Seite') + ' ' + fmt(v.len1) + ' mm, ' + T('Knickwinkel') + ' ' + fmt(v.vDeg) + '°';
           }
         });
@@ -815,8 +819,8 @@
     const el = document.getElementById('vbfInfo'); if (!el) return;
     if (!G || !G.ok) { el.innerHTML = '<b>' + T('Verbinderform') + '</b><br>' + (G && G.msg ? G.msg : T('Keine Form.')); return; }
     const L = p.len1 + p.len2, A = G.A, V = A * L / 1000, ph = p.phi / 100;
-    const nRov = A * ph * p.rhoF * 1000 / p.tex * (1 + p.over / 100);
-    const mF = V * ph * p.rhoF, mR = V * (1 - ph) * 1.15;
+    const fill = A * ph * p.rhoF * 1000 * (1 + p.over / 100);   // Fasermasse je km Steckung inkl. Überfüllung (g/km = tex)
+    const mF = V * ph * p.rhoF, mR = V * (1 - ph) * 1.15, Lform = L + 2 * p.ov;
     const dims = pt => { const b = bbox(pt.pos); return fmt(b.hi[0] - b.lo[0]) + ' × ' + fmt(b.hi[1] - b.lo[1]) + ' × ' + fmt(b.hi[2] - b.lo[2]) + ' mm'; };
     const sec = p.shape === 'circle' ? 'Ø ' + fmt(p.d) + ' mm' : fmt(p.a) + ' × ' + fmt(p.b) + ' mm (' + T('Sehne × Dicke') + ')';
     let h = '<b>' + T('Verbinderform') + '</b> · ' + T(G.split ? 'dreiteilig' : 'zweiteilig (3D-Druck)') + ' · '
@@ -828,7 +832,18 @@
     if (G.lat) h += T('Ebene Latte') + ': ' + fmt(2 * G.lat.uL) + ' mm ' + T('breit') + ', ' + fmt(p.latT) + '–' + fmt(p.latT + G.lat.rise) + ' mm ' + T('stark (unten und oben)') + '<br>';
     if (G.nHoles) h += T('Bohrungen') + ': ' + G.nHoles + ' × ' + p.screw + (p.holes === 'nut' ? ' ' + T('mit Sechskant unten') : '') + ', ' + T('Gesamthöhe zusammengebaut') + ' ' + fmt(G.Hges) + ' mm<br>';
     h += T('Querschnittsfläche') + ' ' + fmt(A) + ' mm² · ' + T('Volumen') + ' ' + fmt(V) + ' cm³<br>';
-    h += T('Rovings') + ': ' + Math.ceil(nRov) + ' × ' + fmt(p.tex) + ' tex (' + T('inkl.') + ' ' + fmt(p.over) + ' % ' + T('Überfüllung') + '), ' + T('Zuschnitt je') + ' ' + fmt(L + 2 * p.ov + 40) + ' mm<br>';
+    const incl = ' (' + T('inkl.') + ' ' + fmt(p.over) + ' % ' + T('Überfüllung') + ')<br>';
+    if (!p.udW) h += T('Rovings') + ': ' + Math.ceil(fill / p.tex) + ' × ' + fmt(p.tex) + ' tex' + incl;
+    else {
+      // UD-Gelege: Streifen in Kanalbreite, Fasern längs, lagenweise eingelegt. Gesamtbreite aller Streifen = Fasermasse je Meter / Flächengewicht.
+      const circ = p.shape === 'circle', wM = circ ? p.d : A / G.Hc, nL = Math.ceil(fill / p.udW / wM - 1e-9);
+      const dr = !circ && G.topWide > 0.005, area = nL * wM * Lform / 1e6;   // Streifen über die ganze Formlänge
+      const wTxt = (dr ? fmt(G.Wc) + '–' + fmt(G.Wc + G.topWide) : fmt(wM)) + ' mm ' + T('breit') + (dr ? ' ' + T('(unten–oben)') : '');
+      h += T('UD-Gelege') + ' ' + p.udW + ' g/m²: ' + nL + ' ' + T(circ ? 'Streifen à' : 'Lagen à') + ' ' + wTxt
+        + ', ' + T('inkl.') + ' ' + fmt(p.over) + ' % ' + T('Überfüllung') + '<br>';
+      h += T('Lagenstärke gepresst') + ' ≈ ' + fmt(p.udW / (p.rhoF * 1000 * ph)) + ' mm · ' + T('Gelege gesamt') + ' ≈ ' + fmt(area) + ' m² (' + fmt(area * p.udW) + ' g)'
+        + (circ ? ' · ' + T('Streifen zum Strang gerollt einlegen') : '') + '<br>';
+    }
     h += T('Faser') + ' ≈ ' + fmt(mF) + ' g · ' + T('Harz') + ' ≈ ' + fmt(mR) + ' g · ' + T('Steckung') + ' ≈ ' + fmt(mF + mR) + ' g';
     if (G.topWide > 0.005) h += '<br>' + T('Entformungsschräge: Steckung oben') + ' ' + fmt(G.topWide) + ' mm ' + T('breiter als unten.');
     G.warn.forEach(w => { h += '<br><span style="color:#ffb454">' + w + '</span>'; });
@@ -948,8 +963,10 @@
     }
 
     // ---- Faserbedarf ----
-    const g5 = grp('Faserbedarf (UD-Rovings)', false, TAB, { key: 'vbfFib' });
-    N(g5.body, 'Roving-Feinheit (tex)', 'tex', { step: 100, min: 1, hint: '12K ≈ 800 tex, 24K ≈ 1600 tex, 48–50K ≈ 3200–3700 tex (Datenblatt).' });
+    const g5 = grp('Faserbedarf (UD-Kohle)', false, TAB, { key: 'vbfFib' });
+    SEL(g5.body, 'Fasermaterial', [['rov', 'UD-Rovings'], ['ud100', 'UD-Gelege 100 g/m²'], ['ud200', 'UD-Gelege 200 g/m²'], ['ud300', 'UD-Gelege 300 g/m²']], 'fib', true,
+      'Gelege: Streifen in Kanalbreite zuschneiden, Fasern in Längsrichtung, lagenweise einlegen und tränken. Die Info oben nennt Lagenzahl, Streifenbreite und Gelegemenge.');
+    if (p.fib === 'rov') N(g5.body, 'Roving-Feinheit (tex)', 'tex', { step: 100, min: 1, hint: '12K ≈ 800 tex, 24K ≈ 1600 tex, 48–50K ≈ 3200–3700 tex (Datenblatt).' });
     N(g5.body, 'Faservolumenanteil (%)', 'phi', { step: 1, min: 1, max: 90, hint: 'Gepresst in geschlossener Form etwa 55–60 %.' });
     N(g5.body, 'Faserdichte (g/cm³)', 'rhoF', { step: 0.01, min: 0.1 });
     N(g5.body, 'Überfüllung (%)', 'over', { step: 1, min: 0, hint: 'Etwas mehr Fasern einlegen, als rechnerisch hineinpasst; der Überschuss wird beim Schließen ausgepresst.' });
