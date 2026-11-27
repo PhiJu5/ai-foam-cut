@@ -6,6 +6,9 @@ CNC-Heißdrahtschneider (2 Türme / 4 Achsen), Fräsen und den Formenbau.
 Entwickelt als vollwertige Alternative zu kommerziellen Programmen dieser Art — und seit
 September 2026 quelloffen unter der GPL-3.0.
 
+**Website:** [ai-foam-cut.com](https://ai-foam-cut.com) — Downloads für Windows, Linux und macOS
+und ein Überblick über alle Module ([English](https://ai-foam-cut.com/index-en)).
+
 ## ⚠️ Sicherheitshinweis
 
 Dieses Programm steuert Maschinen an: glühende Drähte bei mehreren hundert Grad und Fräsen mit
